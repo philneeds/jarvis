@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Shell } from "@/components/Shell";
 import { useLive } from "@/lib/live";
 import { api } from "@/lib/api";
+import { MayneLimits } from "@/components/MayneLimits";
 import type { AgentConfig, ApprovalKind, ModelKey } from "@jarvis/core";
 
 const FIELDS: { key: keyof AgentConfig["persona"]; label: string; hint: string }[] = [
@@ -53,6 +54,8 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
           <span className="text-[11px] tracking-[0.14em] uppercase" style={{ color }}>{agent.short} · {state?.ventures[agent.venture]?.label}</span>
         </div>
         <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>{agent.desc}</p>
+
+        {id === "mayne" && <MayneLimits />}
 
         <section className="card flex flex-col gap-3" aria-label="Persona">
           <span className="label">Persona · Phil&apos;s template</span>

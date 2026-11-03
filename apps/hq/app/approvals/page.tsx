@@ -5,6 +5,7 @@ import { Shell } from "@/components/Shell";
 import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 import type { Approval } from "@/lib/types";
+import { MayneLimits } from "@/components/MayneLimits";
 
 const KIND: Record<string, string> = { send: "var(--red)", post: "var(--sky, #5CC8F5)", money: "var(--gold)", strategy: "#FF6EC7", config: "var(--accent)", record: "var(--green)", other: "var(--muted)" };
 
@@ -57,7 +58,7 @@ export default function ApprovalsPage() {
               <h2 className="display font-bold text-2xl leading-tight m-0" style={{ color: "var(--ink-bright)" }}>{a.title}</h2>
               {editing === a.id ? <textarea className="input h-32 py-2" value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="Edit what will happen" /> : <p className="m-0 text-[13px] whitespace-pre-wrap leading-relaxed">{a.body}</p>}
               {facts.length > 0 && <div className="grid grid-cols-2 gap-2">{facts.map(([k, val]) => <div key={k} className="border p-2 flex flex-col gap-0.5" style={{ borderColor: "rgba(239,230,218,0.14)" }}><span className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>{k}</span><span className="display text-lg">{String(val)}</span></div>)}</div>}
-              {a.kind === "strategy" && <div className="border p-2 text-[12px]" style={{ borderColor: "rgba(242,193,78,0.4)" }}><span className="label" style={{ color: "var(--gold)" }}>Mayne&apos;s hard limits</span><br />Max position, max daily loss and auto-stop apply after approval. Set them in agent settings (Phase 2).</div>}
+              {(a.kind === "strategy" || a.kind === "money") && a.status === "pending" && <MayneLimits compact />}
               {a.status === "pending" ? (
                 <>
                   <input className="input h-9" placeholder="Note (optional)" aria-label="Note" value={busy === a.id ? note : note} onChange={(e) => setNote(e.target.value)} />

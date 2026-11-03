@@ -101,10 +101,15 @@ pnpm --filter @jarvis/hq start                   # systemd unit 2 (port 3000)
 | Connector | What it gives | Set up |
 | --- | --- | --- |
 | Google | Calendar (Monica) and Gmail (Stella's team): read tools, drafts without approval, `gmail.send` and `calendar.create` as approval actions | Create an OAuth client (Web application) in Google Cloud with redirect `<HQ origin>/api/connectors/google/callback`, set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, then Settings → Connect Google |
+| X | Phil's own accounts (Philneeds, Range.cool, Acres), one OAuth connection each: mentions, own posts with metrics and the DM inbox as tools; `x.post`, `x.reply` and `x.dm` as approval actions | OAuth 2.0 app in the X developer portal with redirect `<HQ origin>/api/connectors/x/callback`, set `X_CLIENT_ID` / `X_CLIENT_SECRET`, then Settings → Connect an X account (once per account) |
 | Telegram | Talk to Jarvis from your phone; approvals arrive with Approve / Reject buttons | Make a bot with @BotFather, set `TELEGRAM_BOT_TOKEN` and your `TELEGRAM_CHAT_ID` |
 | ntfy | Push alerts | `NOTIFY_WEBHOOK_URL` |
 
 A new connector is a class with `tools()` and `executors()` passed to `jarvis.addConnector(...)`; see `packages/core/src/connectors/google.ts`.
+
+### Mayne's hard limits
+
+Max position size, max daily loss, max open positions and an auto-stop drawdown, set on Mayne's agent page. They are checked when Mayne asks for a trade (an over-limit request is refused before Phil sees it) and again when an approved trade executes, so a limit Phil tightens while an approval waits still holds. Hitting the daily loss or the drawdown stop flips the trading kill switch until Phil clears it. Execution is paper (a ledger of open positions and realized P&L) until a wallet or exchange connector wraps the trade executor with `guard.wrap(...)`; equity can be marked by hand or by that connector.
 
 ## Develop
 

@@ -41,6 +41,10 @@ export class Jarvis {
     });
   }
 
+  /** Checks run when an approval is requested; a failing check refuses it with a reason (used by Mayne's limits). */
+  private preflights: ((a: Omit<Approval, "id" | "at" | "status">) => Promise<string | undefined>)[] = [];
+  onApprovalRequested(fn: (a: Omit<Approval, "id" | "at" | "status">) => Promise<string | undefined>) { this.preflights.push(fn); }
+
   /** Register what happens when an approval with payload.action = name is approved. */
   onApproved(action: string, fn: Executor) { this.executors.set(action, fn); }
 
@@ -272,6 +276,16 @@ export class Jarvis {
   // ---- Approvals ----------------------------------------------------------
 
   async requestApproval(a: Omit<Approval, "id" | "at" | "status">): Promise<Approval> {
+    for (const pf of this.preflights) {
+      const reason = await pf(a);
+      if (reason) {
+        const refused: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "rejected", decidedAt: new Date().toISOString(), note: `refused: ${reason}`, ...a };
+        await this.store.approvals.add(refused);
+        await this.router.log(a.agentId, "error", `${getAgent(a.agentId)?.name ?? a.agentId}: "${a.title}" refused — ${reason}`, a.runId, { kind: a.kind });
+        bus.emitEvent({ type: "approval.decided", approval: refused });
+        return refused;
+      }
+    }
     const approval: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "pending", ...a };
     await this.store.approvals.add(approval);
     // Phil's per-agent rules: low-risk kinds under the dollar cap go through on their own, logged.

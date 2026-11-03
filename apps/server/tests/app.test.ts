@@ -5,9 +5,14 @@ process.env.HQ_PASSWORD = "open-sesame";
 const { Jarvis, memoryStore } = await import("@jarvis/core");
 const { createApp } = await import("../src/app.js");
 
+const { TradingGuard, parseTrade } = await import("@jarvis/core");
 const store = memoryStore();
 await store.init();
-const app = createApp(new Jarvis({ store }));
+const jarvisInst = new Jarvis({ store });
+const guard = new TradingGuard(store);
+jarvisInst.addConnector(guard, TradingGuard.promptHint());
+jarvisInst.onApprovalRequested(async (a) => { if ((a.payload as { action?: string } | undefined)?.action !== "trade.execute") return undefined; const c = await guard.check(parseTrade(a.payload)); return c.ok ? undefined : c.reason; });
+const app = createApp(jarvisInst, { guard });
 
 async function call(path: string, init: RequestInit & { cookie?: string } = {}) {
   const headers = new Headers(init.headers);
@@ -58,4 +63,22 @@ test("agent settings round-trip and passkey registration needs a session", async
   assert.equal(opts.status, 200);
   assert.equal(((await opts.json()) as { rp: { id: string } }).rp.id, "localhost");
   assert.equal((await call("/api/passkeys/login/options", { method: "POST" })).status, 404);
+});
+
+test("Mayne's limits over the API", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const t0 = (await (await call("/api/trading", { cookie })).json()) as { limits: { maxPositionUsd: number } };
+  assert.equal(t0.limits.maxPositionUsd, 250);
+  const put = await call("/api/trading/limits", { method: "PUT", cookie, body: JSON.stringify({ maxPositionUsd: 100, autoStopDrawdownPct: 5 }) });
+  assert.equal(((await put.json()) as { limits: { maxPositionUsd: number } }).limits.maxPositionUsd, 100);
+  assert.equal((await call("/api/trading/limits", { method: "PUT", cookie, body: JSON.stringify({ maxPositionUsd: -1 }) })).status, 400);
+  await call("/api/trading/equity", { method: "POST", cookie, body: JSON.stringify({ equityUsd: 1000 }) });
+  const dd = (await (await call("/api/trading/equity", { method: "POST", cookie, body: JSON.stringify({ equityUsd: 940 }) })).json()) as { stopped?: string };
+  assert.match(dd.stopped!, /drawdown/);
+  const st = (await (await call("/api/state", { cookie })).json()) as { status: { killSwitch: { trading: boolean } } };
+  assert.equal(st.status.killSwitch.trading, true);
+  await call("/api/trading/clear-stop", { method: "POST", cookie });
+  await call("/api/kill", { method: "POST", cookie, body: JSON.stringify({ scope: "trading", paused: false }) });
+  assert.equal(((await (await call("/api/trading", { cookie })).json()) as { ledger: { stoppedAt?: string } }).ledger.stoppedAt, undefined);
 });

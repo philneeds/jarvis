@@ -1,1 +1,2 @@
 export { GoogleConnector, GOOGLE_SCOPES, bodyText, rawMail, type GoogleOptions } from "./google.js";
+export { XConnector, X_SCOPES, type XOptions, type XAccount } from "./x.js";

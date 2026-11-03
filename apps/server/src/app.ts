@@ -2,11 +2,11 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { AGENTS, VENTURES, MODELS, SCHEDULES, findAgent, getAgentConfig, setAgentConfig, usageSummary, type GoogleConnector, type Jarvis } from "@jarvis/core";
+import { AGENTS, VENTURES, MODELS, SCHEDULES, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type GoogleConnector, type Jarvis, type TradingGuard, type XConnector } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
 
-export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector } = {}) {
+export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; guard?: TradingGuard } = {}) {
   const app = new Hono();
   const origins = (process.env.HQ_ORIGIN ?? "http://localhost:3000").split(",").map((s) => s.trim());
   app.use("/api/*", cors({ origin: origins, credentials: true }));
@@ -163,6 +163,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   const oauthStates = new Set<string>();
   api.get("/connectors", async (c) => c.json({
     google: connectors.google ? { configured: true, ...(await connectors.google.status()) } : { configured: false, connected: false },
+    x: connectors.x ? { configured: true, ...(await connectors.x.status()) } : { configured: false, accounts: [] },
     telegram: { configured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) },
     ntfy: { configured: !!process.env.NOTIFY_WEBHOOK_URL },
   }));
@@ -189,6 +190,66 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     await connectors.google?.disconnect();
     await jarvis.router.log("jarvis", "system", "Phil disconnected Google");
     return c.json({ ok: true });
+  });
+  api.get("/connectors/x/auth", (c) => {
+    if (!connectors.x) return c.json({ error: "X_CLIENT_ID not set" }, 400);
+    return c.json({ url: connectors.x.authUrl().url });
+  });
+  api.get("/connectors/x/callback", async (c) => {
+    const { code, state, error } = c.req.query();
+    if (!connectors.x) return c.text("X connector not configured", 400);
+    if (error) return c.redirect(`/settings?x=${encodeURIComponent(error)}`);
+    if (!code || !state) return c.text("missing code or state", 400);
+    try {
+      const a = await connectors.x.exchangeCode(code, state);
+      await jarvis.router.log("jarvis", "system", `Phil connected X @${a.handle}`);
+      return c.redirect(`/settings?x=connected:${a.handle}`);
+    } catch (e) {
+      return c.redirect(`/settings?x=${encodeURIComponent((e as Error).message)}`);
+    }
+  });
+  api.post("/connectors/x/disconnect", async (c) => {
+    const p = z.object({ handle: z.string().min(1) }).safeParse(await c.req.json().catch(() => ({})));
+    if (!p.success) return c.json({ error: "handle required" }, 400);
+    await connectors.x?.disconnect(p.data.handle);
+    await jarvis.router.log("jarvis", "system", `Phil disconnected X @${p.data.handle}`);
+    return c.json({ ok: true });
+  });
+
+  // ---- Mayne's hard limits -----------------------------------------------------
+  api.get("/trading", async (c) => {
+    if (!connectors.guard) return c.json({ error: "no guard" }, 500);
+    return c.json({ limits: await connectors.guard.limits(), ledger: await connectors.guard.ledger(), strategies: await jarvis.store.settings.get("strategies", []) });
+  });
+  api.put("/trading/limits", async (c) => {
+    if (!connectors.guard) return c.json({ error: "no guard" }, 500);
+    const p = limitsSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!p.success) return c.json({ error: "bad limits", issues: p.error.issues }, 400);
+    const limits = await connectors.guard.setLimits(p.data);
+    await jarvis.router.log("mayne", "system", `Phil set Mayne's limits: max position $${limits.maxPositionUsd}, daily loss $${limits.maxDailyLossUsd}, max open ${limits.maxOpenPositions}, auto-stop ${limits.autoStopDrawdownPct}%${limits.enabled ? "" : " (OFF)"}`);
+    return c.json({ limits });
+  });
+  api.post("/trading/equity", async (c) => {
+    if (!connectors.guard) return c.json({ error: "no guard" }, 500);
+    const p = z.object({ equityUsd: z.number().min(0) }).safeParse(await c.req.json().catch(() => ({})));
+    if (!p.success) return c.json({ error: "equityUsd required" }, 400);
+    const r = await connectors.guard.markEquity(p.data.equityUsd);
+    if (r.stopped) await jarvis.router.log("mayne", "error", `AUTO-STOP: ${r.stopped}`);
+    return c.json({ ledger: await connectors.guard.ledger(), stopped: r.stopped });
+  });
+  api.post("/trading/close", async (c) => {
+    if (!connectors.guard) return c.json({ error: "no guard" }, 500);
+    const p = z.object({ positionId: z.string().min(1), pnlUsd: z.number() }).safeParse(await c.req.json().catch(() => ({})));
+    if (!p.success) return c.json({ error: "positionId and pnlUsd required" }, 400);
+    const r = await connectors.guard.close(p.data.positionId, p.data.pnlUsd);
+    await jarvis.router.log("mayne", "system", `Phil closed ${p.data.positionId} at $${p.data.pnlUsd.toFixed(2)}${r.stopped ? ` — AUTO-STOP: ${r.stopped}` : ""}`);
+    return c.json({ ledger: await connectors.guard.ledger(), stopped: r.stopped });
+  });
+  api.post("/trading/clear-stop", async (c) => {
+    if (!connectors.guard) return c.json({ error: "no guard" }, 500);
+    await connectors.guard.clearStop();
+    await jarvis.router.log("mayne", "system", "Phil cleared Mayne's auto-stop");
+    return c.json({ ledger: await connectors.guard.ledger() });
   });
 
   app.route("/api", api);

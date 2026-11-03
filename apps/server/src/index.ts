@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { GoogleConnector, Jarvis, Scheduler, bus, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
+import { GoogleConnector, Jarvis, Scheduler, TradingGuard, XConnector, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
 import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
 import { authEnabled, isAuthedRequest } from "./auth.js";
@@ -12,7 +12,16 @@ await store.init();
 const jarvis = new Jarvis({ store, notify });
 const google = GoogleConnector.fromEnv(store);
 if (google) jarvis.addConnector(google, GoogleConnector.promptHint());
-const app = createApp(jarvis, { google });
+const x = XConnector.fromEnv(store);
+if (x) jarvis.addConnector(x, XConnector.promptHint());
+// Mayne's hard limits are always on: refused before Phil sees an over-limit trade, and again at execution.
+const guard = new TradingGuard(store);
+jarvis.addConnector(guard, TradingGuard.promptHint());
+jarvis.onApprovalRequested(async (a) => {
+  if ((a.payload as { action?: string } | undefined)?.action !== "trade.execute") return undefined;
+  try { const c = await guard.check(parseTrade(a.payload)); return c.ok ? undefined : `Mayne's hard limits: ${c.reason}`; } catch (e) { return (e as Error).message; }
+});
+const app = createApp(jarvis, { google, x, guard });
 
 // Live feed for HQ: agent status, chat, approvals, activity, usage, system status.
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
