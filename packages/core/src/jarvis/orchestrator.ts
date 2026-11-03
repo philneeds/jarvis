@@ -24,6 +24,9 @@ export class Jarvis {
   readonly router: ModelRouter;
   private notify?: JarvisOptions["notify"];
   private executors = new Map<string, Executor>();
+  /** Extra tools from connectors, by name. */
+  readonly connectorTools = new Map<string, import("../tools/index.js").ToolDef>();
+  private promptHints: string[] = [];
 
   constructor(opts: JarvisOptions) {
     this.store = opts.store;
@@ -40,6 +43,16 @@ export class Jarvis {
 
   /** Register what happens when an approval with payload.action = name is approved. */
   onApproved(action: string, fn: Executor) { this.executors.set(action, fn); }
+
+  /** Plug in a connector: its tools become available in agent settings, its actions run on approval. */
+  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor> }, hint?: string) {
+    for (const t of c.tools()) this.connectorTools.set(t.name, t);
+    for (const [k, fn] of Object.entries(c.executors())) this.executors.set(k, fn);
+    if (hint) this.promptHints.push(hint);
+  }
+
+  /** Every tool an agent could be given: built-in plus connectors. */
+  allTools() { return [...TOOLS, ...this.connectorTools.values()]; }
 
   // ---- Chat -------------------------------------------------------------
 
@@ -120,8 +133,8 @@ export class Jarvis {
   async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string } = {}) {
     const memory = [...(await this.store.memory.list("phil")), ...(await this.store.memory.list(`venture:${agent.venture}`)), ...(await this.store.memory.list(`agent:${agent.id}`))];
     const cfg = await getAgentConfig(this.store, agent.id);
-    const tools = TOOLS.filter((t) => cfg.tools.includes(t.name));
-    const system = agentSystemPrompt(agent, memory, cfg.persona, tools);
+    const tools = this.allTools().filter((t) => cfg.tools.includes(t.name));
+    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "");
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
     const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id) });
     if (r.blocked) return r;

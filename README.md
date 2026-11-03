@@ -96,6 +96,16 @@ pnpm --filter @jarvis/hq start                   # systemd unit 2 (port 3000)
 
 `deploy/Caddyfile` routes `/api/*` and `/ws` to the server and everything else to HQ on one domain with TLS; `deploy/docker-compose.yml` brings up Postgres and Caddy. Set `HQ_ORIGIN`, `HQ_RP_ID` and `NEXT_PUBLIC_WS_URL` to the domain. `NOTIFY_WEBHOOK_URL` (an ntfy topic) and/or `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` push approvals and alerts to the phone.
 
+### Connectors
+
+| Connector | What it gives | Set up |
+| --- | --- | --- |
+| Google | Calendar (Monica) and Gmail (Stella's team): read tools, drafts without approval, `gmail.send` and `calendar.create` as approval actions | Create an OAuth client (Web application) in Google Cloud with redirect `<HQ origin>/api/connectors/google/callback`, set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, then Settings → Connect Google |
+| Telegram | Talk to Jarvis from your phone; approvals arrive with Approve / Reject buttons | Make a bot with @BotFather, set `TELEGRAM_BOT_TOKEN` and your `TELEGRAM_CHAT_ID` |
+| ntfy | Push alerts | `NOTIFY_WEBHOOK_URL` |
+
+A new connector is a class with `tools()` and `executors()` passed to `jarvis.addConnector(...)`; see `packages/core/src/connectors/google.ts`.
+
 ## Develop
 
 ```bash

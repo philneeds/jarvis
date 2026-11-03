@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { Jarvis, Scheduler, bus, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
+import { GoogleConnector, Jarvis, Scheduler, bus, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
+import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
 import { authEnabled, isAuthedRequest } from "./auth.js";
 import { notify } from "./notify.js";
@@ -9,7 +10,9 @@ const port = Number(process.env.PORT ?? 4000);
 const store = storeFromEnv();
 await store.init();
 const jarvis = new Jarvis({ store, notify });
-const app = createApp(jarvis);
+const google = GoogleConnector.fromEnv(store);
+if (google) jarvis.addConnector(google, GoogleConnector.promptHint());
+const app = createApp(jarvis, { google });
 
 // Live feed for HQ: agent status, chat, approvals, activity, usage, system status.
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
@@ -43,9 +46,12 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
 });
 injectWebSocket(server);
 
+const telegram = TelegramBot.fromEnv(jarvis);
+if (telegram) { telegram.start(); console.log("Telegram bot polling"); }
+
 const scheduler = new Scheduler(jarvis);
 if (process.env.SCHEDULER !== "0") scheduler.start();
 
-const shutdown = async () => { scheduler.stop(); await store.close(); process.exit(0); };
+const shutdown = async () => { scheduler.stop(); telegram?.stop(); await store.close(); process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

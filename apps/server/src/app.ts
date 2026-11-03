@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
-import { AGENTS, VENTURES, MODELS, SCHEDULES, TOOL_NAMES, findAgent, getAgentConfig, setAgentConfig, usageSummary, type Jarvis } from "@jarvis/core";
+import { randomBytes } from "node:crypto";
+import { AGENTS, VENTURES, MODELS, SCHEDULES, findAgent, getAgentConfig, setAgentConfig, usageSummary, type GoogleConnector, type Jarvis } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
 
-export function createApp(jarvis: Jarvis) {
+export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector } = {}) {
   const app = new Hono();
   const origins = (process.env.HQ_ORIGIN ?? "http://localhost:3000").split(",").map((s) => s.trim());
   app.use("/api/*", cors({ origin: origins, credentials: true }));
@@ -108,7 +109,7 @@ export function createApp(jarvis: Jarvis) {
   api.get("/agents/:id/config", async (c) => {
     const agent = findAgent(c.req.param("id"));
     if (!agent) return c.json({ error: "no such agent" }, 404);
-    return c.json({ config: await getAgentConfig(jarvis.store, agent.id), tools: TOOL_NAMES, defaultModel: agent.model });
+    return c.json({ config: await getAgentConfig(jarvis.store, agent.id), tools: jarvis.allTools().map((t) => t.name), defaultModel: agent.model });
   });
   api.put("/agents/:id/config", async (c) => {
     const agent = findAgent(c.req.param("id"));
@@ -119,9 +120,11 @@ export function createApp(jarvis: Jarvis) {
       model: z.enum(Object.keys(MODELS) as [string, ...string[]]).nullable().optional(),
       schedule: z.object({ enabled: z.boolean(), when: z.string().regex(/^(daily@\d{2}:\d{2}|every:\d{1,4}|)$/), task: z.string().max(2000) }).nullable().optional(),
       rules: z.object({ autoApprove: z.array(z.enum(["send", "post", "money", "strategy", "config", "record", "other"])), maxAutoDollars: z.number().min(0).max(1_000_000) }).partial().optional(),
-      tools: z.array(z.enum(TOOL_NAMES as [string, ...string[]])).optional(),
+      tools: z.array(z.string()).optional(),
     }).safeParse(await c.req.json().catch(() => ({})));
     if (!p.success) return c.json({ error: "bad body", issues: p.error.issues }, 400);
+    const known = new Set(jarvis.allTools().map((t) => t.name));
+    if (p.data.tools?.some((t) => !known.has(t))) return c.json({ error: "unknown tool" }, 400);
     const config = await setAgentConfig(jarvis.store, agent.id, p.data as Parameters<typeof setAgentConfig>[2]);
     if (p.data.model !== undefined) await jarvis.store.agentState.set(agent.id, { modelOverride: p.data.model && p.data.model !== agent.model ? p.data.model : "" });
     await jarvis.router.log("jarvis", "system", `Phil updated ${agent.name}'s settings`, undefined, { changed: Object.keys(p.data) });
@@ -155,6 +158,38 @@ export function createApp(jarvis: Jarvis) {
   });
 
   api.get("/roster", (c) => c.json({ agents: AGENTS, ventures: VENTURES, models: MODELS }));
+
+  // ---- Connectors -----------------------------------------------------------
+  const oauthStates = new Set<string>();
+  api.get("/connectors", async (c) => c.json({
+    google: connectors.google ? { configured: true, ...(await connectors.google.status()) } : { configured: false, connected: false },
+    telegram: { configured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) },
+    ntfy: { configured: !!process.env.NOTIFY_WEBHOOK_URL },
+  }));
+  api.get("/connectors/google/auth", (c) => {
+    if (!connectors.google) return c.json({ error: "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set" }, 400);
+    const state = randomBytes(16).toString("base64url");
+    oauthStates.add(state);
+    return c.json({ url: connectors.google.authUrl(state) });
+  });
+  api.get("/connectors/google/callback", async (c) => {
+    const { code, state, error } = c.req.query();
+    if (!connectors.google) return c.text("Google connector not configured", 400);
+    if (error) return c.redirect(`/settings?google=${encodeURIComponent(error)}`);
+    if (!code || !state || !oauthStates.delete(state)) return c.text("bad state", 400);
+    try {
+      const t = await connectors.google.exchangeCode(code);
+      await jarvis.router.log("jarvis", "system", `Phil connected Google${t.email ? ` (${t.email})` : ""}`);
+      return c.redirect("/settings?google=connected");
+    } catch (e) {
+      return c.redirect(`/settings?google=${encodeURIComponent((e as Error).message)}`);
+    }
+  });
+  api.post("/connectors/google/disconnect", async (c) => {
+    await connectors.google?.disconnect();
+    await jarvis.router.log("jarvis", "system", "Phil disconnected Google");
+    return c.json({ ok: true });
+  });
 
   app.route("/api", api);
   return app;

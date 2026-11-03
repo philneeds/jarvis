@@ -1,0 +1,89 @@
+import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent } from "@jarvis/core";
+
+/**
+ * Two-way Telegram: Phil talks to Jarvis from his phone, and approvals arrive with Approve / Reject buttons.
+ *   TELEGRAM_BOT_TOKEN   from @BotFather
+ *   TELEGRAM_CHAT_ID     Phil's chat id; every other sender is ignored
+ * Long polling, no public webhook needed.
+ */
+export interface TelegramOptions { token: string; chatId: string; fetch?: typeof fetch; pollTimeout?: number }
+
+export class TelegramBot {
+  private f: typeof fetch;
+  private offset = 0;
+  private running = false;
+  private off?: () => void;
+  constructor(private jarvis: Jarvis, private opts: TelegramOptions) { this.f = opts.fetch ?? fetch; }
+
+  static fromEnv(jarvis: Jarvis): TelegramBot | undefined {
+    const { TELEGRAM_BOT_TOKEN: token, TELEGRAM_CHAT_ID: chatId } = process.env;
+    return token && chatId ? new TelegramBot(jarvis, { token, chatId }) : undefined;
+  }
+
+  private api(method: string, body: unknown) {
+    return this.f(`https://api.telegram.org/bot${this.opts.token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  }
+
+  async send(text: string, extra: Record<string, unknown> = {}) {
+    for (let i = 0; i < text.length; i += 3900) await this.api("sendMessage", { chat_id: this.opts.chatId, text: text.slice(i, i + 3900), ...(i + 3900 >= text.length ? extra : {}) }).catch(() => undefined);
+  }
+
+  start() {
+    this.running = true;
+    this.off = bus.onEvent((e: JarvisEvent) => { if (e.type === "approval.new") void this.announce(e.approval); });
+    void this.loop();
+  }
+  stop() { this.running = false; this.off?.(); }
+
+  private async announce(a: Approval) {
+    const who = getAgent(a.agentId)?.name ?? a.agentId;
+    await this.send(`Approval · ${who} · ${a.kind}\n${a.title}\n\n${a.body.slice(0, 1500)}`, {
+      reply_markup: { inline_keyboard: [[{ text: "✅ Approve", callback_data: `apr:${a.id}:approved` }, { text: "❌ Reject", callback_data: `apr:${a.id}:rejected` }]] },
+    });
+  }
+
+  private async loop() {
+    while (this.running) {
+      try {
+        const res = await this.api("getUpdates", { offset: this.offset, timeout: this.opts.pollTimeout ?? 30, allowed_updates: ["message", "callback_query"] });
+        const j = (await res.json()) as { ok: boolean; result?: Update[] };
+        for (const u of j.result ?? []) { this.offset = u.update_id + 1; await this.handle(u); }
+        // Yield to timers between polls (a fast-returning poll must not starve the event loop).
+        await new Promise((r) => setTimeout(r, j.result?.length ? 50 : 500));
+      } catch (e) {
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    }
+  }
+
+  /** One update. Public for tests. */
+  async handle(u: Update) {
+    if (u.callback_query) {
+      const q = u.callback_query;
+      if (String(q.from.id) !== this.opts.chatId && String(q.message?.chat.id) !== this.opts.chatId) return;
+      const m = q.data?.match(/^apr:([^:]+):(approved|rejected)$/);
+      if (m) {
+        const a = await this.jarvis.decide(m[1]!, m[2] as "approved" | "rejected", "via Telegram");
+        await this.api("answerCallbackQuery", { callback_query_id: q.id, text: a ? `${m[2]}` : "not found" }).catch(() => undefined);
+        if (a && q.message) await this.api("editMessageText", { chat_id: q.message.chat.id, message_id: q.message.message_id, text: `${m[2] === "approved" ? "✅ Approved" : "❌ Rejected"} · ${a.title}` }).catch(() => undefined);
+      }
+      return;
+    }
+    const msg = u.message;
+    if (!msg?.text) return;
+    if (String(msg.chat.id) !== this.opts.chatId) { await this.api("sendMessage", { chat_id: msg.chat.id, text: "This is Phil's Jarvis. Not for you." }).catch(() => undefined); return; }
+    const text = msg.text.trim();
+    if (text === "/start") { await this.send("Jarvis here. Talk to me, @ an agent, or /help."); return; }
+    const out = await this.jarvis.handle(text);
+    for (const o of out) {
+      const who = o.role === "jarvis" ? "Jarvis" : o.role === "system" ? "HQ" : getAgent(o.agentId ?? "")?.name ?? o.agentId ?? "Agent";
+      await this.send(`${who}: ${o.text}`);
+    }
+  }
+}
+
+export interface Update {
+  update_id: number;
+  message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string };
+  callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number } } };
+}

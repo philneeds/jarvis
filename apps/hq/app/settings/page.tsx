@@ -7,6 +7,7 @@ import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 
 interface Passkey { id: string; label: string; createdAt: string }
+interface Connectors { google: { configured: boolean; connected: boolean; email?: string }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
 
 export default function SettingsPage() {
   const { state, refresh } = useLive();
@@ -15,9 +16,16 @@ export default function SettingsPage() {
   const [label, setLabel] = useState("");
   const [msg, setMsg] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [conn, setConn] = useState<Connectors | null>(null);
+  const [googleMsg, setGoogleMsg] = useState<string>();
 
-  const load = () => api<{ passkeys: Passkey[]; rpID: string }>("/api/passkeys").then((r) => { setPasskeys(r.passkeys); setRpID(r.rpID); }).catch(() => undefined);
-  useEffect(() => { void load(); }, []);
+  const load = () => Promise.all([
+    api<{ passkeys: Passkey[]; rpID: string }>("/api/passkeys").then((r) => { setPasskeys(r.passkeys); setRpID(r.rpID); }),
+    api<Connectors>("/api/connectors").then(setConn),
+  ]).catch(() => undefined);
+  useEffect(() => { void load(); const g = new URLSearchParams(location.search).get("google"); if (g) setGoogleMsg(g === "connected" ? "Google connected." : g); }, []);
+  const connectGoogle = async () => { try { const r = await api<{ url: string }>("/api/connectors/google/auth"); location.href = r.url; } catch (e) { setGoogleMsg((e as Error).message); } };
+  const disconnectGoogle = async () => { if (!confirm("Disconnect Google? Monica and the JD PM team lose calendar and mail until you reconnect.")) return; await post("/api/connectors/google/disconnect"); setGoogleMsg(undefined); await load(); };
 
   const addPasskey = async () => {
     setBusy(true); setMsg(undefined);
@@ -65,9 +73,19 @@ export default function SettingsPage() {
           <p className="m-0 text-[11px]" style={{ color: "var(--muted)" }}>Sign-ins and keys live in <code>.env</code> on the server; see the README.</p>
         </section>
 
-        <section className="card flex flex-col gap-2" aria-label="Notifications">
-          <span className="label">Notifications</span>
-          <p className="m-0 text-[12px]">Approvals and alerts go to your phone through an ntfy topic (NOTIFY_WEBHOOK_URL) and/or a Telegram bot (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID). Set them in <code>.env</code> and restart the server.</p>
+        <section className="card flex flex-col gap-3" aria-label="Connectors">
+          <span className="label">Connectors</span>
+          <div className="flex flex-wrap items-center gap-3 text-[12px]">
+            <span className={`dot ${conn?.google.connected ? "dot-working" : "dot-idle"}`} />
+            <span><b>Google</b> · Calendar for Monica, Gmail for Stella&apos;s team{conn?.google.email ? ` · ${conn.google.email}` : ""}</span>
+            {conn?.google.connected ? <button className="btn btn-sm btn-danger ml-auto" onClick={disconnectGoogle}>Disconnect</button>
+              : conn?.google.configured ? <button className="btn btn-sm btn-primary ml-auto" onClick={connectGoogle}>Connect Google</button>
+              : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET</span>}
+          </div>
+          {googleMsg && <p className="m-0 text-[12px]" style={{ color: googleMsg === "Google connected." ? "var(--green)" : "var(--red)" }}>{googleMsg}</p>}
+          <p className="m-0 text-[11px]" style={{ color: "var(--muted)" }}>Reads become tools you tick per agent (calendar_list_events, gmail_search, gmail_read, gmail_create_draft). Sending mail and creating events run only after you approve.</p>
+          <div className="flex items-center gap-3 text-[12px]"><span className={`dot ${conn?.telegram.configured ? "dot-working" : "dot-idle"}`} /><span><b>Telegram</b> · talk to Jarvis and approve from your phone</span><span className="ml-auto" style={{ color: "var(--muted)" }}>{conn?.telegram.configured ? "bot polling" : "set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"}</span></div>
+          <div className="flex items-center gap-3 text-[12px]"><span className={`dot ${conn?.ntfy.configured ? "dot-working" : "dot-idle"}`} /><span><b>ntfy</b> · push alerts</span><span className="ml-auto" style={{ color: "var(--muted)" }}>{conn?.ntfy.configured ? "on" : "set NOTIFY_WEBHOOK_URL"}</span></div>
         </section>
       </div>
     </Shell>
