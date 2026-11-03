@@ -1,0 +1,13 @@
+[Unit]
+Description=Jarvis HQ (Next.js)
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/jarvis
+EnvironmentFile=/opt/jarvis/.env
+ExecStart=/usr/bin/pnpm --filter @jarvis/hq start
+Restart=always
+User=jarvis
+
+[Install]
+WantedBy=multi-user.target

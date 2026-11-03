@@ -1,0 +1,7 @@
+# One domain for HQ. Replace hq.example.com. Caddy fetches TLS on its own.
+hq.example.com {
+	encode gzip
+	@api path /api/* /ws
+	reverse_proxy @api server:4000
+	reverse_proxy hq:3000
+}

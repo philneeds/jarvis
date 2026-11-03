@@ -1,0 +1,26 @@
+{
+  "name": "jarvis",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Jarvis Agent System: one front door, 52 agents, one HQ.",
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter ./apps/* dev",
+    "dev:server": "pnpm --filter @jarvis/server dev",
+    "dev:hq": "pnpm --filter @jarvis/hq dev",
+    "build": "pnpm -r build",
+    "start": "pnpm -r --parallel --filter ./apps/* start",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:migrate": "pnpm --filter @jarvis/core db:migrate",
+    "db:generate": "pnpm --filter @jarvis/core db:generate"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

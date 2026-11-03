@@ -1,0 +1,29 @@
+# Postgres and the reverse proxy. The apps run on the host (they need the Claude and Grok plan sign-ins),
+# so Caddy reaches them over host.docker.internal; adjust for your server.
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jarvis
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jarvis}
+      POSTGRES_DB: jarvis
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    extra_hosts:
+      - "server:host-gateway"
+      - "hq:host-gateway"
+volumes:
+  pgdata:
+  caddy_data:

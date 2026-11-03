@@ -1,0 +1,103 @@
+# Jarvis
+
+One front door to Phil's web of 52 specialist agents across nine ventures. Phil talks to Jarvis in **HQ**, a private phone-first web app; Jarvis routes work to agents, each on the model that fits it, and anything that moves money, posts publicly or messages a customer waits for Phil's OK.
+
+This is **Phase 0 — Foundation** of the [scope outline](https://claude.ai/artifact/DVX4ekT1tjMJuaN3je54vp): the web terminal, Jarvis, the model router (Claude + Grok, others pluggable), shared memory, the action log, the approval queue, and the five MVP screens (Command, Agent Web, Approvals, Activity log, Usage). Gate: Phil can ask Jarvis something and get an answer from a Claude agent and a Grok agent.
+
+## Layout
+
+```
+packages/core   the runtime: agent registry (52 agents, 9 ventures), model catalog, model router,
+                providers (Claude Agent SDK / API, Grok CLI / API, mock), Jarvis orchestrator,
+                approvals + memory blocks, usage rationing, scheduler, Postgres schema + stores
+apps/server     Hono API + websocket feed; single-user login; runs Jarvis and the scheduler
+apps/hq         Next.js HQ: Home display, Command, Agent Web, Approvals, Activity, Usage (installable PWA)
+```
+
+## Run it
+
+Requirements: Node 22, pnpm 10, Postgres (or nothing: the JSON file store works for dev).
+
+```bash
+pnpm install
+cp .env.example .env            # set HQ_PASSWORD at least
+pnpm --filter @jarvis/core build
+pnpm db:migrate                 # needs DATABASE_URL; skip for the file store
+pnpm dev                        # server on :4000, HQ on :3000
+```
+
+Open http://localhost:3000, log in, say `/help`.
+
+No models wired yet? `JARVIS_MOCK=1 pnpm dev` runs the whole thing offline on mock providers (they answer in character and even queue an approval when you ask an agent to send something).
+
+### Models and plans
+
+Every agent names its model in `packages/core/src/registry/agents.ts`; swapping it is a one-line change there, or a dropdown in the Agent Web panel.
+
+| Model key | Runs through | Set up |
+| --- | --- | --- |
+| `claude-opus`, `claude-sonnet` | Claude Agent SDK on Phil's Claude plan (`CLAUDE_MODE=agent-sdk`, default) | `claude login` once on the server |
+| same, fallback | Messages API (`CLAUDE_MODE=api`) | `ANTHROPIC_API_KEY` |
+| `grok` | Grok Build CLI, `grok -p` on SuperGrok (`GROK_MODE=cli`, default) | `grok login` once on the server |
+| same, fallback | xAI API (`GROK_MODE=api`) | `XAI_API_KEY` |
+| `cursor`, `higgsfield`, `chatgpt-health` | not callable from HQ yet | Jarvis reports it and asks Phil to relay |
+
+The router tries the configured mode first and falls back to the other if it is available. Model ids: `CLAUDE_OPUS_MODEL`, `CLAUDE_SONNET_MODEL`, `GROK_MODEL`.
+
+### Usage rationing
+
+Both plans have caps, so work is rationed by priority instead of paying for API calls. Pools are estimates until the plans are confirmed (`CLAUDE_WEEKLY_TOKENS`, `GROK_WEEKLY_RUNS`).
+
+- **Always run:** Jarvis, Stella's team, anything Phil asks for directly.
+- **Run when there's room:** briefs, holdings reviews, research. Hold at 90% of a pool.
+- **Pause first:** scheduled scanners back off at 70% of a pool.
+
+### Safety
+
+- Nothing irreversible runs on its own. Agents ask with a fenced `approval` block; HQ queues it; Phil approves, edits or rejects. Phase 0 has no outbound connectors, so an approval records the decision; the connector that executes it (email, X, CRM, wallet) hooks into `Jarvis.decide` in later phases.
+- Kill switch: pause one agent, all trading (Mayne and the on-chain team), or the whole web, from HQ or `/pause`.
+- Single-user login (`HQ_PASSWORD`, HMAC-signed cookie). Passkey/2FA is the next step before HQ goes on a public domain; until then keep it behind a VPN or Cloudflare Access.
+- Every agent run, delegation, approval, decision and memory write is in the activity log. Outside content is treated as data, never as instructions; the rule is in every agent's system prompt.
+- Secrets live in `.env` on the server (never committed). Wallet and brokerage keys, when they arrive, are read-only.
+
+### HQ screens
+
+| Screen | What Phil does there |
+| --- | --- |
+| Home | The approved display: status orb and level bar, clock and Rochester weather, needs-your-attention, money pulse, Joi's visuals, Jarvis core with his one recommendation and the command bar, towers for the 12 leads (lit when their team needs Phil), since-you-left, primary objective with the two secondary goals. Display off shows just the skyline. |
+| Command | Chat with Jarvis by text or voice; `@stella` talks to an agent directly; `/brief`, `/status`, `/pause`, `/resume`, `/approvals`, `/usage`, `/memory`, `/help`. |
+| Agent Web | The live map: every bubble shows working, idle, waiting on Phil, error or paused, plus last run and model. Tap one for its job, team, model switch, pause and a task box. Faded bubbles are not live in the current phase. |
+| Approvals | One inbox for every send, post, money move, record change and strategy. Approve, edit or reject with a note. |
+| Activity | Searchable record of who did what, when and why, with the prompt and reply behind each run. |
+| Usage | Each plan against its pool this week, per agent; provider readiness; the schedule table. |
+
+### Phases
+
+The web moves phase by phase; agents fade in on the map as their phase arrives. `POST /api/phase {"phase":1}` (or a one-line setting) opens the next one. Schedules (`packages/core/src/scheduler.ts`) carry a phase too, so scouts don't fire until Phase 2.
+
+## Deploy (cloud server)
+
+The Claude and Grok plan sign-ins live on the box, so the simplest shape is one VPS running both apps under systemd with Postgres and Caddy in front.
+
+```bash
+# once
+claude login && grok login
+pnpm install && pnpm build && pnpm db:migrate
+# serve
+PORT=4000 node apps/server/dist/index.js        # systemd unit 1
+pnpm --filter @jarvis/hq start                   # systemd unit 2 (port 3000)
+```
+
+`deploy/Caddyfile` routes `/api/*` and `/ws` to the server and everything else to HQ on one domain with TLS; `deploy/docker-compose.yml` brings up Postgres and Caddy. Set `HQ_ORIGIN` and `NEXT_PUBLIC_WS_URL` to the domain. `NOTIFY_WEBHOOK_URL` (an ntfy topic) pushes approvals and alerts to the phone.
+
+## Develop
+
+```bash
+pnpm typecheck
+pnpm test          # core: registry, blocks, Jarvis end to end on mocks, scheduler; server: API
+pnpm db:generate   # after changing packages/core/src/db/schema.ts
+```
+
+## Open questions (from the scope doc)
+
+Which Claude and Grok plans exactly; what other AI plans or keys exist; JD PM's CRM, scheduling and invoicing tools; a name and domain for HQ, push vs Telegram for approvals; the Memecoin Analyzer stack; which cloud server; how Doc gets health data.

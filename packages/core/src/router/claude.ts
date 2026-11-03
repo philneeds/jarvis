@@ -1,0 +1,142 @@
+import type { AgentRequest, AgentResult, Provider } from "./types.js";
+import { ProviderError } from "./types.js";
+
+/**
+ * Claude provider. Two modes:
+ *  - "agent-sdk" (default): runs through the Claude Agent SDK, which uses the Claude Code sign-in on
+ *    Phil's plan. Works wherever `claude` is logged in. Set CLAUDE_MODE=agent-sdk.
+ *  - "api": calls the Messages API directly with ANTHROPIC_API_KEY (pay-as-you-go fallback).
+ * If the chosen mode fails with an auth error and the other is configured, the router falls back.
+ */
+export type ClaudeMode = "agent-sdk" | "api";
+
+export function claudeProvider(mode: ClaudeMode = (process.env.CLAUDE_MODE as ClaudeMode) || "agent-sdk"): Provider {
+  return mode === "api" ? claudeApiProvider() : claudeAgentSdkProvider();
+}
+
+export function claudeAgentSdkProvider(): Provider {
+  return {
+    id: "claude:agent-sdk",
+    async available() {
+      try {
+        await import("@anthropic-ai/claude-agent-sdk");
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, reason: "Claude Agent SDK not installed" };
+      }
+    },
+    async run(req: AgentRequest): Promise<AgentResult> {
+      const t0 = Date.now();
+      const { query } = await import("@anthropic-ai/claude-agent-sdk");
+      let text = "";
+      let input = 0, output = 0, cost = 0;
+      let resultText: string | undefined;
+      let error: string | undefined;
+      const abort = new AbortController();
+      req.signal?.addEventListener("abort", () => abort.abort());
+      try {
+        const q = query({
+          prompt: req.prompt,
+          options: {
+            model: req.model.modelId,
+            systemPrompt: req.system,
+            maxTurns: req.maxTurns ?? 1,
+            // Phase 0: agents reason and draft; they get tools when connectors land.
+            allowedTools: [],
+            tools: [],
+            permissionMode: "dontAsk",
+            persistSession: false,
+            settingSources: [],
+            abortController: abort,
+            cwd: process.env.JARVIS_AGENT_CWD || process.cwd(),
+          },
+        });
+        for await (const msg of q) {
+          if (msg.type === "assistant") {
+            if (msg.error) error = msg.error;
+            for (const block of msg.message.content) {
+              if (block.type === "text" && block.text) {
+                text += block.text;
+                req.onDelta?.(block.text);
+              }
+            }
+          } else if (msg.type === "result") {
+            if (msg.subtype === "success") {
+              resultText = msg.result;
+            } else {
+              error = error ?? msg.subtype;
+            }
+            const u = (msg as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+            input = u?.input_tokens ?? 0;
+            output = u?.output_tokens ?? 0;
+            cost = (msg as { total_cost_usd?: number }).total_cost_usd ?? 0;
+          }
+        }
+      } catch (e) {
+        throw new ProviderError(`Claude Agent SDK failed: ${(e as Error).message}`, "claude:agent-sdk", e);
+      }
+      if (error && !text && !resultText) {
+        throw new ProviderError(`Claude Agent SDK error: ${error}`, "claude:agent-sdk");
+      }
+      return {
+        text: (text || resultText || "").trim(),
+        provider: "claude:agent-sdk",
+        modelId: req.model.modelId ?? "claude",
+        inputTokens: input,
+        outputTokens: output,
+        costUsd: cost,
+        durationMs: Date.now() - t0,
+      };
+    },
+  };
+}
+
+export function claudeApiProvider(): Provider {
+  return {
+    id: "claude:api",
+    async available() {
+      return process.env.ANTHROPIC_API_KEY
+        ? { ok: true }
+        : { ok: false, reason: "ANTHROPIC_API_KEY not set" };
+    },
+    async run(req: AgentRequest): Promise<AgentResult> {
+      const t0 = Date.now();
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const client = new Anthropic();
+      try {
+        const stream = client.messages.stream(
+          {
+            model: req.model.modelId ?? "claude-sonnet-5-5",
+            max_tokens: 4096,
+            system: req.system,
+            messages: [{ role: "user", content: req.prompt }],
+          },
+          { signal: req.signal },
+        );
+        let text = "";
+        stream.on("text", (d) => { text += d; req.onDelta?.(d); });
+        const final = await stream.finalMessage();
+        const input = final.usage.input_tokens, output = final.usage.output_tokens;
+        return {
+          text: text.trim(),
+          provider: "claude:api",
+          modelId: final.model,
+          inputTokens: input,
+          outputTokens: output,
+          costUsd: estimateClaudeCost(final.model, input, output),
+          durationMs: Date.now() - t0,
+        };
+      } catch (e) {
+        throw new ProviderError(`Claude API failed: ${(e as Error).message}`, "claude:api", e);
+      }
+    },
+  };
+}
+
+/** Rough list-price estimate so the usage screen has a dollar figure for API fallback runs. */
+export function estimateClaudeCost(model: string, input: number, output: number): number {
+  const opus = /opus/i.test(model);
+  const inRate = opus ? 15 : 3; // $ per 1M input tokens
+  const outRate = opus ? 75 : 15;
+  return (input * inRate + output * outRate) / 1_000_000;
+}

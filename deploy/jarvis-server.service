@@ -1,0 +1,13 @@
+[Unit]
+Description=Jarvis server (API, websocket, scheduler)
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/jarvis
+EnvironmentFile=/opt/jarvis/.env
+ExecStart=/usr/bin/node apps/server/dist/index.js
+Restart=always
+User=jarvis
+
+[Install]
+WantedBy=multi-user.target
