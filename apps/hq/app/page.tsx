@@ -76,7 +76,7 @@ export default function HomePage() {
             <div className="corner tl" /><div className="corner tr" /><div className="corner bl" /><div className="corner br" />
             <div className="flex items-start justify-between gap-4">
               <div className="flex flex-col gap-2 flex-1 md:flex-none md:w-72">
-                <div className="flex items-baseline gap-3 text-[11px] tracking-[0.14em]">
+                <div className="flex items-baseline gap-3 text-[11px] tracking-[0.14em] whitespace-nowrap">
                   <span className="display font-bold text-lg tracking-[0.08em]" style={{ color: "var(--ink-strong)" }}>LV {Math.max(1, Math.floor((activity.length + messages.length) / 50) + (state?.status.phase ?? 0))}</span>
                   <span style={{ color: "var(--muted)" }}>Phase {state?.status.phase ?? 0}</span>
                   <span className="ml-auto" style={{ color: "var(--amber)" }}>{state?.pendingApprovals ?? 0} waiting</span>

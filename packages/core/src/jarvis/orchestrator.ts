@@ -5,7 +5,9 @@ import { ModelRouter } from "../router/index.js";
 import type { Store } from "../store/types.js";
 import { usageSummary } from "../usage/caps.js";
 import { extractBlocks, parsePlan } from "./blocks.js";
-import { agentSystemPrompt, briefPrompt, jarvisSystemPrompt, planPrompt, synthesisPrompt } from "./prompts.js";
+import { agentSystemPrompt, briefPrompt, condensePrompt, jarvisSystemPrompt, planPrompt, synthesisPrompt } from "./prompts.js";
+import { getAgentConfig } from "../config.js";
+import { TOOLS } from "../tools/index.js";
 
 export interface JarvisOptions {
   store: Store;
@@ -14,16 +16,30 @@ export interface JarvisOptions {
   notify?: (title: string, body: string) => Promise<void>;
 }
 
+/** Runs an approved action. Registered by the payload's `action` name; connectors add theirs. */
+export type Executor = (approval: Approval, jarvis: Jarvis) => Promise<string | void>;
+
 export class Jarvis {
   readonly store: Store;
   readonly router: ModelRouter;
   private notify?: JarvisOptions["notify"];
+  private executors = new Map<string, Executor>();
 
   constructor(opts: JarvisOptions) {
     this.store = opts.store;
     this.router = opts.router ?? new ModelRouter({ store: opts.store });
     this.notify = opts.notify;
+    this.executors.set("memory.replace", async (a) => {
+      const keep = (a.payload?.keep ?? []) as { scope: string; key: string; value: string }[];
+      const current = await this.store.memory.list();
+      for (const m of current) await this.store.memory.remove(m.scope, m.key);
+      for (const k of keep) await this.store.memory.set({ scope: k.scope, key: k.key, value: k.value, source: a.agentId });
+      return `Memory condensed: ${current.length} → ${keep.length} items.`;
+    });
   }
+
+  /** Register what happens when an approval with payload.action = name is approved. */
+  onApproved(action: string, fn: Executor) { this.executors.set(action, fn); }
 
   // ---- Chat -------------------------------------------------------------
 
@@ -90,7 +106,7 @@ export class Jarvis {
       return { agent: d.agent, task: d.task, text: r.text, blocked: r.blocked };
     }));
 
-    const synth = await this.router.run(jarvis, { system, prompt: synthesisPrompt(userText, reports), direct: true, parentRunId: planRun.runId, maxTurns: 1 });
+    const synth = await this.router.run(jarvis, { system, prompt: synthesisPrompt(userText, reports), direct: true, parentRunId: planRun.runId, maxTurns: 1, onDelta: this.streamer("jarvis") });
     const final = synth.blocked
       ? reports.map((r) => `${r.agent.name}: ${r.blocked ? `did not run (${r.blocked})` : r.text}`).join("\n\n")
       : synth.text;
@@ -103,9 +119,11 @@ export class Jarvis {
   /** Run one agent on a task with its persona, memory and safety rules; queue approvals and memories it emits. */
   async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string } = {}) {
     const memory = [...(await this.store.memory.list("phil")), ...(await this.store.memory.list(`venture:${agent.venture}`)), ...(await this.store.memory.list(`agent:${agent.id}`))];
-    const system = agentSystemPrompt(agent, memory);
+    const cfg = await getAgentConfig(this.store, agent.id);
+    const tools = TOOLS.filter((t) => cfg.tools.includes(t.name));
+    const system = agentSystemPrompt(agent, memory, cfg.persona, tools);
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
-    const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, maxTurns: 1 });
+    const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id) });
     if (r.blocked) return r;
     const { text, approvals, remember } = extractBlocks(r.text);
     await this.absorb(agent, approvals, remember, r.runId);
@@ -118,6 +136,15 @@ export class Jarvis {
       await this.store.memory.set({ scope: m.scope, key: m.key, value: m.value, source: agent.id });
       await this.router.log(agent.id, "memory", `${agent.name} remembered [${m.scope}] ${m.key}`, runId, { value: m.value });
     }
+  }
+
+  /** Live text deltas for HQ while an agent is still writing. */
+  private streamer(agentId: string) {
+    let runId: string | undefined;
+    return (delta: string) => {
+      runId ??= randomUUID();
+      bus.emitEvent({ type: "chat.stream", runId, agentId, delta });
+    };
   }
 
   async say(m: Omit<ChatMessage, "id" | "at">): Promise<ChatMessage> {
@@ -134,7 +161,7 @@ export class Jarvis {
     const arg = rest.join(" ").trim();
     switch ((cmd ?? "").toLowerCase()) {
       case "help":
-        return "Commands: /brief (morning rundown), /status (who's doing what), /pause [agent|trading|all], /resume [agent|trading|all], /approvals, /usage, /memory. Talk to any agent with @name.";
+        return "Commands: /brief (morning rundown), /status (who's doing what), /pause [agent|trading|all], /resume [agent|trading|all], /approvals, /usage, /memory, /condense (Oscar tidies memory). Talk to any agent with @name.";
       case "brief":
         return this.brief();
       case "status": {
@@ -158,6 +185,8 @@ export class Jarvis {
         const u = await usageSummary(this.store);
         return u.plans.filter((p) => p.window !== "manual").map((p) => `${p.label}: ${Math.round(p.used * 100)}% of ${p.window}, ${p.runs} runs${p.throttled ? " (scouts paused)" : ""}`).join("\n");
       }
+      case "condense":
+        return this.condenseMemory();
       case "memory": {
         const m = await this.store.memory.list();
         return m.length ? m.slice(0, 40).map((x) => `- [${x.scope}] ${x.key}: ${x.value}`).join("\n") : "Memory is empty.";
@@ -203,8 +232,28 @@ export class Jarvis {
     if (r.blocked) return `No brief: ${r.blocked}`;
     const { text, approvals, remember } = extractBlocks(r.text);
     await this.absorb(jarvis, approvals, remember, r.runId);
-    await this.store.settings.set("lastBrief", { at: new Date().toISOString(), text });
+    const entry = { at: new Date().toISOString(), text };
+    await this.store.settings.set("lastBrief", entry);
+    const history = await this.store.settings.get<{ at: string; text: string }[]>("briefs", []);
+    await this.store.settings.set("briefs", [entry, ...history].slice(0, 30));
     return text;
+  }
+
+  /** Oscar condenses memory; the result waits in Approvals as a record change and is applied on approval. */
+  async condenseMemory(): Promise<string> {
+    const oscar = getAgent("oscar")!;
+    const items = await this.store.memory.list();
+    if (items.length < 2) return "Nothing to condense yet.";
+    const r = await this.router.run(oscar, { system: agentSystemPrompt(oscar, []), prompt: condensePrompt(items), direct: true, maxTurns: 1 });
+    if (r.blocked) return `Oscar did not run: ${r.blocked}`;
+    let plan: { keep?: { scope: string; key: string; value: string }[]; dropped?: number; why?: string } = {};
+    const raw = r.text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    const first = raw.indexOf("{"), last = raw.lastIndexOf("}");
+    try { plan = JSON.parse(first >= 0 ? raw.slice(first, last + 1) : raw); } catch { return "Oscar's answer wasn't a clean list; nothing changed."; }
+    const keep = (plan.keep ?? []).filter((k) => k && k.key && k.value !== undefined).map((k) => ({ scope: String(k.scope || "phil"), key: String(k.key), value: String(k.value) }));
+    if (!keep.length) return "Oscar wanted to drop everything; ignored.";
+    const a = await this.requestApproval({ agentId: oscar.id, kind: "record", title: `Oscar: condense memory ${items.length} → ${keep.length} items`, body: `${plan.why ?? "Merged duplicates and dropped the stale."}\n\nKeeps:\n${keep.map((k) => `- [${k.scope}] ${k.key}: ${k.value}`).join("\n")}`, payload: { action: "memory.replace", keep, before: items.length, after: keep.length }, runId: r.runId });
+    return a.status === "approved" ? "Memory condensed." : `Oscar's condensed memory (${items.length} → ${keep.length}) is waiting in Approvals.`;
   }
 
   // ---- Approvals ----------------------------------------------------------
@@ -212,6 +261,14 @@ export class Jarvis {
   async requestApproval(a: Omit<Approval, "id" | "at" | "status">): Promise<Approval> {
     const approval: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "pending", ...a };
     await this.store.approvals.add(approval);
+    // Phil's per-agent rules: low-risk kinds under the dollar cap go through on their own, logged.
+    const rules = (await getAgentConfig(this.store, a.agentId)).rules;
+    const amount = Number((a.payload as { amount?: unknown } | undefined)?.amount ?? 0);
+    if (a.kind !== "money" && a.kind !== "strategy" && rules.autoApprove.includes(a.kind) && amount <= rules.maxAutoDollars) {
+      await this.router.log(a.agentId, "approval", `${getAgent(a.agentId)?.name ?? a.agentId}: "${a.title}" auto-approved by Phil's rule (${a.kind}${amount ? `, $${amount}` : ""})`, a.runId, { kind: a.kind, body: a.body });
+      const done = await this.decide(approval.id, "approved", "auto: Phil's rule");
+      return done ?? approval;
+    }
     await this.router.setStatus(a.agentId, "waiting", `waiting on Phil: ${a.title}`);
     await this.router.log(a.agentId, "approval", `${getAgent(a.agentId)?.name ?? a.agentId} asked for approval: ${a.title}`, a.runId, { kind: a.kind, body: a.body });
     bus.emitEvent({ type: "approval.new", approval });
@@ -226,8 +283,22 @@ export class Jarvis {
     if (!stillWaiting) await this.router.setStatus(a.agentId, "idle");
     await this.router.log(a.agentId, "decision", `Phil ${decision} "${a.title}"${note ? ` — ${note}` : ""}`, a.runId, { approvalId: a.id, kind: a.kind });
     bus.emitEvent({ type: "approval.decided", approval: a });
-    // Phase 0 has no outbound connectors: an approval records the decision; the executing connector (email, X, CRM, wallet) hooks in here in later phases.
-    await this.say({ role: "system", text: `${decision === "approved" ? "Approved" : decision === "rejected" ? "Rejected" : "Edited and approved"}: ${a.title} (${getAgent(a.agentId)?.name ?? a.agentId})` });
+    let outcome = "";
+    if (decision !== "rejected") {
+      const action = (a.payload as { action?: unknown } | undefined)?.action;
+      const exec = typeof action === "string" ? this.executors.get(action) : undefined;
+      if (exec) {
+        try {
+          outcome = (await exec(a, this)) || `Done: ${action}`;
+          await this.router.log(a.agentId, "system", outcome, a.runId, { approvalId: a.id, action });
+        } catch (e) {
+          outcome = `Failed to execute ${action}: ${(e as Error).message}`;
+          await this.router.log(a.agentId, "error", outcome, a.runId, { approvalId: a.id, action });
+        }
+      }
+      // No executor: the decision is recorded and the connector that executes it (email, X, CRM, wallet) hooks in via onApproved().
+    }
+    await this.say({ role: "system", text: `${decision === "approved" ? "Approved" : decision === "rejected" ? "Rejected" : "Edited and approved"}: ${a.title} (${getAgent(a.agentId)?.name ?? a.agentId})${outcome ? ` — ${outcome}` : ""}` });
     return a;
   }
 
@@ -254,7 +325,7 @@ export class Jarvis {
     const phase = await this.store.settings.get("phase", 0);
     return AGENTS.map((a) => {
       const st = states.get(a.id);
-      const model = st?.modelOverride ?? a.model;
+      const model = st?.modelOverride || a.model;
       return { ...a, live: a.phase <= phase, model, status: st?.paused ? "paused" : (st?.status ?? "idle"), lastRunAt: st?.lastRunAt, lastError: st?.lastError, detail: st?.detail };
     });
   }

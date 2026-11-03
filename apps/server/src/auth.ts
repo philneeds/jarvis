@@ -42,12 +42,16 @@ export async function requireAuth(c: Context, next: Next) {
   await next();
 }
 
+export function startSession(c: Context) {
+  const id = createHmac("sha256", secret).update(String(Date.now()) + Math.random()).digest("base64url").slice(0, 24);
+  setCookie(c, COOKIE, sign(id), { httpOnly: true, sameSite: "Lax", path: "/", secure: process.env.NODE_ENV === "production", maxAge: 60 * 60 * 24 * 30 });
+}
+
 export function login(c: Context, given: string): boolean {
   if (!authEnabled) return true;
   const a = Buffer.from(given), b = Buffer.from(password!);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
-  const id = createHmac("sha256", secret).update(String(Date.now()) + Math.random()).digest("base64url").slice(0, 24);
-  setCookie(c, COOKIE, sign(id), { httpOnly: true, sameSite: "Lax", path: "/", secure: process.env.NODE_ENV === "production", maxAge: 60 * 60 * 24 * 30 });
+  startSession(c);
   return true;
 }
 

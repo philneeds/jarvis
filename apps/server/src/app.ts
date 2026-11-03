@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
-import { AGENTS, VENTURES, MODELS, SCHEDULES, findAgent, usageSummary, type Jarvis } from "@jarvis/core";
+import { AGENTS, VENTURES, MODELS, SCHEDULES, TOOL_NAMES, findAgent, getAgentConfig, setAgentConfig, usageSummary, type Jarvis } from "@jarvis/core";
+import { passkeyRoutes } from "./passkeys.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
 
 export function createApp(jarvis: Jarvis) {
@@ -20,6 +21,7 @@ export function createApp(jarvis: Jarvis) {
   });
   app.post("/api/logout", (c) => { logout(c); return c.json({ ok: true }); });
   app.get("/api/me", (c) => c.json({ authed: isAuthed(c), auth: authEnabled }));
+  app.route("/api/passkeys", passkeyRoutes(jarvis.store));
 
   const api = new Hono();
   api.use("*", requireAuth);
@@ -41,7 +43,8 @@ export function createApp(jarvis: Jarvis) {
 
   api.get("/brief", async (c) => {
     const last = await jarvis.store.settings.get<{ at: string; text: string } | null>("lastBrief", null);
-    return c.json({ brief: last });
+    const history = await jarvis.store.settings.get<{ at: string; text: string }[]>("briefs", []);
+    return c.json({ brief: last, history });
   });
   api.post("/brief", async (c) => {
     const text = await jarvis.brief();
@@ -76,6 +79,7 @@ export function createApp(jarvis: Jarvis) {
     await jarvis.router.log("jarvis", "memory", `Phil set [${p.data.scope}] ${p.data.key}`);
     return c.json({ ok: true });
   });
+  api.post("/memory/condense", async (c) => c.json({ message: await jarvis.condenseMemory() }));
   api.delete("/memory", async (c) => {
     await jarvis.store.memory.remove(c.req.query("scope") ?? "", c.req.query("key") ?? "");
     return c.json({ ok: true });
@@ -100,6 +104,28 @@ export function createApp(jarvis: Jarvis) {
     const r = await jarvis.runAgent(agent, p.data.task, { direct: true });
     const m = await jarvis.say({ role: "agent", agentId: agent.id, text: r.blocked ? `(${agent.name} did not run: ${r.blocked})` : r.text, runId: r.runId });
     return c.json({ message: m, blocked: r.blocked });
+  });
+  api.get("/agents/:id/config", async (c) => {
+    const agent = findAgent(c.req.param("id"));
+    if (!agent) return c.json({ error: "no such agent" }, 404);
+    return c.json({ config: await getAgentConfig(jarvis.store, agent.id), tools: TOOL_NAMES, defaultModel: agent.model });
+  });
+  api.put("/agents/:id/config", async (c) => {
+    const agent = findAgent(c.req.param("id"));
+    if (!agent) return c.json({ error: "no such agent" }, 404);
+    const str = z.string().max(2000).optional();
+    const p = z.object({
+      persona: z.object({ reportsTo: str, job: str, daily: str, tools: str, alone: str, approval: str, preferredAI: str, good: str }).partial().optional(),
+      model: z.enum(Object.keys(MODELS) as [string, ...string[]]).nullable().optional(),
+      schedule: z.object({ enabled: z.boolean(), when: z.string().regex(/^(daily@\d{2}:\d{2}|every:\d{1,4}|)$/), task: z.string().max(2000) }).nullable().optional(),
+      rules: z.object({ autoApprove: z.array(z.enum(["send", "post", "money", "strategy", "config", "record", "other"])), maxAutoDollars: z.number().min(0).max(1_000_000) }).partial().optional(),
+      tools: z.array(z.enum(TOOL_NAMES as [string, ...string[]])).optional(),
+    }).safeParse(await c.req.json().catch(() => ({})));
+    if (!p.success) return c.json({ error: "bad body", issues: p.error.issues }, 400);
+    const config = await setAgentConfig(jarvis.store, agent.id, p.data as Parameters<typeof setAgentConfig>[2]);
+    if (p.data.model !== undefined) await jarvis.store.agentState.set(agent.id, { modelOverride: p.data.model && p.data.model !== agent.model ? p.data.model : "" });
+    await jarvis.router.log("jarvis", "system", `Phil updated ${agent.name}'s settings`, undefined, { changed: Object.keys(p.data) });
+    return c.json({ config });
   });
   api.patch("/agents/:id", async (c) => {
     const agent = findAgent(c.req.param("id"));

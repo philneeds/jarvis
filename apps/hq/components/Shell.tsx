@@ -14,6 +14,11 @@ const TABS = [
   { href: "/activity", label: "Activity" },
   { href: "/usage", label: "Usage" },
 ];
+const MORE = [
+  { href: "/brief", label: "Daily brief" },
+  { href: "/memory", label: "Memory" },
+  { href: "/settings", label: "Settings" },
+];
 
 const LEVEL: Record<string, string> = { green: "var(--green)", yellow: "var(--yellow)", orange: "var(--orange)", red: "var(--red)" };
 
@@ -21,6 +26,7 @@ export function Shell({ children, bare }: { children: React.ReactNode; bare?: bo
   const path = usePathname();
   const { state, connected, pending, refresh } = useLive();
   const [busy, setBusy] = useState(false);
+  const [more, setMore] = useState(false);
   const level = state?.status.level ?? "green";
   const killed = state?.status.killSwitch.all;
 
@@ -42,10 +48,10 @@ export function Shell({ children, bare }: { children: React.ReactNode; bare?: bo
             <span role="status" aria-label={`System status ${level}: ${state?.status.text ?? ""}`} title={state?.status.text} className="inline-block w-3 h-3 rounded-full flex-none" style={{ background: LEVEL[level], boxShadow: `0 0 8px ${LEVEL[level]}` }} />
           </Link>
           <span className="hidden md:inline text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>{state?.status.text ?? "connecting"} · phase {state?.status.phase ?? "-"}</span>
-          <nav className="tabs ml-auto hidden md:flex" style={{ maxWidth: 680, flex: 1 }} aria-label="HQ screens">
-            {TABS.map((t) => (
-              <Link key={t.href} href={t.href} aria-current={path === t.href ? "page" : undefined}>
-                {t.label}
+          <nav className="tabs ml-auto hidden md:flex" style={{ maxWidth: 900, flex: 1 }} aria-label="HQ screens">
+            {[...TABS, ...MORE].map((t) => (
+              <Link key={t.href} href={t.href} aria-current={path === t.href || (t.href === "/web" && path.startsWith("/agents")) ? "page" : undefined}>
+                {t.label.replace("Daily ", "")}
                 {t.href === "/approvals" && pending.length > 0 && <span className="badge">{pending.length}</span>}
               </Link>
             ))}
@@ -58,14 +64,22 @@ export function Shell({ children, bare }: { children: React.ReactNode; bare?: bo
       )}
       <main className="flex-1 flex flex-col min-h-0 pb-16 md:pb-0">{children}</main>
       {!bare && (
-        <nav className="tabs fixed bottom-0 left-0 right-0 md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)", background: "rgba(5,12,32,0.92)", zIndex: 20 }} aria-label="HQ screens">
-          {TABS.map((t) => (
-            <Link key={t.href} href={t.href} aria-current={path === t.href ? "page" : undefined}>
-              {t.label.replace("Agent ", "")}
-              {t.href === "/approvals" && pending.length > 0 && <span className="badge">{pending.length}</span>}
-            </Link>
-          ))}
-        </nav>
+        <div className="fixed bottom-0 left-0 right-0 md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)", background: "rgba(5,12,32,0.92)", zIndex: 20 }}>
+          {more && (
+            <div className="tabs flex-wrap border-b" style={{ borderColor: "var(--line)" }} role="menu">
+              {[...TABS.slice(4), ...MORE].map((t) => <Link key={t.href} href={t.href} role="menuitem" onClick={() => setMore(false)} aria-current={path === t.href ? "page" : undefined} style={{ flexBasis: "33%" }}>{t.label}</Link>)}
+            </div>
+          )}
+          <nav className="tabs" aria-label="HQ screens">
+            {TABS.slice(0, 4).map((t) => (
+              <Link key={t.href} href={t.href} aria-current={path === t.href || (t.href === "/web" && path.startsWith("/agents")) ? "page" : undefined}>
+                {t.label.replace("Agent ", "")}
+                {t.href === "/approvals" && pending.length > 0 && <span className="badge">{pending.length}</span>}
+              </Link>
+            ))}
+            <button onClick={() => setMore(!more)} aria-expanded={more} aria-label="More screens" style={more ? { borderColor: "var(--accent)" } : undefined}>More</button>
+          </nav>
+        </div>
       )}
     </div>
   );

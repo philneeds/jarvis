@@ -27,7 +27,23 @@ export function claudeAgentSdkProvider(): Provider {
     },
     async run(req: AgentRequest): Promise<AgentResult> {
       const t0 = Date.now();
-      const { query } = await import("@anthropic-ai/claude-agent-sdk");
+      const { query, createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
+      const tools = req.tools ?? [];
+      const mcp = tools.length
+        ? createSdkMcpServer({
+            name: "jarvis",
+            version: "0.1.0",
+            instructions: "HQ tools. Read-only: anything that changes the world goes through an approval block.",
+            tools: tools.map((t) => tool(t.name, t.description, t.schema, async (args) => {
+              try {
+                const text = await t.handler(args as never, req.toolContext ?? { store: undefined as never, agentId: req.agent.id });
+                return { content: [{ type: "text", text }] };
+              } catch (e) {
+                return { content: [{ type: "text", text: `tool failed: ${(e as Error).message}` }], isError: true };
+              }
+            })),
+          })
+        : undefined;
       let text = "";
       let input = 0, output = 0, cost = 0;
       let resultText: string | undefined;
@@ -40,10 +56,11 @@ export function claudeAgentSdkProvider(): Provider {
           options: {
             model: req.model.modelId,
             systemPrompt: req.system,
-            maxTurns: req.maxTurns ?? 1,
-            // Phase 0: agents reason and draft; they get tools when connectors land.
-            allowedTools: [],
+            maxTurns: req.maxTurns ?? (tools.length ? 8 : 1),
+            // Only HQ tools, never the CLI's file/shell tools.
+            allowedTools: tools.map((t) => `mcp__jarvis__${t.name}`),
             tools: [],
+            ...(mcp ? { mcpServers: { jarvis: mcp } } : {}),
             permissionMode: "dontAsk",
             persistSession: false,
             settingSources: [],

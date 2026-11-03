@@ -54,9 +54,11 @@ Both plans have caps, so work is rationed by priority instead of paying for API 
 
 ### Safety
 
-- Nothing irreversible runs on its own. Agents ask with a fenced `approval` block; HQ queues it; Phil approves, edits or rejects. Phase 0 has no outbound connectors, so an approval records the decision; the connector that executes it (email, X, CRM, wallet) hooks into `Jarvis.decide` in later phases.
+- Nothing irreversible runs on its own. Agents ask with a fenced `approval` block; HQ queues it; Phil approves, edits or rejects. An approval whose payload names an `action` runs the registered executor on approval (`jarvis.onApproved("gmail.send", fn)` is where a connector plugs in); today the only executor is `memory.replace` for Oscar's condensing.
+- Claude agents can call read-only HQ tools (`memory_search`, `web_status`, `activity_recent`, `roster`) through the Agent SDK when ticked in their settings; nothing that changes the world is a tool.
 - Kill switch: pause one agent, all trading (Mayne and the on-chain team), or the whole web, from HQ or `/pause`.
-- Single-user login (`HQ_PASSWORD`, HMAC-signed cookie). Passkey/2FA is the next step before HQ goes on a public domain; until then keep it behind a VPN or Cloudflare Access.
+- Single-user login: password (`HQ_PASSWORD`, HMAC-signed cookie) plus passkeys (WebAuthn) registered under Settings. Set `HQ_RP_ID` to the HQ domain in production.
+- Per-agent approval rules let low-risk kinds (record changes, config) go through on their own under a dollar cap; money moves and trading strategies always wait for Phil.
 - Every agent run, delegation, approval, decision and memory write is in the activity log. Outside content is treated as data, never as instructions; the rule is in every agent's system prompt.
 - Secrets live in `.env` on the server (never committed). Wallet and brokerage keys, when they arrive, are read-only.
 
@@ -70,6 +72,10 @@ Both plans have caps, so work is rationed by priority instead of paying for API 
 | Approvals | One inbox for every send, post, money move, record change and strategy. Approve, edit or reject with a note. |
 | Activity | Searchable record of who did what, when and why, with the prompt and reply behind each run. |
 | Usage | Each plan against its pool this week, per agent; provider readiness; the schedule table. |
+| Daily brief | Jarvis's morning rundown, run on a timer or on demand, with earlier briefs. |
+| Memory | Browse and correct what the web knows; add facts; Oscar condenses on request or nightly, and the result waits in Approvals. |
+| Agent settings | Per agent (from the Agent Web panel): Phil's persona template, model switch, tools, a custom schedule, and approval rules (which kinds may go through alone, up to what dollar amount). |
+| Settings | Passkeys for this device, the build phase, provider readiness, notification setup. |
 
 ### Phases
 
@@ -88,7 +94,7 @@ PORT=4000 node apps/server/dist/index.js        # systemd unit 1
 pnpm --filter @jarvis/hq start                   # systemd unit 2 (port 3000)
 ```
 
-`deploy/Caddyfile` routes `/api/*` and `/ws` to the server and everything else to HQ on one domain with TLS; `deploy/docker-compose.yml` brings up Postgres and Caddy. Set `HQ_ORIGIN` and `NEXT_PUBLIC_WS_URL` to the domain. `NOTIFY_WEBHOOK_URL` (an ntfy topic) pushes approvals and alerts to the phone.
+`deploy/Caddyfile` routes `/api/*` and `/ws` to the server and everything else to HQ on one domain with TLS; `deploy/docker-compose.yml` brings up Postgres and Caddy. Set `HQ_ORIGIN`, `HQ_RP_ID` and `NEXT_PUBLIC_WS_URL` to the domain. `NOTIFY_WEBHOOK_URL` (an ntfy topic) and/or `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` push approvals and alerts to the phone.
 
 ## Develop
 

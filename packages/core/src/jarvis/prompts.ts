@@ -1,6 +1,8 @@
 import { VENTURES } from "../registry/ventures.js";
 import { AGENT_BY_ID, children, rosterText, type AgentDef } from "../registry/index.js";
 import type { MemoryItem } from "../store/types.js";
+import { personaText, type Persona } from "../config.js";
+import { toolsText, type ToolDef } from "../tools/index.js";
 
 export const SAFETY_RULES = `Safety and permissions (always on):
 - You have the least access your job needs. Nothing that moves money, posts publicly, messages a customer, changes a record over the set dollar amount, or installs tools goes out without Phil's OK.
@@ -15,7 +17,7 @@ export function memoryText(items: MemoryItem[]): string {
   return items.slice(0, 60).map((m) => `- [${m.scope}] ${m.key}: ${m.value}`).join("\n");
 }
 
-export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[]): string {
+export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona: Persona = {}, tools: ToolDef[] = []): string {
   const venture = VENTURES[agent.venture];
   const boss = agent.parent ? AGENT_BY_ID[agent.parent] : undefined;
   const team = children(agent.id);
@@ -24,11 +26,13 @@ export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[]): string
     `You are ${agent.name}, one of Phil's specialist agents in the Jarvis web. Job: ${agent.short}.`,
     agent.desc,
     `Venture: ${venture.label}${also.length ? ` (also works for ${also.join(", ")})` : ""}. ${boss ? `Reports to ${boss.name}.` : "Reports to Phil."}${team.length ? ` Team: ${team.map((t) => t.name).join(", ")}.` : ""}`,
+    personaText(persona) ? `Phil's brief for you:\n${personaText(persona)}` : "",
+    tools.length ? `Tools you can call (read-only):\n${toolsText(tools)}` : "",
     `You answer Jarvis or Phil directly, in your own voice, briefly, with a clear recommendation. Lead with the answer.`,
     `Anything worth remembering about Phil, a venture or a contact goes in a fenced block tagged "remember" with JSON: {"scope":"phil|venture:${agent.venture}|contact:<name>","key":"...","value":"..."}.`,
     SAFETY_RULES,
     `What the web knows:\n${memoryText(memory)}`,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 export function jarvisSystemPrompt(memory: MemoryItem[], statusLine: string): string {
@@ -72,5 +76,14 @@ export function briefPrompt(status: { pending: number; working: string[]; errors
     `Facts from HQ: ${status.pending} approval(s) waiting; working now: ${status.working.join(", ") || "nobody"}; errors: ${status.errors.join(", ") || "none"}.`,
     `Recent activity:\n${status.recent.map((r) => `- ${r}`).join("\n") || "- (quiet)"}`,
     `Shape: one line on the state of the web, then the day in five short sections only where there is something to say: Monica's day, Munger's money, Stella's leads, Mantis's markets, Doc's health. For a section whose lead isn't live yet in this phase, say so in a few words rather than inventing content. End with the one thing you'd have Phil do first.`,
+  ].join("\n\n");
+}
+
+/** Oscar condenses memory into the important bullets. Strict JSON so the result can be applied. */
+export function condensePrompt(items: MemoryItem[]): string {
+  return [
+    `Here is everything the web currently remembers (${items.length} items):`,
+    items.map((m) => `- [${m.scope}] ${m.key}: ${m.value}`).join("\n"),
+    `Condense it: merge duplicates, drop the stale and the trivial, keep every fact that still matters (names, numbers, dates, preferences, decisions). Keep scopes as they are. Respond with JSON only: {"keep":[{"scope":"...","key":"...","value":"..."}],"dropped":<count>,"why":"<one line>"}`,
   ].join("\n\n");
 }

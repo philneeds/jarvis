@@ -40,3 +40,22 @@ test("login gates the API", async () => {
   const act = await call("/api/activity?q=stella", { cookie });
   assert.ok(((await act.json()) as { entries: unknown[] }).entries.length > 0);
 });
+
+test("agent settings round-trip and passkey registration needs a session", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const put = await call("/api/agents/stella/config", { method: "PUT", cookie, body: JSON.stringify({ persona: { job: "Run JD PM." }, tools: ["memory_search"], rules: { autoApprove: ["record"], maxAutoDollars: 250 }, schedule: { enabled: true, when: "daily@06:50", task: "Leads" } }) });
+  assert.equal(put.status, 200);
+  const get = await call("/api/agents/stella/config", { cookie });
+  const j = (await get.json()) as { config: { persona: { job: string }; tools: string[]; rules: { maxAutoDollars: number } } };
+  assert.equal(j.config.persona.job, "Run JD PM.");
+  assert.deepEqual(j.config.tools, ["memory_search"]);
+  assert.equal(j.config.rules.maxAutoDollars, 250);
+  const bad = await call("/api/agents/stella/config", { method: "PUT", cookie, body: JSON.stringify({ schedule: { enabled: true, when: "whenever", task: "x" } }) });
+  assert.equal(bad.status, 400);
+  assert.equal((await call("/api/passkeys/register/options", { method: "POST" })).status, 401);
+  const opts = await call("/api/passkeys/register/options", { method: "POST", cookie });
+  assert.equal(opts.status, 200);
+  assert.equal(((await opts.json()) as { rp: { id: string } }).rp.id, "localhost");
+  assert.equal((await call("/api/passkeys/login/options", { method: "POST" })).status, 404);
+});

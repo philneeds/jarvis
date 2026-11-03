@@ -21,7 +21,7 @@ export function Clock({ since }: { since?: string }) {
   const sinceText = since ? (() => { const s = (Date.now() - new Date(since).getTime()) / 1000; return s < 3600 ? `${Math.floor(s / 60)}M` : `${Math.floor(s / 3600)}H ${Math.floor((s % 3600) / 60)}M`; })() : null;
   return (
     <div className="flex flex-col items-end gap-1 text-right">
-      <span className="display glow font-semibold leading-none tracking-[0.06em]" style={{ fontSize: 36, color: "var(--ink-bright)" }}>
+      <span className="display glow font-semibold leading-none tracking-[0.06em] text-[26px] md:text-[36px]" style={{ color: "var(--ink-bright)" }}>
         {now ? now.toLocaleTimeString("en-US", { hour12: false }) : "--:--:--"}
       </span>
       <span className="text-[12px] tracking-[0.18em] uppercase" style={{ color: "#CFE6FF" }}>{now ? now.toLocaleDateString("en-US", { weekday: "short", day: "2-digit", month: "short", year: "numeric" }) : ""}</span>

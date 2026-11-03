@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { post } from "@/lib/api";
 import { useLive } from "@/lib/live";
+import { startAuthentication } from "@simplewebauthn/browser";
 
 function LoginForm() {
   const router = useRouter();
@@ -13,6 +14,20 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+
+  const passkey = async () => {
+    setBusy(true); setError(undefined);
+    try {
+      const optionsJSON = await post<Parameters<typeof startAuthentication>[0]["optionsJSON"]>("/api/passkeys/login/options");
+      const response = await startAuthentication({ optionsJSON });
+      await post("/api/passkeys/login/verify", { response });
+      await refresh();
+      router.replace(params.get("next") || "/");
+      router.refresh();
+    } catch (err) {
+      setError((err as Error).message === "no passkeys registered" ? "No passkey yet. Log in with the password, then add one under Settings." : (err as Error).message);
+    } finally { setBusy(false); }
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -38,6 +53,7 @@ function LoginForm() {
       <input id="pw" className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
       {error && <p className="text-[12px]" style={{ color: "var(--red)" }}>{error}</p>}
       <button className="btn btn-primary" disabled={busy || !password}>Enter HQ</button>
+      <button type="button" className="btn" disabled={busy} onClick={passkey}>Use a passkey</button>
     </form>
   );
 }

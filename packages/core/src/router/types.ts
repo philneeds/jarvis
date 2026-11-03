@@ -1,5 +1,6 @@
 import type { AgentDef } from "../registry/agents.js";
 import type { ModelSpec } from "../models.js";
+import type { ToolContext, ToolDef } from "../tools/index.js";
 
 export interface AgentRequest {
   agent: AgentDef;
@@ -11,6 +12,9 @@ export interface AgentRequest {
   onDelta?: (delta: string) => void;
   signal?: AbortSignal;
   maxTurns?: number;
+  /** Tools the agent may call (providers that support tool use). */
+  tools?: ToolDef[];
+  toolContext?: ToolContext;
 }
 
 export interface AgentResult {

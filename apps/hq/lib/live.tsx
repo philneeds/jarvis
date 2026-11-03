@@ -12,6 +12,8 @@ interface Live {
   messages: ChatMessage[];
   pending: Approval[];
   activity: ActivityEntry[];
+  /** Agents mid-reply: partial text by run. */
+  streams: Record<string, { agentId: string; text: string; at: number }>;
   refresh: () => Promise<void>;
   setMessages: (fn: (m: ChatMessage[]) => ChatMessage[]) => void;
   setPending: (fn: (a: Approval[]) => Approval[]) => void;
@@ -26,6 +28,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [messages, setMessagesState] = useState<ChatMessage[]>([]);
   const [pending, setPendingState] = useState<Approval[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [streams, setStreams] = useState<Record<string, { agentId: string; text: string; at: number }>>({});
   const wsRef = useRef<WebSocket | null>(null);
   const [wsGen, setWsGen] = useState(0);
 
@@ -70,6 +73,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             break;
           case "chat.message":
             setMessagesState((m) => (m.some((x) => x.id === e.message.id) ? m : [...m, e.message].slice(-500)));
+            setStreams((st) => { const n = { ...st }; for (const [k, v] of Object.entries(n)) if (v.agentId === (e.message.agentId ?? (e.message.role === "jarvis" ? "jarvis" : v.agentId))) delete n[k]; return n; });
+            break;
+          case "chat.stream":
+            setStreams((st) => ({ ...st, [e.runId]: { agentId: e.agentId, text: (st[e.runId]?.text ?? "") + e.delta, at: Date.now() } }));
             break;
           case "approval.new":
             setPendingState((p) => [e.approval, ...p.filter((x) => x.id !== e.approval.id)]);
@@ -97,10 +104,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [wsGen]);
 
   const value = useMemo<Live>(() => ({
-    state, connected, error, messages, pending, activity, refresh,
+    state, connected, error, messages, pending, activity, streams, refresh,
     setMessages: (fn) => setMessagesState(fn),
     setPending: (fn) => setPendingState(fn),
-  }), [state, connected, error, messages, pending, activity, refresh]);
+  }), [state, connected, error, messages, pending, activity, streams, refresh]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

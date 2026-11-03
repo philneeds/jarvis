@@ -96,3 +96,51 @@ test("duplicate delegations collapse to one run per agent", async () => {
   const runs = (await store.activity.list({ limit: 50 })).filter((e) => e.kind === "run" && e.summary.startsWith("Stella ran"));
   assert.equal(runs.length, 1);
 });
+
+test("persona, tools and rules from agent settings shape the run", async () => {
+  const { jarvis, store } = make();
+  const { setAgentConfig, TOOLS } = await import("../src/index.js");
+  await setAgentConfig(store, "stephanie", { persona: { job: "Keep every customer answered within the hour." }, tools: ["memory_search"], rules: { autoApprove: ["record"], maxAutoDollars: 500 } });
+  // A record change under the cap goes through on its own; a send still waits.
+  const auto = await jarvis.requestApproval({ agentId: "stephanie", kind: "record", title: "Update the Smith job date", body: "", payload: { amount: 120 } });
+  assert.equal(auto.status, "approved");
+  const over = await jarvis.requestApproval({ agentId: "stephanie", kind: "record", title: "Refund", body: "", payload: { amount: 900 } });
+  assert.equal(over.status, "pending");
+  const send = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Email", body: "" });
+  assert.equal(send.status, "pending");
+  assert.ok(TOOLS.some((t) => t.name === "memory_search"));
+  const r = await jarvis.runAgent(await import("../src/index.js").then((m) => m.getAgent("stephanie")!), "hi", { direct: true });
+  assert.equal(r.blocked, undefined);
+});
+
+test("tools answer from the store", async () => {
+  const { store } = make();
+  const { TOOLS } = await import("../src/index.js");
+  await store.memory.set({ scope: "venture:jdpm", key: "smith", value: "wants oak cabinets" });
+  const t = TOOLS.find((x) => x.name === "memory_search")!;
+  assert.match(await t.handler({ query: "oak" }, { store, agentId: "stella" }), /oak cabinets/);
+  const s = TOOLS.find((x) => x.name === "web_status")!;
+  assert.match(await s.handler({}, { store, agentId: "stella" }), /Everyone idle/);
+});
+
+test("Oscar condenses memory through an approval that executes on approve", async () => {
+  const { jarvis, store } = make();
+  for (let i = 0; i < 6; i++) await store.memory.set({ scope: "phil", key: `k${i}`, value: `v${i}` });
+  const msg = await jarvis.condenseMemory();
+  assert.match(msg, /waiting in Approvals/);
+  const pending = await store.approvals.list("pending");
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0]!.payload?.action, "memory.replace");
+  await jarvis.decide(pending[0]!.id, "approved");
+  assert.equal((await store.memory.list()).length, 3);
+});
+
+test("custom per-agent schedules merge with the built-in ones", async () => {
+  const { jarvis, store } = make();
+  const { setAgentConfig } = await import("../src/index.js");
+  await setAgentConfig(store, "karol", { schedule: { enabled: true, when: "every:30", task: "Scan for leads" } });
+  const s = new Scheduler(jarvis, []);
+  const all = await s.allSchedules();
+  assert.deepEqual(all.map((x) => x.id), ["custom:karol"]);
+  assert.equal(s.due(new Date(), 0, all).length, 1);
+});

@@ -1,6 +1,7 @@
 import { bus } from "./events.js";
 import type { Jarvis } from "./jarvis/orchestrator.js";
-import { getAgent } from "./registry/index.js";
+import { AGENTS, getAgent } from "./registry/index.js";
+import { getAgentConfig } from "./config.js";
 
 export interface Schedule {
   id: string;
@@ -16,6 +17,7 @@ export interface Schedule {
 /** Scouts and briefs on their timers. Nothing runs before its phase. */
 export const SCHEDULES: Schedule[] = [
   { id: "daily-brief", agentId: "jarvis", task: "brief", when: process.env.BRIEF_AT ? `daily@${process.env.BRIEF_AT}` : "daily@07:00", phase: 0 },
+  { id: "oscar-condense", agentId: "oscar", task: "condense", when: "daily@03:30", phase: 0 },
   { id: "monica-day", agentId: "monica", task: "Lay out Phil's day: what's on the calendar, what's unscheduled, what to protect.", when: "daily@06:45", phase: 1 },
   { id: "stella-leads", agentId: "stella", task: "Review new leads and open jobs for JD PM; flag anything waiting on a customer reply.", when: "daily@06:50", phase: 1 },
   { id: "mantis-markets", agentId: "mantis", task: "Market read for the day: what moved on-chain overnight and what the team should watch.", when: "daily@06:55", phase: 1 },
@@ -41,9 +43,19 @@ export class Scheduler {
   }
   stop() { if (this.timer) clearInterval(this.timer); }
 
+  /** Phil's per-agent schedules from agent settings, merged over the built-in ones. */
+  async allSchedules(): Promise<Schedule[]> {
+    const custom: Schedule[] = [];
+    for (const a of AGENTS) {
+      const c = await getAgentConfig(this.jarvis.store, a.id);
+      if (c.schedule?.enabled && c.schedule.when && c.schedule.task) custom.push({ id: `custom:${a.id}`, agentId: a.id, task: c.schedule.task, when: c.schedule.when, phase: 0 });
+    }
+    return [...this.schedules, ...custom];
+  }
+
   /** Which schedules are due at `now`. Exposed for tests. */
-  due(now: Date, phase: number): Schedule[] {
-    return this.schedules.filter((s) => {
+  due(now: Date, phase: number, schedules: Schedule[] = this.schedules): Schedule[] {
+    return schedules.filter((s) => {
       if (s.phase > phase) return false;
       const last = this.lastRun.get(s.id) ?? 0;
       if (s.when.startsWith("every:")) {
@@ -61,7 +73,7 @@ export class Scheduler {
 
   async tick(now = new Date()) {
     const phase = await this.jarvis.store.settings.get("phase", 0);
-    for (const s of this.due(now, phase)) {
+    for (const s of this.due(now, phase, await this.allSchedules())) {
       this.lastRun.set(s.id, now.getTime());
       const agent = getAgent(s.agentId);
       if (!agent) continue;
@@ -70,6 +82,8 @@ export class Scheduler {
         if (s.task === "brief") {
           const text = await this.jarvis.brief();
           await this.jarvis.say({ role: "jarvis", text: `Daily brief\n\n${text}` });
+        } else if (s.task === "condense") {
+          if ((await this.jarvis.store.memory.list()).length >= 20) await this.jarvis.say({ role: "system", text: await this.jarvis.condenseMemory() });
         } else {
           const r = await this.jarvis.runAgent(agent, s.task, { direct: false, from: "Scheduler" });
           if (!r.blocked) await this.jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId });

@@ -6,7 +6,7 @@ import { post, fmtTime } from "@/lib/api";
 import type { ChatMessage } from "@/lib/types";
 import { Md } from "./Md";
 
-const QUICK = ["/brief", "/status", "/approvals", "/usage", "/pause", "/help"];
+const QUICK = ["/brief", "/status", "/approvals", "/usage", "/pause", "/condense", "/help"];
 
 type Recognition = { start(): void; stop(): void; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null; lang: string; interimResults: boolean; continuous: boolean };
 
@@ -18,7 +18,7 @@ function speech(): Recognition | null {
 }
 
 export function Chat({ compact, initial }: { compact?: boolean; initial?: string }) {
-  const { state, messages, setMessages } = useLive();
+  const { state, messages, setMessages, streams } = useLive();
   const [text, setText] = useState(initial ?? "");
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
@@ -89,7 +89,12 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
             {m.role === "phil" ? m.text : <Md text={m.text} />}
           </div>
         ))}
-        {busy && <div className="msg" style={{ color: "var(--muted)" }}><span className="who" style={{ color: "var(--accent)" }}>JARVIS</span>thinking…</div>}
+        {Object.entries(streams).filter(([, v]) => Date.now() - v.at < 120_000).map(([id, v]) => {
+          const a = state?.agents.find((x) => x.id === v.agentId);
+          const c = v.agentId === "jarvis" ? "var(--accent)" : state?.ventures[a?.venture ?? "root"]?.color ?? "var(--accent)";
+          return <div key={id} className="msg" style={{ borderColor: `color-mix(in srgb, ${c} 45%, transparent)`, opacity: 0.85 }}><span className="who" style={{ color: c }}><span>{(a?.name ?? v.agentId).toUpperCase()} · writing</span></span><Md text={v.text} /></div>;
+        })}
+        {busy && Object.keys(streams).length === 0 && <div className="msg" style={{ color: "var(--muted)" }}><span className="who" style={{ color: "var(--accent)" }}>JARVIS</span>thinking…</div>}
       </div>
       <form onSubmit={onSubmit} className="p-3 flex flex-col gap-2 border-t" style={{ borderColor: "var(--line)", background: "rgba(5,12,32,0.7)" }}>
         {!compact && (

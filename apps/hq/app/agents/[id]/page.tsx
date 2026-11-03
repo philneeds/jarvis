@@ -1,0 +1,121 @@
+"use client";
+
+import { use, useEffect, useState } from "react";
+import Link from "next/link";
+import { Shell } from "@/components/Shell";
+import { useLive } from "@/lib/live";
+import { api } from "@/lib/api";
+import type { AgentConfig, ApprovalKind, ModelKey } from "@jarvis/core";
+
+const FIELDS: { key: keyof AgentConfig["persona"]; label: string; hint: string }[] = [
+  { key: "reportsTo", label: "Reports to", hint: "Who this agent answers to, if not the registry default" },
+  { key: "job", label: "Job in one sentence", hint: "" },
+  { key: "daily", label: "What it does daily / on demand", hint: "" },
+  { key: "tools", label: "Tools and accounts it needs", hint: "CRM, calendar, wallets, X account…" },
+  { key: "alone", label: "What it may do alone vs. needs approval", hint: "" },
+  { key: "approval", label: "Approval notes", hint: "Dollar thresholds, who to copy, what never goes out" },
+  { key: "preferredAI", label: "Preferred AI (if any)", hint: "Only a note; the model switch below is what counts" },
+  { key: "good", label: "What \"good\" looks like", hint: "" },
+];
+const KINDS: ApprovalKind[] = ["send", "post", "config", "record", "other"];
+
+export default function AgentSettingsPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const { state, refresh } = useLive();
+  const [cfg, setCfg] = useState<AgentConfig | null>(null);
+  const [toolNames, setToolNames] = useState<string[]>([]);
+  const [saved, setSaved] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const agent = state?.agents.find((a) => a.id === id);
+  const [registryDefault, setRegistryDefault] = useState<ModelKey | undefined>();
+
+  useEffect(() => { api<{ config: AgentConfig; tools: string[]; defaultModel: ModelKey }>(`/api/agents/${id}/config`).then((r) => { setCfg(r.config); setToolNames(r.tools); setRegistryDefault(r.defaultModel); }).catch((e) => setSaved((e as Error).message)); }, [id]);
+
+  const save = async () => {
+    if (!cfg) return;
+    setBusy(true); setSaved(undefined);
+    try {
+      const r = await api<{ config: AgentConfig }>(`/api/agents/${id}/config`, { method: "PUT", body: JSON.stringify(cfg) });
+      setCfg(r.config); setSaved("Saved."); await refresh();
+    } catch (e) { setSaved((e as Error).message); } finally { setBusy(false); }
+  };
+
+  if (!agent || !cfg) return <Shell><div className="p-6" style={{ color: "var(--muted)" }}>{saved ?? "Loading…"}</div></Shell>;
+  const color = state?.ventures[agent.venture]?.color;
+  const sched = cfg.schedule ?? { enabled: false, when: "", task: "" };
+
+  return (
+    <Shell>
+      <div className="max-w-3xl w-full mx-auto p-4 flex flex-col gap-5">
+        <div className="flex flex-wrap items-baseline gap-3">
+          <Link href={`/web?agent=${id}`} className="text-[11px] tracking-[0.14em] uppercase">‹ Agent Web</Link>
+          <h1 className="display font-bold text-3xl m-0" style={{ color: "var(--ink-bright)" }}>{agent.name}</h1>
+          <span className="text-[11px] tracking-[0.14em] uppercase" style={{ color }}>{agent.short} · {state?.ventures[agent.venture]?.label}</span>
+        </div>
+        <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>{agent.desc}</p>
+
+        <section className="card flex flex-col gap-3" aria-label="Persona">
+          <span className="label">Persona · Phil&apos;s template</span>
+          {FIELDS.map((f) => (
+            <label key={f.key} className="flex flex-col gap-1 text-[11px] tracking-[0.12em] uppercase" style={{ color: "var(--muted)" }}>
+              {f.label}
+              <textarea className="input py-2 h-16 normal-case tracking-normal text-[13px]" placeholder={f.hint} value={cfg.persona[f.key] ?? ""} onChange={(e) => setCfg({ ...cfg, persona: { ...cfg.persona, [f.key]: e.target.value } })} />
+            </label>
+          ))}
+        </section>
+
+        <section className="card flex flex-col gap-3" aria-label="Model">
+          <span className="label">Model</span>
+          <select className="input h-10" value={cfg.model || agent.model || registryDefault} onChange={(e) => setCfg({ ...cfg, model: e.target.value as AgentConfig["model"] })} aria-label="Model">
+            {state && Object.values(state.models).filter((m) => m.key !== "web-app").map((m) => <option key={m.key} value={m.key}>{m.label} — {m.why}</option>)}
+          </select>
+          <span className="text-[11px]" style={{ color: "var(--muted)" }}>Registry default: {registryDefault ? state?.models[registryDefault]?.label : "—"}. A swap takes effect on the next run.</span>
+        </section>
+
+        <section className="card flex flex-col gap-3" aria-label="Tools">
+          <span className="label">Tools (read-only, Claude agents)</span>
+          <div className="flex flex-wrap gap-2">
+            {toolNames.map((t) => (
+              <label key={t} className="btn btn-sm cursor-pointer" style={cfg.tools.includes(t) ? { borderColor: "var(--accent)", background: "rgba(60,130,255,0.25)" } : undefined}>
+                <input type="checkbox" className="sr-only" checked={cfg.tools.includes(t)} onChange={(e) => setCfg({ ...cfg, tools: e.target.checked ? [...cfg.tools, t] : cfg.tools.filter((x) => x !== t) })} />
+                {t}
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section className="card flex flex-col gap-3" aria-label="Schedule">
+          <span className="label">Schedule</span>
+          <div className="flex flex-wrap gap-2 items-center">
+            <label className="btn btn-sm cursor-pointer" style={sched.enabled ? { borderColor: "var(--accent)", background: "rgba(60,130,255,0.25)" } : undefined}>
+              <input type="checkbox" className="sr-only" checked={sched.enabled} onChange={(e) => setCfg({ ...cfg, schedule: { ...sched, enabled: e.target.checked } })} />{sched.enabled ? "On" : "Off"}
+            </label>
+            <input className="input h-9 w-40" placeholder="daily@07:00 or every:60" aria-label="When" value={sched.when} onChange={(e) => setCfg({ ...cfg, schedule: { ...sched, when: e.target.value } })} />
+          </div>
+          <textarea className="input py-2 h-16" placeholder="What it does on that timer" aria-label="Scheduled task" value={sched.task} onChange={(e) => setCfg({ ...cfg, schedule: { ...sched, task: e.target.value } })} />
+          <span className="text-[11px]" style={{ color: "var(--muted)" }}>Runs when there is room in the plan; scouts back off at 70%. Built-in schedules are on the Usage screen.</span>
+        </section>
+
+        <section className="card flex flex-col gap-3" aria-label="Approval rules">
+          <span className="label label-amber">Approval rules</span>
+          <span className="text-[12px]">Kinds this agent may do without you. Money and strategies always wait, whatever you tick.</span>
+          <div className="flex flex-wrap gap-2">
+            {KINDS.map((k) => (
+              <label key={k} className="btn btn-sm cursor-pointer" style={cfg.rules.autoApprove.includes(k) ? { borderColor: "var(--amber)", background: "rgba(255,194,102,0.18)" } : undefined}>
+                <input type="checkbox" className="sr-only" checked={cfg.rules.autoApprove.includes(k)} onChange={(e) => setCfg({ ...cfg, rules: { ...cfg.rules, autoApprove: e.target.checked ? [...cfg.rules.autoApprove, k] : cfg.rules.autoApprove.filter((x) => x !== k) } })} />{k}
+              </label>
+            ))}
+          </div>
+          <label className="flex items-center gap-3 text-[11px] tracking-[0.12em] uppercase" style={{ color: "var(--muted)" }}>
+            Auto up to $<input className="input h-9 w-32" type="number" min={0} value={cfg.rules.maxAutoDollars} onChange={(e) => setCfg({ ...cfg, rules: { ...cfg.rules, maxAutoDollars: Number(e.target.value) } })} aria-label="Dollar cap for automatic approval" />
+          </label>
+        </section>
+
+        <div className="flex items-center gap-3">
+          <button className="btn btn-primary" disabled={busy} onClick={save}>Save settings</button>
+          {saved && <span className="text-[12px]" style={{ color: saved === "Saved." ? "var(--green)" : "var(--red)" }}>{saved}</span>}
+        </div>
+      </div>
+    </Shell>
+  );
+}

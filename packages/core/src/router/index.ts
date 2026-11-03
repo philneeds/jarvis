@@ -8,6 +8,7 @@ import { claudeAgentSdkProvider, claudeApiProvider } from "./claude.js";
 import { grokApiProvider, grokCliProvider } from "./grok.js";
 import { mockProvider } from "./mock.js";
 import { ProviderError, type AgentResult, type Provider } from "./types.js";
+import type { ToolContext, ToolDef } from "../tools/index.js";
 
 export * from "./types.js";
 export { claudeProvider, claudeAgentSdkProvider, claudeApiProvider } from "./claude.js";
@@ -29,6 +30,8 @@ export interface RunOptions {
   onDelta?: (delta: string) => void;
   signal?: AbortSignal;
   maxTurns?: number;
+  tools?: ToolDef[];
+  toolContext?: ToolContext;
 }
 
 export interface RunOutcome extends AgentResult {
@@ -70,7 +73,7 @@ export class ModelRouter {
 
   async modelForAgent(agent: AgentDef): Promise<ModelSpec> {
     const st = await this.store.agentState.get(agent.id);
-    const key = (st?.modelOverride as ModelKey | undefined) ?? agent.model;
+    const key = (st?.modelOverride as ModelKey | undefined) || agent.model;
     return MODELS[key] ?? MODELS[agent.model];
   }
 
@@ -119,7 +122,7 @@ export class ModelRouter {
       const avail = await p.available();
       if (!avail.ok) { errors.push(`${p.id}: ${avail.reason}`); continue; }
       try {
-        const res = await p.run({ agent, model, system: opts.system, prompt: opts.prompt, runId, onDelta: opts.onDelta, signal: opts.signal, maxTurns: opts.maxTurns });
+        const res = await p.run({ agent, model, system: opts.system, prompt: opts.prompt, runId, onDelta: opts.onDelta, signal: opts.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext });
         const finishedAt = new Date().toISOString();
         await this.store.runs.update(runId, { status: "done", output: res.text, provider: res.provider, modelId: res.modelId, finishedAt, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd });
         await this.store.usage.add({ id: randomUUID(), at: finishedAt, plan: model.plan, provider: res.provider, agentId: agent.id, modelId: res.modelId, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd, runId });

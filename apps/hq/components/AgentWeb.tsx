@@ -189,6 +189,7 @@ export function AgentWeb({ initial }: { initial?: string }) {
                 <div className="flex gap-2">
                   {a.status === "paused" ? <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => act(() => post(`/api/agents/${a.id}/resume`))}>Resume</button> : <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => act(() => post(`/api/agents/${a.id}/pause`))}>Pause</button>}
                   <Link className="btn btn-sm" href={`/command?say=${encodeURIComponent(`@${a.id} `)}`}>Talk</Link>
+                  <Link className="btn btn-sm" href={`/agents/${a.id}`}>Settings</Link>
                 </div>
                 <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (task.trim()) { const t = task; setTask(""); void act(() => post(`/api/agents/${a.id}/run`, { task: t })); } }}>
                   <input className="input h-9" placeholder={`Give ${a.name} a task`} aria-label={`Give ${a.name} a task`} value={task} onChange={(e) => setTask(e.target.value)} />

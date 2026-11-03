@@ -19,6 +19,10 @@ export function mockProvider(label = "mock"): Provider {
           delegate: mentions.map((id) => ({ agent: id, task: "Give Phil a one-paragraph status in your own voice." })),
         };
         text = JSON.stringify(plan);
+      } else if (req.agent.id === "oscar" && /Condense it/.test(req.prompt)) {
+        const items = [...req.prompt.matchAll(/^- \[([^\]]+)\] ([^:]+): (.*)$/gm)].map((m) => ({ scope: m[1]!, key: m[2]!, value: m[3]! }));
+        const keep = items.filter((_, i) => i % 2 === 0);
+        text = JSON.stringify({ keep, dropped: items.length - keep.length, why: `(${label}) merged duplicates, kept the facts` });
       } else if (req.agent.id === "jarvis" && /Reports back from the agents/.test(req.prompt)) {
         const reports = [...req.prompt.matchAll(/^### (.+?) \(@[\w.-]+\) — task: .*\n([\s\S]*?)(?=\n### |\n\nNow answer Phil)/gm)];
         text = `(${label}) Here's the rundown.\n\n${reports.map((m) => `**${m[1]}** — ${m[2]!.trim().split("\n")[0]!.slice(0, 160)}`).join("\n")}\n\nAnything an agent flagged for approval is waiting in Approvals.`;
