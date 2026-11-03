@@ -2,7 +2,7 @@ import { and, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
 import { createDb, type Db } from "../db/client.js";
 import * as t from "../db/schema.js";
 import type { ActivityEntry, Approval, ChatMessage } from "../events.js";
-import type { AgentStateRow, MemoryItem, RunRecord, Store, UsageRecord } from "./types.js";
+import type { AgentStateRow, MemoryItem, MetricPoint, RecordItem, RunRecord, Store, UsageRecord } from "./types.js";
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : undefined);
 const date = (s: string | undefined) => (s ? new Date(s) : undefined);
@@ -112,8 +112,36 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
         await db.insert(t.settings).values({ key, value, updatedAt: new Date() }).onConflictDoUpdate({ target: t.settings.key, set: { value, updatedAt: new Date() } });
       },
     },
+    metrics: {
+      async add(m) { await db.insert(t.metrics).values({ id: m.id, venture: m.venture, key: m.key, at: new Date(m.at), value: m.value, source: m.source }); },
+      async series(venture, key, limit = 60) {
+        const rows = await db.select().from(t.metrics).where(and(eq(t.metrics.venture, venture), eq(t.metrics.key, key))).orderBy(desc(t.metrics.at)).limit(limit);
+        return rows.reverse().map(toMetric);
+      },
+      async latest(venture) {
+        const rows = await db.select().from(t.metrics).where(eq(t.metrics.venture, venture)).orderBy(desc(t.metrics.at)).limit(2000);
+        const out = new Map<string, MetricPoint>();
+        for (const r of rows) if (!out.has(r.key)) out.set(r.key, toMetric(r));
+        return [...out.values()];
+      },
+    },
+    records: {
+      async upsert(r) {
+        await db.insert(t.records).values({ id: r.id, venture: r.venture, kind: r.kind, title: r.title, status: r.status, fields: r.fields, source: r.source, createdAt: new Date(r.createdAt), updatedAt: new Date(r.updatedAt) })
+          .onConflictDoUpdate({ target: t.records.id, set: { title: r.title, status: r.status, fields: r.fields, source: r.source, updatedAt: new Date(r.updatedAt) } });
+      },
+      async list(venture, kind) {
+        const rows = await db.select().from(t.records).where(kind ? and(eq(t.records.venture, venture), eq(t.records.kind, kind)) : eq(t.records.venture, venture)).orderBy(desc(t.records.updatedAt)).limit(1000);
+        return rows.map(toRecord);
+      },
+      async get(id) { const r = (await db.select().from(t.records).where(eq(t.records.id, id)))[0]; return r ? toRecord(r) : undefined; },
+      async remove(id) { await db.delete(t.records).where(eq(t.records.id, id)); },
+    },
   };
 }
+
+const toMetric = (r: typeof t.metrics.$inferSelect): MetricPoint => ({ id: r.id, venture: r.venture, key: r.key, at: r.at.toISOString(), value: r.value, source: r.source ?? undefined });
+const toRecord = (r: typeof t.records.$inferSelect): RecordItem => ({ id: r.id, venture: r.venture, kind: r.kind, title: r.title, status: r.status, fields: r.fields ?? {}, source: r.source ?? undefined, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString() });
 
 const toApproval = (r: typeof t.approvals.$inferSelect): Approval => ({ id: r.id, at: r.at.toISOString(), agentId: r.agentId, kind: r.kind as Approval["kind"], title: r.title, body: r.body, payload: r.payload ?? undefined, status: r.status as Approval["status"], decidedAt: iso(r.decidedAt), note: r.note ?? undefined, runId: r.runId ?? undefined });
 const toMemory = (r: typeof t.memory.$inferSelect): MemoryItem => ({ scope: r.scope, key: r.key, value: r.value, source: r.source ?? undefined, updatedAt: r.updatedAt.toISOString() });

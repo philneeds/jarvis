@@ -14,6 +14,8 @@ interface Live {
   activity: ActivityEntry[];
   /** Agents mid-reply: partial text by run. */
   streams: Record<string, { agentId: string; text: string; at: number }>;
+  /** Bumps whenever a venture's numbers or board change. */
+  ventureTick: number;
   refresh: () => Promise<void>;
   setMessages: (fn: (m: ChatMessage[]) => ChatMessage[]) => void;
   setPending: (fn: (a: Approval[]) => Approval[]) => void;
@@ -29,6 +31,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [pending, setPendingState] = useState<Approval[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [streams, setStreams] = useState<Record<string, { agentId: string; text: string; at: number }>>({});
+  const [ventureTick, setVentureTick] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const [wsGen, setWsGen] = useState(0);
 
@@ -95,6 +98,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           case "system":
             setState((s) => s && { ...s, status: e.status });
             break;
+          case "venture":
+            setVentureTick((n) => n + 1);
+            break;
         }
       };
     };
@@ -104,10 +110,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [wsGen]);
 
   const value = useMemo<Live>(() => ({
-    state, connected, error, messages, pending, activity, streams, refresh,
+    state, connected, error, messages, pending, activity, streams, ventureTick, refresh,
     setMessages: (fn) => setMessagesState(fn),
     setPending: (fn) => setPendingState(fn),
-  }), [state, connected, error, messages, pending, activity, streams, refresh]);
+  }), [state, connected, error, messages, pending, activity, streams, ventureTick, refresh]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

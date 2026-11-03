@@ -49,6 +49,9 @@ export interface AgentStateRow {
   detail?: string;
 }
 
+export interface MetricPoint { id: string; venture: string; key: string; at: string; value: number; source?: string }
+export interface RecordItem { id: string; venture: string; kind: string; title: string; status: string; fields: Record<string, unknown>; source?: string; createdAt: string; updatedAt: string }
+
 export interface Store {
   kind: "memory" | "postgres";
   init(): Promise<void>;
@@ -90,5 +93,16 @@ export interface Store {
   settings: {
     get<T>(key: string, fallback: T): Promise<T>;
     set(key: string, value: unknown): Promise<void>;
+  };
+  metrics: {
+    add(m: MetricPoint): Promise<void>;
+    series(venture: string, key: string, limit?: number): Promise<MetricPoint[]>;
+    latest(venture: string): Promise<MetricPoint[]>;
+  };
+  records: {
+    upsert(r: RecordItem): Promise<void>;
+    list(venture: string, kind?: string): Promise<RecordItem[]>;
+    get(id: string): Promise<RecordItem | undefined>;
+    remove(id: string): Promise<void>;
   };
 }

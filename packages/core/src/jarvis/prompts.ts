@@ -3,6 +3,7 @@ import { AGENT_BY_ID, children, rosterText, type AgentDef } from "../registry/in
 import type { MemoryItem } from "../store/types.js";
 import { personaText, type Persona } from "../config.js";
 import { toolsText, type ToolDef } from "../tools/index.js";
+import { VENTURE_DASH } from "../ventures/dashboards.js";
 
 export const SAFETY_RULES = `Safety and permissions (always on):
 - You have the least access your job needs. Nothing that moves money, posts publicly, messages a customer, changes a record over the set dollar amount, or installs tools goes out without Phil's OK.
@@ -30,6 +31,7 @@ export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona
     tools.length ? `Tools you can call (read-only):\n${toolsText(tools)}` : "",
     `You answer Jarvis or Phil directly, in your own voice, briefly, with a clear recommendation. Lead with the answer.`,
     `Anything worth remembering about Phil, a venture or a contact goes in a fenced block tagged "remember" with JSON: {"scope":"phil|venture:${agent.venture}|contact:<name>","key":"...","value":"..."}.`,
+    dashboardHint(agent.venture),
     SAFETY_RULES,
     `What the web knows:\n${memoryText(memory)}`,
   ].filter(Boolean).join("\n\n");
@@ -86,4 +88,14 @@ export function condensePrompt(items: MemoryItem[]): string {
     items.map((m) => `- [${m.scope}] ${m.key}: ${m.value}`).join("\n"),
     `Condense it: merge duplicates, drop the stale and the trivial, keep every fact that still matters (names, numbers, dates, preferences, decisions). Keep scopes as they are. Respond with JSON only: {"keep":[{"scope":"...","key":"...","value":"..."}],"dropped":<count>,"why":"<one line>"}`,
   ].join("\n\n");
+}
+
+/** How an agent feeds its venture's dashboard. */
+export function dashboardHint(venture: keyof typeof VENTURE_DASH): string {
+  const d = VENTURE_DASH[venture];
+  if (!d || (!d.metrics.length && !d.records.length)) return "";
+  const parts: string[] = [];
+  if (d.metrics.length) parts.push(`A number for the ${venture} dashboard goes in a fenced block tagged "metric": {"venture":"${venture}","key":"<${d.metrics.map((m) => m.key).join("|")}>","value":<number>}.`);
+  if (d.records.length) parts.push(`A tracker item goes in a fenced block tagged "record": {"venture":"${venture}","kind":"<${d.records.map((r) => r.kind).join("|")}>","title":"...","status":"<${[...new Set(d.records.flatMap((r) => r.statuses))].join("|")}>","fields":{...}}; include "id" to update one you saw before.`);
+  return parts.join(" ");
 }

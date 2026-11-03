@@ -24,7 +24,7 @@ export default function HomePage() {
     try { setOn(localStorage.getItem("hq.display") !== "off"); setSince(localStorage.getItem("hq.lastSeen") ?? undefined); } catch { /* ignore */ }
     const mark = () => { try { localStorage.setItem("hq.lastSeen", new Date().toISOString()); } catch { /* ignore */ } };
     window.addEventListener("pagehide", mark);
-    api<{ items: { key: string; value: string }[] }>("/api/memory?scope=venture:money").then((r) => setMoney(r.items.filter((i) => /net.worth|cash|strateg/i.test(i.key)).slice(0, 3))).catch(() => undefined);
+    api<{ metrics: { key: string; label: string; unit?: string; latest?: number }[] }>("/api/ventures/money").then((r) => setMoney(r.metrics.filter((m) => m.latest !== undefined).slice(0, 3).map((m) => ({ key: m.label, value: m.unit === "$" ? `$${m.latest!.toLocaleString("en-US", { maximumFractionDigits: 0 })}` : String(m.latest) })))).catch(() => undefined);
     api<{ items: { key: string; value: string }[] }>("/api/memory?scope=agent:joi").then((r) => setVisual(r.items.find((i) => i.key.startsWith("visual")) ?? null)).catch(() => undefined);
     return () => window.removeEventListener("pagehide", mark);
   }, []);
@@ -97,8 +97,8 @@ export default function HomePage() {
                 </section>
                 <section aria-label="Money pulse" className="flex flex-col gap-2">
                   <span className="label" style={{ color: "var(--gold)" }}>❬ Money pulse · Munger</span>
-                  {money.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Munger goes live in Phase 2. Until then: @munger for a read.</span>}
-                  {money.map((m) => <div key={m.key} className="flex justify-between text-[12px]"><span style={{ color: "var(--muted)" }}>{m.key.replace(/[-_.]/g, " ").toUpperCase()}</span><span style={{ color: "var(--ink-bright)" }}>{m.value}</span></div>)}
+                  {money.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>No numbers yet. Add net worth and cash on the <Link href="/ventures/money" style={{ color: "var(--gold)" }}>Money page</Link>, or Munger will in Phase 2.</span>}
+                  {money.map((m) => <Link key={m.key} href="/ventures/money" className="flex justify-between text-[12px]"><span style={{ color: "var(--muted)" }}>{m.key.toUpperCase()}</span><span style={{ color: "var(--ink-bright)" }}>{m.value}</span></Link>)}
                   <span className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>Mayne · {state?.status.killSwitch.trading ? "trading paused" : "all limits ok"}</span>
                 </section>
                 <section aria-label="Visuals from Joi" className="flex flex-col gap-2">

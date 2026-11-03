@@ -15,6 +15,7 @@ const TABS = [
   { href: "/usage", label: "Usage" },
 ];
 const MORE = [
+  { href: "/ventures", label: "Ventures" },
   { href: "/brief", label: "Daily brief" },
   { href: "/memory", label: "Memory" },
   { href: "/settings", label: "Settings" },
@@ -50,7 +51,7 @@ export function Shell({ children, bare }: { children: React.ReactNode; bare?: bo
           <span className="hidden md:inline text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>{state?.status.text ?? "connecting"} · phase {state?.status.phase ?? "-"}</span>
           <nav className="tabs ml-auto hidden md:flex" style={{ maxWidth: 900, flex: 1 }} aria-label="HQ screens">
             {[...TABS, ...MORE].map((t) => (
-              <Link key={t.href} href={t.href} aria-current={path === t.href || (t.href === "/web" && path.startsWith("/agents")) ? "page" : undefined}>
+              <Link key={t.href} href={t.href} aria-current={path === t.href || (t.href === "/web" && path.startsWith("/agents")) || (t.href === "/ventures" && path.startsWith("/ventures/")) ? "page" : undefined}>
                 {t.label.replace("Daily ", "")}
                 {t.href === "/approvals" && pending.length > 0 && <span className="badge">{pending.length}</span>}
               </Link>

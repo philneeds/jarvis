@@ -2,14 +2,18 @@ import type { ApprovalKind } from "../events.js";
 
 export interface ApprovalBlock { kind: ApprovalKind; title: string; body: string; payload?: Record<string, unknown> }
 export interface RememberBlock { scope: string; key: string; value: string }
+export interface MetricBlock { venture: string; key: string; value: number; at?: string }
+export interface RecordBlock { venture: string; kind: string; id?: string; title: string; status?: string; fields?: Record<string, unknown> }
 
 const KINDS: ApprovalKind[] = ["send", "post", "money", "strategy", "config", "record", "other"];
 
 /** Pull fenced ```approval and ```remember JSON blocks out of an agent's reply. */
-export function extractBlocks(text: string): { text: string; approvals: ApprovalBlock[]; remember: RememberBlock[] } {
+export function extractBlocks(text: string): { text: string; approvals: ApprovalBlock[]; remember: RememberBlock[]; metrics: MetricBlock[]; records: RecordBlock[] } {
   const approvals: ApprovalBlock[] = [];
   const remember: RememberBlock[] = [];
-  const re = /```(approval|remember)\s*\n([\s\S]*?)```/g;
+  const metrics: MetricBlock[] = [];
+  const records: RecordBlock[] = [];
+  const re = /```(approval|remember|metric|record)\s*\n([\s\S]*?)```/g;
   const cleaned = text.replace(re, (_m, tag: string, body: string) => {
     let parsed: unknown;
     try { parsed = JSON.parse(body.trim()); } catch { return _m; }
@@ -22,6 +26,22 @@ export function extractBlocks(text: string): { text: string; approvals: Approval
       }
       return approvals.length ? `[Approval queued: ${approvals[approvals.length - 1]!.title}]` : _m;
     }
+    if (tag === "metric") {
+      for (const it of items) {
+        const o = it as Partial<MetricBlock>;
+        if (!o || typeof o !== "object" || !o.venture || !o.key || typeof o.value !== "number" || !Number.isFinite(o.value)) continue;
+        metrics.push({ venture: String(o.venture), key: String(o.key), value: o.value, at: o.at ? String(o.at) : undefined });
+      }
+      return "";
+    }
+    if (tag === "record") {
+      for (const it of items) {
+        const o = it as Partial<RecordBlock>;
+        if (!o || typeof o !== "object" || !o.venture || !o.kind || !o.title) continue;
+        records.push({ venture: String(o.venture), kind: String(o.kind), id: o.id ? String(o.id) : undefined, title: String(o.title), status: o.status ? String(o.status) : undefined, fields: o.fields && typeof o.fields === "object" ? (o.fields as Record<string, unknown>) : undefined });
+      }
+      return "";
+    }
     for (const it of items) {
       const o = it as Partial<RememberBlock>;
       if (!o || typeof o !== "object" || !o.key || o.value === undefined) continue;
@@ -29,7 +49,7 @@ export function extractBlocks(text: string): { text: string; approvals: Approval
     }
     return "";
   });
-  return { text: cleaned.replace(/\n{3,}/g, "\n\n").trim(), approvals, remember };
+  return { text: cleaned.replace(/\n{3,}/g, "\n\n").trim(), approvals, remember, metrics, records };
 }
 
 /** Parse Jarvis's plan JSON, tolerating fences and stray prose around it. */

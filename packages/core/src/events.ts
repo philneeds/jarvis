@@ -10,7 +10,8 @@ export type JarvisEvent =
   | { type: "approval.decided"; approval: Approval }
   | { type: "activity"; entry: ActivityEntry }
   | { type: "usage"; usage: UsageSummary }
-  | { type: "system"; status: SystemStatus };
+  | { type: "system"; status: SystemStatus }
+  | { type: "venture"; venture: string };
 
 export interface ChatMessage {
   id: string;

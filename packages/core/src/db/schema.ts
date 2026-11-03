@@ -89,3 +89,24 @@ export const settings = pgTable("settings", {
   value: jsonb("value").$type<unknown>().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const metrics = pgTable("metrics", {
+  id: text("id").primaryKey(),
+  venture: text("venture").notNull(),
+  key: text("key").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  value: real("value").notNull(),
+  source: text("source"),
+}, (t) => [index("metrics_vk_idx").on(t.venture, t.key, t.at)]);
+
+export const records = pgTable("records", {
+  id: text("id").primaryKey(),
+  venture: text("venture").notNull(),
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  status: text("status").notNull(),
+  fields: jsonb("fields").$type<Record<string, unknown>>(),
+  source: text("source"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("records_vk_idx").on(t.venture, t.kind)]);

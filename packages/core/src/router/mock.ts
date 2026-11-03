@@ -33,6 +33,10 @@ export function mockProvider(label = "mock"): Provider {
         if (/\b(send|email|post|tweet|transfer|trade|invoice)\b/i.test(req.prompt)) {
           text += `\n\nDraft is ready; it needs your OK.\n\n\`\`\`approval\n${JSON.stringify({ kind: /transfer|trade/i.test(req.prompt) ? "money" : /post|tweet/i.test(req.prompt) ? "post" : "send", title: `${req.agent.name}: ${req.prompt.replace(/^.*?asks:\s*/s, "").slice(0, 60)}`, body: `(${label}) This is what would go out, word for word. Edit it here or approve as is.`, payload: { from: req.agent.id } })}\n\`\`\``;
         }
+        if (/\blog (a )?lead\b/i.test(req.prompt) && req.agent.venture === "jdpm") {
+          const who = req.prompt.match(/lead\s+(?:for|from)?\s*([A-Z][\w']+(?: [A-Z][\w']+)?)/)?.[1] ?? "New lead";
+          text += `\n\n\`\`\`record\n${JSON.stringify({ venture: "jdpm", kind: "lead", title: who, status: "new", fields: { source: "referral", value: 4200 } })}\n\`\`\`\n\`\`\`metric\n${JSON.stringify({ venture: "jdpm", key: "leads_week", value: 1 + Math.floor(Math.random() * 5) })}\n\`\`\``;
+        }
         if (/remember|note that/i.test(req.prompt)) {
           text += `\n\n\`\`\`remember\n${JSON.stringify({ scope: `venture:${req.agent.venture}`, key: "note-" + Date.now().toString(36), value: req.prompt.replace(/^.*?asks:\s*/s, "").slice(0, 120) })}\n\`\`\``;
         }

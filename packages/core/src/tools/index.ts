@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Store } from "../store/types.js";
 import { AGENTS, getAgent } from "../registry/index.js";
+import { VENTURE_DASH } from "../ventures/dashboards.js";
 
 /**
  * Tools agents can call. Provider-neutral: the Claude provider exposes them as an in-process MCP server
@@ -54,6 +55,22 @@ export function buildTools(): ToolDef[] {
       async handler({ agent, limit }, { store }) {
         const rows = await store.activity.list({ agentId: agent, limit: limit ?? 15 });
         return rows.length ? rows.map((r) => `${r.at.slice(0, 16)} ${r.summary}`).join("\n") : "Nothing logged yet.";
+      },
+    }),
+    defineTool({
+      name: "venture_board",
+      description: "A venture's dashboard: latest metrics and tracker records (leads, jobs, holdings, strategies, posts...). Read it before adding or updating anything.",
+      schema: { venture: z.string().describe("jdpm | proedge | range | philneeds | acres | crypto | money | lab | personal | command"), kind: z.string().optional().describe("one record kind only") },
+      async handler({ venture, kind }, { store }) {
+        const d = VENTURE_DASH[venture as keyof typeof VENTURE_DASH];
+        if (!d) return "No such venture.";
+        const latest = await store.metrics.latest(venture);
+        const lines = [`Metrics: ${d.metrics.map((m) => `${m.key}=${latest.find((l) => l.key === m.key)?.value ?? "—"}`).join(", ") || "none"}`];
+        for (const k of d.records.filter((r) => !kind || r.kind === kind)) {
+          const items = await store.records.list(venture, k.kind);
+          lines.push(`${k.label} (${items.length}):` + (items.length ? "\n" + items.slice(0, 40).map((i) => `  [${i.id}] ${i.title} · ${i.status}${Object.keys(i.fields).length ? " · " + JSON.stringify(i.fields) : ""}`).join("\n") : " none"));
+        }
+        return lines.join("\n");
       },
     }),
     defineTool({

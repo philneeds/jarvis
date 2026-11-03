@@ -1,6 +1,6 @@
-import type { AgentDef, Venture, VentureId, ModelSpec, ModelKey, SystemStatus, UsageSummary, ChatMessage, Approval, ActivityEntry, Schedule } from "@jarvis/core";
+import type { AgentDef, Venture, VentureId, ModelSpec, ModelKey, SystemStatus, UsageSummary, ChatMessage, Approval, ActivityEntry, Schedule, MetricDef, RecordKindDef } from "@jarvis/core";
 
-export type { AgentDef, Venture, VentureId, ModelSpec, ModelKey, SystemStatus, UsageSummary, ChatMessage, Approval, ActivityEntry, Schedule };
+export type { AgentDef, Venture, VentureId, ModelSpec, ModelKey, SystemStatus, UsageSummary, ChatMessage, Approval, ActivityEntry, Schedule, MetricDef, RecordKindDef };
 
 export type AgentLive = AgentDef & {
   live: boolean;

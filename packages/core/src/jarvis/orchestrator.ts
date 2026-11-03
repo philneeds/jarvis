@@ -7,6 +7,8 @@ import { usageSummary } from "../usage/caps.js";
 import { extractBlocks, parsePlan } from "./blocks.js";
 import { agentSystemPrompt, briefPrompt, condensePrompt, jarvisSystemPrompt, planPrompt, synthesisPrompt } from "./prompts.js";
 import { getAgentConfig } from "../config.js";
+import { VENTURES, type VentureId } from "../registry/ventures.js";
+import { VENTURE_DASH, recordKind } from "../ventures/dashboards.js";
 import { TOOLS } from "../tools/index.js";
 
 export interface JarvisOptions {
@@ -142,17 +144,79 @@ export class Jarvis {
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
     const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id) });
     if (r.blocked) return r;
-    const { text, approvals, remember } = extractBlocks(r.text);
-    await this.absorb(agent, approvals, remember, r.runId);
+    const { text, approvals, remember, metrics, records } = extractBlocks(r.text);
+    await this.absorb(agent, approvals, remember, r.runId, metrics, records);
     return { ...r, text };
   }
 
-  private async absorb(agent: AgentDef, approvals: ReturnType<typeof extractBlocks>["approvals"], remember: ReturnType<typeof extractBlocks>["remember"], runId?: string) {
+  private async absorb(agent: AgentDef, approvals: ReturnType<typeof extractBlocks>["approvals"], remember: ReturnType<typeof extractBlocks>["remember"], runId?: string, metrics: ReturnType<typeof extractBlocks>["metrics"] = [], records: ReturnType<typeof extractBlocks>["records"] = []) {
     for (const a of approvals) await this.requestApproval({ agentId: agent.id, ...a, runId });
     for (const m of remember) {
       await this.store.memory.set({ scope: m.scope, key: m.key, value: m.value, source: agent.id });
       await this.router.log(agent.id, "memory", `${agent.name} remembered [${m.scope}] ${m.key}`, runId, { value: m.value });
     }
+    for (const m of metrics) await this.recordMetric(m.venture as VentureId, m.key, m.value, agent.id, m.at, runId);
+    for (const r of records) await this.upsertRecord({ venture: r.venture as VentureId, kind: r.kind, id: r.id, title: r.title, status: r.status, fields: r.fields, source: agent.id }, runId);
+  }
+
+  // ---- Venture dashboards -------------------------------------------------------
+
+  async recordMetric(venture: VentureId, key: string, value: number, source: string, at?: string, runId?: string) {
+    if (!VENTURES[venture]) throw new Error(`no such venture: ${venture}`);
+    const point = { id: randomUUID(), venture, key, value, at: at && !Number.isNaN(Date.parse(at)) ? new Date(at).toISOString() : new Date().toISOString(), source };
+    await this.store.metrics.add(point);
+    await this.router.log(source === "phil" ? "jarvis" : source, "memory", `${VENTURES[venture].short} · ${key} = ${value}${source === "phil" ? " (Phil)" : ""}`, runId, { venture, key, value });
+    bus.emitEvent({ type: "venture", venture });
+    return point;
+  }
+
+  async upsertRecord(r: { venture: VentureId; kind: string; id?: string; title: string; status?: string; fields?: Record<string, unknown>; source: string }, runId?: string) {
+    if (!VENTURES[r.venture]) throw new Error(`no such venture: ${r.venture}`);
+    const def = recordKind(r.venture, r.kind);
+    if (!def) throw new Error(`${VENTURES[r.venture].label} has no record kind "${r.kind}" (has: ${VENTURE_DASH[r.venture].records.map((k) => k.kind).join(", ") || "none"})`);
+    const existing = r.id ? await this.store.records.get(r.id) : undefined;
+    const now = new Date().toISOString();
+    const status = r.status && def.statuses.includes(r.status) ? r.status : existing?.status ?? def.statuses[0]!;
+    const item = { id: existing?.id ?? r.id ?? randomUUID(), venture: r.venture, kind: r.kind, title: r.title || existing?.title || "(untitled)", status, fields: { ...(existing?.fields ?? {}), ...(r.fields ?? {}) }, source: r.source, createdAt: existing?.createdAt ?? now, updatedAt: now };
+    await this.store.records.upsert(item);
+    await this.router.log(r.source === "phil" ? "jarvis" : r.source, "memory", `${VENTURES[r.venture].short} · ${def.label.split(" (")[0]}: ${item.title} → ${status}${r.source === "phil" ? " (Phil)" : ""}`, runId, { venture: r.venture, kind: r.kind, id: item.id });
+    bus.emitEvent({ type: "venture", venture: r.venture });
+    return item;
+  }
+
+  /** Everything one venture page needs. */
+  async ventureDashboard(venture: VentureId) {
+    const v = VENTURES[venture];
+    const dash = VENTURE_DASH[venture];
+    const agents = (await this.snapshot()).filter((a) => a.venture === venture || a.serves?.includes(venture));
+    const ids = new Set(agents.map((a) => a.id));
+    const metrics = await Promise.all(dash.metrics.map(async (m) => {
+      const series = await this.store.metrics.series(venture, m.key, 60);
+      const latest = series[series.length - 1];
+      const prev = series.length > 1 ? series[series.length - 2] : undefined;
+      return { ...m, series: series.map((p) => ({ at: p.at, value: p.value })), latest: latest?.value, at: latest?.at, delta: latest && prev ? latest.value - prev.value : undefined };
+    }));
+    const records = await Promise.all(dash.records.map(async (k) => ({ ...k, items: await this.store.records.list(venture, k.kind) })));
+    const pending = (await this.store.approvals.list("pending")).filter((a) => ids.has(a.agentId));
+    const activity = (await this.store.activity.list({ limit: 300 })).filter((e) => ids.has(e.agentId)).slice(0, 25);
+    return { venture: v, blurb: dash.blurb, agents, metrics, records, pending, activity };
+  }
+
+  /** One card per venture for the overview. */
+  async ventureSummaries() {
+    const snap = await this.snapshot();
+    const pending = await this.store.approvals.list("pending");
+    return Promise.all((Object.keys(VENTURES) as VentureId[]).filter((id) => id !== "root").map(async (id) => {
+      const agents = snap.filter((a) => a.venture === id);
+      const ids = new Set(agents.map((a) => a.id));
+      const latest = await this.store.metrics.latest(id);
+      const dash = VENTURE_DASH[id];
+      const headline = dash.metrics.slice(0, 2).map((m) => ({ ...m, latest: latest.find((l) => l.key === m.key)?.value }));
+      const counts: Record<string, number> = {};
+      for (const k of dash.records) counts[k.kind] = (await this.store.records.list(id, k.kind)).length;
+      const status = agents.some((a) => a.status === "error") ? "error" : agents.some((a) => a.status === "waiting") || pending.some((p) => ids.has(p.agentId)) ? "waiting" : agents.some((a) => a.status === "working") ? "working" : agents.some((a) => a.live) ? "idle" : "dormant";
+      return { venture: VENTURES[id], lead: agents.find((a) => a.id === VENTURES[id].lead), agents: agents.length, live: agents.filter((a) => a.live).length, status, pending: pending.filter((p) => ids.has(p.agentId)).length, headline, counts };
+    }));
   }
 
   /** Live text deltas for HQ while an agent is still writing. */

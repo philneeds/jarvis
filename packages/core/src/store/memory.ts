@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ActivityEntry, Approval, ChatMessage } from "../events.js";
-import type { AgentStateRow, MemoryItem, RunRecord, Store, UsageRecord } from "./types.js";
+import type { AgentStateRow, MemoryItem, MetricPoint, RecordItem, RunRecord, Store, UsageRecord } from "./types.js";
 
 interface Snapshot {
   chat: ChatMessage[];
@@ -12,6 +12,8 @@ interface Snapshot {
   memory: MemoryItem[];
   agentState: AgentStateRow[];
   settings: Record<string, unknown>;
+  metrics: MetricPoint[];
+  records: RecordItem[];
 }
 
 /**
@@ -19,7 +21,7 @@ interface Snapshot {
  * Postgres is the real thing.
  */
 export function memoryStore(file?: string): Store {
-  const s: Snapshot = { chat: [], runs: [], activity: [], approvals: [], usage: [], memory: [], agentState: [], settings: {} };
+  const s: Snapshot = { chat: [], runs: [], activity: [], approvals: [], usage: [], memory: [], agentState: [], settings: {}, metrics: [], records: [] };
   let saveTimer: NodeJS.Timeout | undefined;
   const save = () => {
     if (!file) return;
@@ -35,6 +37,7 @@ export function memoryStore(file?: string): Store {
     async init() {
       if (file && fs.existsSync(file)) {
         try { Object.assign(s, JSON.parse(fs.readFileSync(file, "utf8"))); } catch { /* start fresh */ }
+        s.metrics ??= []; s.records ??= [];
       }
     },
     async close() { clearTimeout(saveTimer); if (file) fs.writeFileSync(file, JSON.stringify(s)); },
@@ -93,5 +96,22 @@ export function memoryStore(file?: string): Store {
       async get(key, fallback) { return (key in s.settings ? s.settings[key] : fallback) as typeof fallback; },
       async set(key, value) { s.settings[key] = value; save(); },
     },
+    metrics: {
+      async add(m) { s.metrics.push(m); if (s.metrics.length > 100000) s.metrics.splice(0, s.metrics.length - 100000); save(); },
+      async series(venture, key, limit = 60) { return s.metrics.filter((m) => m.venture === venture && m.key === key).sort((a, b) => (a.at < b.at ? -1 : 1)).slice(-limit); },
+      async latest(venture) {
+        const out = new Map<string, MetricPoint>();
+        for (const m of s.metrics.filter((x) => x.venture === venture).sort((a, b) => (a.at < b.at ? -1 : 1))) out.set(m.key, m);
+        return [...out.values()];
+      },
+    },
+    records: {
+      async upsert(r) { const i = s.records.findIndex((x) => x.id === r.id); if (i >= 0) s.records[i] = r; else s.records.push(r); save(); },
+      async list(venture, kind) { return s.records.filter((r) => r.venture === venture && (!kind || r.kind === kind)).sort(byAtDesc2); },
+      async get(id) { return s.records.find((r) => r.id === id); },
+      async remove(id) { const i = s.records.findIndex((r) => r.id === id); if (i >= 0) s.records.splice(i, 1); save(); },
+    },
   };
 }
+
+const byAtDesc2 = (a: { updatedAt: string }, b: { updatedAt: string }) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0);

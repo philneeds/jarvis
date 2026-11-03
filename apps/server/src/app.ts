@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { AGENTS, VENTURES, MODELS, SCHEDULES, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type GoogleConnector, type Jarvis, type TradingGuard, type XConnector } from "@jarvis/core";
+import { AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
 
@@ -158,6 +158,39 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   });
 
   api.get("/roster", (c) => c.json({ agents: AGENTS, ventures: VENTURES, models: MODELS }));
+
+  // ---- Venture dashboards -----------------------------------------------------------
+  const ventureId = (raw: string): VentureId | undefined => (raw in VENTURE_DASH && raw !== "root" ? (raw as VentureId) : undefined);
+  api.get("/ventures", async (c) => c.json({ ventures: await jarvis.ventureSummaries() }));
+  api.get("/ventures/:id", async (c) => {
+    const v = ventureId(c.req.param("id"));
+    if (!v) return c.json({ error: "no such venture" }, 404);
+    return c.json(await jarvis.ventureDashboard(v));
+  });
+  api.post("/ventures/:id/metrics", async (c) => {
+    const v = ventureId(c.req.param("id"));
+    if (!v) return c.json({ error: "no such venture" }, 404);
+    const p = z.object({ key: z.string().min(1), value: z.number().finite(), at: z.string().optional() }).safeParse(await c.req.json().catch(() => ({})));
+    if (!p.success) return c.json({ error: "key and numeric value required" }, 400);
+    if (!VENTURE_DASH[v].metrics.some((m) => m.key === p.data.key)) return c.json({ error: `unknown metric; one of ${VENTURE_DASH[v].metrics.map((m) => m.key).join(", ")}` }, 400);
+    return c.json({ point: await jarvis.recordMetric(v, p.data.key, p.data.value, "phil", p.data.at) });
+  });
+  api.put("/ventures/:id/records", async (c) => {
+    const v = ventureId(c.req.param("id"));
+    if (!v) return c.json({ error: "no such venture" }, 404);
+    const p = z.object({ kind: z.string().min(1), id: z.string().optional(), title: z.string().min(1).max(300), status: z.string().optional(), fields: z.record(z.string(), z.unknown()).optional() }).safeParse(await c.req.json().catch(() => ({})));
+    if (!p.success) return c.json({ error: "kind and title required" }, 400);
+    try { return c.json({ record: await jarvis.upsertRecord({ venture: v, ...p.data, source: "phil" }) }); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
+  api.delete("/ventures/:id/records/:rid", async (c) => {
+    const v = ventureId(c.req.param("id"));
+    if (!v) return c.json({ error: "no such venture" }, 404);
+    const r = await jarvis.store.records.get(c.req.param("rid"));
+    if (!r || r.venture !== v) return c.json({ error: "not found" }, 404);
+    await jarvis.store.records.remove(r.id);
+    await jarvis.router.log("jarvis", "memory", `${VENTURES[v].short} · removed ${r.kind}: ${r.title} (Phil)`);
+    return c.json({ ok: true });
+  });
 
   // ---- Connectors -----------------------------------------------------------
   const oauthStates = new Set<string>();

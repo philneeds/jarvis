@@ -82,3 +82,19 @@ test("Mayne's limits over the API", async () => {
   await call("/api/kill", { method: "POST", cookie, body: JSON.stringify({ scope: "trading", paused: false }) });
   assert.equal(((await (await call("/api/trading", { cookie })).json()) as { ledger: { stoppedAt?: string } }).ledger.stoppedAt, undefined);
 });
+
+test("venture dashboards over the API", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const all = (await (await call("/api/ventures", { cookie })).json()) as { ventures: { venture: { id: string } }[] };
+  assert.ok(all.ventures.some((v) => v.venture.id === "jdpm"));
+  assert.equal((await call("/api/ventures/jdpm/metrics", { method: "POST", cookie, body: JSON.stringify({ key: "nope", value: 1 }) })).status, 400);
+  assert.equal((await call("/api/ventures/jdpm/metrics", { method: "POST", cookie, body: JSON.stringify({ key: "leads_week", value: 6 }) })).status, 200);
+  const rec = (await (await call("/api/ventures/jdpm/records", { method: "PUT", cookie, body: JSON.stringify({ kind: "lead", title: "Dana Smith", status: "quoted", fields: { value: 4200 } }) })).json()) as { record: { id: string; status: string } };
+  assert.equal(rec.record.status, "quoted");
+  const d = (await (await call("/api/ventures/jdpm", { cookie })).json()) as { metrics: { key: string; latest?: number }[]; records: { kind: string; items: unknown[] }[] };
+  assert.equal(d.metrics.find((m) => m.key === "leads_week")!.latest, 6);
+  assert.equal(d.records.find((k) => k.kind === "lead")!.items.length, 1);
+  assert.equal((await call(`/api/ventures/jdpm/records/${rec.record.id}`, { method: "DELETE", cookie })).status, 200);
+  assert.equal((await call("/api/ventures/root", { cookie })).status, 404);
+});

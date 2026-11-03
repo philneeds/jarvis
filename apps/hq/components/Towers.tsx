@@ -13,7 +13,7 @@ export function Towers() {
   const team = (id: string) => state.agents.filter((a) => { let p = a.parent; while (p) { if (p === id) return true; p = state.agents.find((x) => x.id === p)?.parent; } return false; });
   return (
     <section aria-label="Your 12 leads" className="flex flex-col gap-2">
-      <span className="label">Towers · your 12 leads ❭</span>
+      <span className="label">Towers · your 12 leads · tap to enter ❭</span>
       <div className="towers">
         {leads.map((l) => {
           const crew = team(l.id);
@@ -22,7 +22,7 @@ export function Towers() {
           const st = err ? "error" : needs ? "waiting" : l.status;
           const lit = needs || err;
           return (
-            <Link key={l.id} href={`/web?agent=${l.id}`} className={`tower ${lit ? "lit" : ""}`} style={{ "--c": ST[st] ?? ST.idle, height: 54 + crew.length * 8 } as React.CSSProperties} aria-label={`${l.name}, team of ${crew.length}, ${st}`} title={`${l.name} · ${st}`}>
+            <Link key={l.id} href={`/ventures/${l.venture}`} className={`tower ${lit ? "lit" : ""}`} style={{ "--c": ST[st] ?? ST.idle, height: 54 + crew.length * 8 } as React.CSSProperties} aria-label={`${l.name}, team of ${crew.length}, ${st}`} title={`${l.name} · ${st}`}>
               <span>{l.name.split(" ").pop()?.toUpperCase()}</span>
             </Link>
           );
