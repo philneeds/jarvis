@@ -2,6 +2,9 @@
 # Jarvis one-shot server setup for a fresh Ubuntu 22.04/24.04 box. Run as root:
 #   curl -fsSL https://raw.githubusercontent.com/philneeds/jarvis/<branch>/deploy/setup.sh | \
 #     DOMAIN=hq.example.com HQ_PASSWORD='choose-a-long-one' BRANCH=<branch> bash
+# Private repo: create a fine-grained GitHub token with read-only Contents on the repo, then
+#   curl -fsSL -H "Authorization: token <TOKEN>" https://raw.githubusercontent.com/philneeds/jarvis/<branch>/deploy/setup.sh | \
+#     DOMAIN=... HQ_PASSWORD='...' BRANCH=<branch> GITHUB_TOKEN=<TOKEN> bash
 # Installs Node 22, pnpm, Postgres, Caddy; clones the repo to /opt/jarvis; builds; migrates; starts two
 # systemd services behind Caddy with TLS. Re-running updates the checkout and restarts.
 set -euo pipefail
@@ -9,7 +12,11 @@ set -euo pipefail
 DOMAIN="${DOMAIN:?set DOMAIN=hq.example.com}"
 HQ_PASSWORD="${HQ_PASSWORD:?set HQ_PASSWORD}"
 BRANCH="${BRANCH:-main}"
-REPO="${REPO:-https://github.com/philneeds/jarvis.git}"
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  REPO="${REPO:-https://x-access-token:${GITHUB_TOKEN}@github.com/philneeds/jarvis.git}"
+else
+  REPO="${REPO:-https://github.com/philneeds/jarvis.git}"
+fi
 APP_DIR=/opt/jarvis
 APP_USER=jarvis
 
@@ -37,6 +44,7 @@ fi
 log "User and checkout"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /bin/bash "$APP_USER"
 if [[ -d "$APP_DIR/.git" ]]; then
+  [[ -n "${GITHUB_TOKEN:-}" ]] && sudo -u "$APP_USER" git -C "$APP_DIR" remote set-url origin "$REPO"
   sudo -u "$APP_USER" git -C "$APP_DIR" fetch -q origin "$BRANCH"
   sudo -u "$APP_USER" git -C "$APP_DIR" checkout -q "$BRANCH"
   sudo -u "$APP_USER" git -C "$APP_DIR" reset -q --hard "origin/$BRANCH"
