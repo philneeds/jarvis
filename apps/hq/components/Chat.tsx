@@ -32,6 +32,8 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
   const [suggest, setSuggest] = useState<string[]>([]);
 
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [messages, busy]);
+  // An ack with no final yet means Jarvis is still working on something.
+  const lastIsAck = (() => { const acks = messages.filter((m) => m.kind === "ack"); const last = acks[acks.length - 1]; return !!last && Date.now() - Date.parse(last.at) < 6 * 60_000 && !messages.some((m) => m.kind === "final" && m.replyTo === last.replyTo); })();
 
   const send = async (t = text) => {
     const line = t.trim();
@@ -86,7 +88,7 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
       <div ref={listRef} className="scroll flex-1 min-h-0 p-4 flex flex-col gap-3" aria-live="polite">
         {messages.length === 0 && <p className="msg msg-system">Say something to Jarvis. Use @name to talk to an agent, / for commands.</p>}
         {messages.slice(compact ? -30 : undefined).map((m) => (
-          <div key={m.id} className={`msg ${m.role === "phil" ? "msg-phil" : m.role === "system" ? "msg-system" : ""}`} style={m.role === "agent" || m.role === "jarvis" ? { borderColor: `color-mix(in srgb, ${color(m)} 45%, transparent)` } : undefined}>
+          <div key={m.id} className={`msg ${m.role === "phil" ? "msg-phil" : m.role === "system" ? "msg-system" : ""} ${m.kind === "ack" ? "msg-ack" : m.kind === "progress" ? "msg-progress" : ""}`} style={m.role === "agent" || m.role === "jarvis" ? { borderColor: `color-mix(in srgb, ${color(m)} 45%, transparent)` } : undefined}>
             {m.role !== "system" && (
               <span className="who" style={{ color: color(m) }}>
                 <span>{name(m)}{m.via?.length ? <span style={{ color: "var(--muted)" }}> · via {m.via.join(", ")}</span> : null}</span>
@@ -102,6 +104,7 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
           return <div key={id} className="msg" style={{ borderColor: `color-mix(in srgb, ${c} 45%, transparent)`, opacity: 0.85 }}><span className="who" style={{ color: c }}><span>{(a?.name ?? v.agentId).toUpperCase()} · writing</span></span><Md text={v.text} /></div>;
         })}
         {busy && Object.keys(streams).length === 0 && <div className="msg" style={{ color: "var(--muted)" }}><span className="who" style={{ color: "var(--accent)" }}>JARVIS</span>thinking…</div>}
+        {!busy && Object.keys(streams).length === 0 && lastIsAck && <p className="msg msg-system">still working · the answer will appear here</p>}
       </div>
       <form onSubmit={onSubmit} className="p-3 flex flex-col gap-2 border-t" style={{ borderColor: "var(--line)", background: "rgba(5,12,32,0.7)" }}>
         {!compact && (

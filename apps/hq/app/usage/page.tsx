@@ -24,8 +24,8 @@ export default function UsagePage() {
               <span>{p.runs} runs</span><span>{(p.inputTokens + p.outputTokens).toLocaleString()} tokens</span>{p.costUsd > 0 && <span>${p.costUsd.toFixed(2)} API fallback</span>}{p.throttled && <span style={{ color: "var(--amber)" }}>scouts paused</span>}
             </div>
             {p.perAgent.length > 0 && (
-              <table className="tbl"><thead><tr><th>Agent</th><th>Runs</th><th>Tokens</th></tr></thead>
-                <tbody>{p.perAgent.slice(0, 12).map((a) => <tr key={a.agentId}><td>{name(a.agentId)}</td><td>{a.runs}</td><td>{(a.inputTokens + a.outputTokens).toLocaleString()}</td></tr>)}</tbody></table>
+              <div className="overflow-x-auto"><table className="tbl"><thead><tr><th>Agent</th><th>Runs</th><th>Tokens</th></tr></thead>
+                <tbody>{p.perAgent.slice(0, 12).map((a) => <tr key={a.agentId}><td>{name(a.agentId)}</td><td>{a.runs}</td><td>{(a.inputTokens + a.outputTokens).toLocaleString()}</td></tr>)}</tbody></table></div>
             )}
           </section>
         ))}
@@ -35,8 +35,8 @@ export default function UsagePage() {
         </section>
         <section className="card flex flex-col gap-2" aria-label="Schedules">
           <span className="label">Schedules</span>
-          <table className="tbl"><thead><tr><th>Agent</th><th>When</th><th>Task</th><th>Phase</th></tr></thead>
-            <tbody>{state?.schedules.map((s) => <tr key={s.id} style={{ opacity: s.phase <= (state.status.phase ?? 0) ? 1 : 0.5 }}><td>{name(s.agentId)}</td><td className="whitespace-nowrap">{s.when.replace("daily@", "daily ").replace("every:", "every ") + (s.when.startsWith("every") ? " min" : "")}</td><td>{s.task === "brief" ? "Daily brief" : s.task}</td><td>{s.phase}</td></tr>)}</tbody></table>
+          <div className="overflow-x-auto"><table className="tbl"><thead><tr><th>Agent</th><th>When</th><th>Task</th><th>Phase</th></tr></thead>
+            <tbody>{state?.schedules.map((s) => <tr key={s.id} style={{ opacity: s.phase <= (state.status.phase ?? 0) ? 1 : 0.5 }}><td className="whitespace-nowrap">{name(s.agentId)}</td><td className="whitespace-nowrap">{s.when.replace("daily@", "daily ").replace("weekly:", "weekly ").replace("every:", "every ") + (s.when.startsWith("every") ? " min" : "")}</td><td style={{ minWidth: 220 }}>{s.task === "brief" ? "Daily brief" : s.task === "condense" ? "Condense memory (Oscar)" : s.task}</td><td>{s.phase}</td></tr>)}</tbody></table></div>
         </section>
       </div>
     </Shell>

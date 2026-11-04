@@ -91,6 +91,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .msg { padding: 10px 12px; border: 1px solid var(--line); background: rgba(73, 160, 255, 0.06); max-width: 92%; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg-phil { align-self: flex-end; max-width: 85%; background: rgba(255, 194, 102, 0.12); border-color: rgba(255, 194, 102, 0.4); }
 .msg-system { align-self: center; color: var(--muted); border-style: dashed; font-size: 11px; }
+.msg-ack { opacity: 0.8; font-size: 12px; padding: 6px 10px; }
+.msg-progress { border-style: dashed; }
 .who { font-size: 11px; letter-spacing: 0.16em; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 4px; }
 .md h4 { margin: 10px 0 2px; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
 .md ul { margin: 2px 0; padding-left: 18px; }

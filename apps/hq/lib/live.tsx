@@ -40,7 +40,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [ventureTick, setVentureTick] = useState(0);
   const listeners = useRef(new Set<(e: JarvisEvent) => void>());
   const waiters = useRef<{ replyTo: string; kinds: string[]; resolve: (m: ChatMessage | null) => void }[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
   const waitForReply = useCallback((replyTo: string, kinds: string[], timeoutMs: number) => new Promise<ChatMessage | null>((resolve) => {
+    // A quick reply can land over the websocket before the HTTP response names what to wait for.
+    const already = messagesRef.current.find((m) => m.replyTo === replyTo && m.kind && kinds.includes(m.kind));
+    if (already) { resolve(already); return; }
     const w = { replyTo, kinds, resolve: (m: ChatMessage | null) => { clearTimeout(t); waiters.current = waiters.current.filter((x) => x !== w); resolve(m); } };
     const t = setTimeout(() => w.resolve(null), timeoutMs);
     waiters.current.push(w);
@@ -98,7 +103,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             setState((s) => s && { ...s, agents: s.agents.map((a) => (a.id === e.agentId ? { ...a, status: e.status, detail: e.detail, lastRunAt: e.status === "idle" ? e.at : a.lastRunAt } : a)) });
             break;
           case "chat.message":
-            setMessagesState((m) => (m.some((x) => x.id === e.message.id) ? m : [...m, e.message].slice(-500)));
+            setMessagesState((m) => { const next = m.some((x) => x.id === e.message.id) ? m : [...m, e.message].slice(-500); messagesRef.current = next; return next; });
             for (const w of [...waiters.current]) if (e.message.replyTo === w.replyTo && e.message.kind && w.kinds.includes(e.message.kind)) w.resolve(e.message);
             setStreams((st) => { const n = { ...st }; for (const [k, v] of Object.entries(n)) if (v.agentId === (e.message.agentId ?? (e.message.role === "jarvis" ? "jarvis" : v.agentId))) delete n[k]; return n; });
             break;
