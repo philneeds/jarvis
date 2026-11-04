@@ -29,6 +29,7 @@ if [[ -z "$HQ_PASSWORD" ]]; then
   fi
 fi
 BRANCH="${BRANCH:-main}"
+TZ_NAME="${TZ_NAME:-America/New_York}"   # schedules (daily brief, scouts) run on this clock
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   REPO="${REPO:-https://x-access-token:${GITHUB_TOKEN}@github.com/philneeds/jarvis.git}"
 else
@@ -120,6 +121,7 @@ After=network.target postgresql.service
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
 Environment=HOME=/home/$APP_USER
+Environment=TZ=${TZ_NAME}
 ExecStart=/usr/bin/node apps/server/dist/index.js
 Restart=always
 RestartSec=3
@@ -137,6 +139,7 @@ After=network.target jarvis-server.service
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
 Environment=HOME=/home/$APP_USER
+Environment=TZ=${TZ_NAME}
 ExecStart=$(command -v pnpm) --filter @jarvis/hq start
 Restart=always
 RestartSec=3
