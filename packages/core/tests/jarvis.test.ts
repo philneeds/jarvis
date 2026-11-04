@@ -91,6 +91,12 @@ test("scheduler respects phase and daily windows", () => {
   assert.deepEqual(s.due(at(7, 3), 0).map((x) => x.id), ["a"]);
   assert.deepEqual(s.due(at(7, 3), 2).map((x) => x.id), ["a", "b"]);
   assert.deepEqual(s.due(at(7, 30), 0).map((x) => x.id), []);
+  // A zero or malformed interval never fires (every:0 would otherwise run on every tick).
+  const bad = new Scheduler(jarvis, [
+    { id: "z", agentId: "ansem", task: "scan", when: "every:0", phase: 0 },
+    { id: "n", agentId: "ansem", task: "scan", when: "every:abc", phase: 0 },
+  ]);
+  assert.deepEqual(bad.due(at(7, 3), 2), []);
 });
 
 test("duplicate delegations collapse to one run per agent", async () => {

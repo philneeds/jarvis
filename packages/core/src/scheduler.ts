@@ -61,6 +61,7 @@ export class Scheduler {
       const last = this.lastRun.get(s.id) ?? 0;
       if (s.when.startsWith("every:")) {
         const mins = Number(s.when.slice(6));
+        if (!Number.isFinite(mins) || mins < 1) return false; // every:0 would run on every tick
         return now.getTime() - last >= mins * 60_000;
       }
       const wk = s.when.match(/^weekly:(sun|mon|tue|wed|thu|fri|sat)@(\d{2}):(\d{2})$/);
