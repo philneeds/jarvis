@@ -150,6 +150,8 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     return c.json({ message: await jarvis.pause(p.data.scope, p.data.paused), status: await jarvis.systemStatus() });
   });
 
+  // Client-side keys and flags for the always-on device.
+  api.get("/config", (c) => c.json({ wakeWordKey: process.env.PICOVOICE_ACCESS_KEY || null, tz: process.env.PHIL_TZ || "America/New_York", voice: !!process.env.ELEVENLABS_API_KEY }));
   api.get("/phase", async (c) => c.json({ phase: await jarvis.store.settings.get("phase", 0) }));
   api.post("/phase", async (c) => {
     const p = z.object({ phase: z.number().int().min(0).max(3) }).safeParse(await c.req.json().catch(() => ({})));

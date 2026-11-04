@@ -43,6 +43,7 @@ export function jarvisSystemPrompt(memory: MemoryItem[], statusLine: string): st
     `You are Jarvis, Phil's master brain and the one front door to his web of 52 specialist agents across nine ventures: JD PM Renovations, ProEdge, Range.cool, Philneeds brand, Airdrop Acres, on-chain trading, money and stocks, personal and health, and the command center. Phil only talks to you. You route, collect and report back, in a calm, direct, slightly dry voice. Lead with the answer; short sentences; no filler.`,
     `Your leads (secondary main layer) and their teams:\n${rosterText()}`,
     `Current system status: ${statusLine}`,
+    TIME_RULE,
     `Agents wake on demand: delegate only when a lead or specialist actually adds something (their data, their venture, their judgment). Anything Phil can get from you right now, answer yourself.`,
     SAFETY_RULES,
     `Anything worth remembering goes in a fenced block tagged "remember" with JSON {"scope":"phil|venture:<id>|contact:<name>","key":"...","value":"..."}.`,
@@ -73,13 +74,22 @@ export function synthesisPrompt(userText: string, reports: { agent: AgentDef; ta
   ].join("\n\n");
 }
 
-export function briefPrompt(status: { pending: number; working: string[]; errors: string[]; recent: string[] }, now: Date): string {
+export const PHIL_TZ = process.env.PHIL_TZ || "America/New_York";
+export const TIME_RULE = `Phil is in Rochester, NY. Give every time in Eastern time (${PHIL_TZ}), never GMT or UTC; convert if a source uses another zone.`;
+
+export function briefPrompt(status: { pending: number; working: string[]; errors: string[]; recent: string[]; reports: { name: string; text: string }[] }, now: Date): string {
   return [
-    `It's ${now.toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}. Give Phil the daily brief.`,
+    `It's ${now.toLocaleString("en-US", { timeZone: PHIL_TZ, weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} in Rochester. Give Phil the daily brief, spoken aloud by you, so write it to be heard: plain sentences, no headers, no markdown, no bullet symbols.`,
     `Facts from HQ: ${status.pending} approval(s) waiting; working now: ${status.working.join(", ") || "nobody"}; errors: ${status.errors.join(", ") || "none"}.`,
+    status.reports.length ? `Reports in from your leads this morning:\n\n${status.reports.map((r) => `${r.name}:\n${r.text}`).join("\n\n")}` : "No lead reports came in this morning.",
     `Recent activity:\n${status.recent.map((r) => `- ${r}`).join("\n") || "- (quiet)"}`,
-    `Shape: one line on the state of the web, then the day in five short sections only where there is something to say: Monica's day, Munger's money, Stella's leads, Mantis's markets, Doc's health. For a section whose lead isn't live yet in this phase, say so in a few words rather than inventing content. End with the one thing you'd have Phil do first.`,
+    `Shape: one line on the state of the web, then the day in short sections only where there is something to say: Monica's day, Stella's leads, Mantis's markets, Munger's money, Doc's health. Use the leads' reports for the facts; for a lead with no report, say so in a few words rather than inventing content. ${TIME_RULE} End with the one thing you'd have Phil do first. Keep it under 250 words.`,
   ].join("\n\n");
+}
+
+/** What a lead is asked for before the brief is written. */
+export function leadBriefTask(now: Date): string {
+  return `It's ${now.toLocaleString("en-US", { timeZone: PHIL_TZ, weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} in Rochester. Jarvis is writing Phil's morning brief. Use your tools to pull today's real data (calendar, mail, board, markets) and report in under 120 words: what's on today, what changed since yesterday, what needs Phil. ${TIME_RULE} No preamble.`;
 }
 
 /** Oscar condenses memory into the important bullets. Strict JSON so the result can be applied. */

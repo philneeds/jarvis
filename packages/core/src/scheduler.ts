@@ -82,6 +82,7 @@ export class Scheduler {
         if (s.task === "brief") {
           const text = await this.jarvis.brief();
           await this.jarvis.say({ role: "jarvis", text: `Daily brief\n\n${text}` });
+          bus.emitEvent({ type: "brief", text, at: new Date().toISOString() });
         } else if (s.task === "condense") {
           if ((await this.jarvis.store.memory.list()).length >= 20) await this.jarvis.say({ role: "system", text: await this.jarvis.condenseMemory() });
         } else {

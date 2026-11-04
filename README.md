@@ -73,7 +73,8 @@ Both plans have caps, so work is rationed by priority instead of paying for API 
 | Activity | Searchable record of who did what, when and why, with the prompt and reply behind each run. |
 | Usage | Each plan against its pool this week, per agent; provider readiness; the schedule table. |
 | Ventures | One page per venture: metrics over time with sparklines, a board of tracker records (JD PM leads and jobs, Analyzer strategies, Money holdings, Philneeds posts, Range.cool milestones…), the team's live status, what's waiting on Phil, recent activity. Agents feed it with `metric` and `record` blocks; Phil edits anything by hand. The home towers open these. |
-| Daily brief | Jarvis's morning rundown, run on a timer or on demand, with earlier briefs. |
+| Always on | For a screen on a stand: say "Jarvis" (with a free Picovoice key) or clap twice to wake him, talk, he answers in his voice; the morning brief is read out when it runs; new approvals are announced and answered by voice ("approve", "reject", "later"). Keeps the screen awake. |
+| Daily brief | Jarvis's morning rundown, run on a timer or on demand, with earlier briefs. Leads with data access (Monica's calendar, Stella's mail, Mantis's markets) report first and the brief is written from their reports, in Eastern time, to be heard aloud. |
 | Memory | Browse and correct what the web knows; add facts; Oscar condenses on request or nightly, and the result waits in Approvals. |
 | Agent settings | Per agent (from the Agent Web panel): Phil's persona template, model switch, tools, a custom schedule, and approval rules (which kinds may go through alone, up to what dollar amount). |
 | Settings | Passkeys for this device, the build phase, provider readiness, notification setup. |

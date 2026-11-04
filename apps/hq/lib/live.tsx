@@ -16,6 +16,8 @@ interface Live {
   streams: Record<string, { agentId: string; text: string; at: number }>;
   /** Bumps whenever a venture's numbers or board change. */
   ventureTick: number;
+  /** Raw event feed for pages that react to specific events (the always-on device). Returns an unsubscribe. */
+  onEvent: (fn: (e: JarvisEvent) => void) => () => void;
   refresh: () => Promise<void>;
   setMessages: (fn: (m: ChatMessage[]) => ChatMessage[]) => void;
   setPending: (fn: (a: Approval[]) => Approval[]) => void;
@@ -32,6 +34,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [streams, setStreams] = useState<Record<string, { agentId: string; text: string; at: number }>>({});
   const [ventureTick, setVentureTick] = useState(0);
+  const listeners = useRef(new Set<(e: JarvisEvent) => void>());
+  const onEvent = useCallback((fn: (e: JarvisEvent) => void) => { listeners.current.add(fn); return () => { listeners.current.delete(fn); }; }, []);
   const wsRef = useRef<WebSocket | null>(null);
   const [wsGen, setWsGen] = useState(0);
 
@@ -70,6 +74,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         let e: JarvisEvent | { type: "hello"; status: State["status"]; agents: State["agents"]; usage: State["usage"] };
         try { e = JSON.parse(ev.data); } catch { return; }
         if (e.type === "hello") { setState((s) => (s ? { ...s, status: e.status, agents: e.agents, usage: e.usage } : s)); return; }
+        for (const fn of listeners.current) { try { fn(e); } catch { /* a listener's problem */ } }
         switch (e.type) {
           case "agent.status":
             setState((s) => s && { ...s, agents: s.agents.map((a) => (a.id === e.agentId ? { ...a, status: e.status, detail: e.detail, lastRunAt: e.status === "idle" ? e.at : a.lastRunAt } : a)) });
@@ -110,10 +115,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [wsGen]);
 
   const value = useMemo<Live>(() => ({
-    state, connected, error, messages, pending, activity, streams, ventureTick, refresh,
+    state, connected, error, messages, pending, activity, streams, ventureTick, onEvent, refresh,
     setMessages: (fn) => setMessagesState(fn),
     setPending: (fn) => setPendingState(fn),
-  }), [state, connected, error, messages, pending, activity, streams, ventureTick, refresh]);
+  }), [state, connected, error, messages, pending, activity, streams, ventureTick, onEvent, refresh]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -5,7 +5,7 @@ import { ModelRouter } from "../router/index.js";
 import type { Store } from "../store/types.js";
 import { usageSummary } from "../usage/caps.js";
 import { extractBlocks, parsePlan } from "./blocks.js";
-import { agentSystemPrompt, briefPrompt, condensePrompt, jarvisSystemPrompt, planPrompt, synthesisPrompt } from "./prompts.js";
+import { agentSystemPrompt, briefPrompt, condensePrompt, jarvisSystemPrompt, leadBriefTask, planPrompt, synthesisPrompt } from "./prompts.js";
 import { getAgentConfig } from "../config.js";
 import { VENTURES, type VentureId } from "../registry/ventures.js";
 import { VENTURE_DASH, recordKind } from "../ventures/dashboards.js";
@@ -302,12 +302,29 @@ export class Jarvis {
     const jarvis = getAgent("jarvis")!;
     const states = await this.store.agentState.all();
     const recent = (await this.store.activity.list({ limit: 15 })).map((e) => `${e.at.slice(0, 16)} ${e.summary}`);
+    const now = new Date();
+    // Leads with data access report first (Monica's calendar, Stella's mailbox, Mantis's markets…), in parallel, time-boxed.
+    const leadIds = ["monica", "stella", "mantis", "munger", "doc"];
+    const reporters: AgentDef[] = [];
+    for (const id of leadIds) {
+      const a = getAgent(id)!;
+      const cfg = await getAgentConfig(this.store, id);
+      if (cfg.tools.length || (await this.store.agentState.get(id))?.lastRunAt) reporters.push(a);
+    }
+    const reports = (await Promise.all(reporters.map(async (a) => {
+      const r = await Promise.race([
+        this.runAgent(a, leadBriefTask(now), { direct: true, from: "Jarvis" }),
+        new Promise<{ blocked: string; text: string }>((res) => setTimeout(() => res({ blocked: "took too long", text: "" }), Number(process.env.BRIEF_LEAD_TIMEOUT_MS ?? 180_000))),
+      ]);
+      return r.blocked ? null : { name: a.name, text: r.text.slice(0, 1500) };
+    }))).filter((r): r is { name: string; text: string } => !!r);
     const prompt = briefPrompt({
       pending: (await this.store.approvals.list("pending")).length,
       working: states.filter((x) => x.status === "working").map((x) => x.id),
       errors: states.filter((x) => x.status === "error").map((x) => x.id),
       recent,
-    }, new Date());
+      reports,
+    }, now);
     const memory = await this.store.memory.list();
     const r = await this.router.run(jarvis, { system: jarvisSystemPrompt(memory, (await this.systemStatus()).text), prompt, direct: true, maxTurns: 1 });
     if (r.blocked) return `No brief: ${r.blocked}`;

@@ -11,7 +11,8 @@ export type JarvisEvent =
   | { type: "activity"; entry: ActivityEntry }
   | { type: "usage"; usage: UsageSummary }
   | { type: "system"; status: SystemStatus }
-  | { type: "venture"; venture: string };
+  | { type: "venture"; venture: string }
+  | { type: "brief"; text: string; at: string };
 
 export interface ChatMessage {
   id: string;
