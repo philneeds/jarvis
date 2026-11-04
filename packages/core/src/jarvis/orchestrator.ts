@@ -148,7 +148,7 @@ export class Jarvis {
     await this.absorb(agent, approvals, remember, r.runId, metrics, records);
     // Hand-offs: something that isn't this agent's job goes to the agent whose job it is, one hop deep.
     if (handoffs.length && (opts.depth ?? 0) < 1) {
-      for (const h of handoffs.slice(0, 3)) {
+      for (const h of handoffs.slice(0, 6)) {
         const to = getAgent(h.agent) ?? findAgent(h.agent);
         if (!to || to.id === agent.id || to.id === "jarvis") continue;
         await this.router.log(agent.id, "delegate", `${agent.name} → ${to.name}: ${h.task.slice(0, 200)}`, r.runId);
@@ -381,8 +381,12 @@ export class Jarvis {
     await this.store.approvals.add(approval);
     // Phil's per-agent rules: low-risk kinds under the dollar cap go through on their own, logged.
     const rules = (await getAgentConfig(this.store, a.agentId)).rules;
-    const amount = Number((a.payload as { amount?: unknown } | undefined)?.amount ?? 0);
-    if (a.kind !== "money" && a.kind !== "strategy" && rules.autoApprove.includes(a.kind) && amount <= rules.maxAutoDollars) {
+    const pay = (a.payload ?? {}) as { amount?: unknown; max?: unknown; ids?: unknown };
+    const amount = Number(pay.amount ?? 0);
+    // Bulk size: an explicit max, or the number of ids. Over the agent's item cap, Phil decides.
+    const items = Array.isArray(pay.ids) ? pay.ids.length : Number(pay.max ?? 0);
+    const itemCap = rules.maxAutoItems ?? 100;
+    if (a.kind !== "money" && a.kind !== "strategy" && rules.autoApprove.includes(a.kind) && amount <= rules.maxAutoDollars && items <= itemCap) {
       await this.router.log(a.agentId, "approval", `${getAgent(a.agentId)?.name ?? a.agentId}: "${a.title}" auto-approved by Phil's rule (${a.kind}${amount ? `, $${amount}` : ""})`, a.runId, { kind: a.kind, body: a.body });
       const done = await this.decide(approval.id, "approved", "auto: Phil's rule");
       return done ?? approval;

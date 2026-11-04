@@ -26,6 +26,8 @@ export interface ApprovalRules {
   autoApprove: ApprovalKind[];
   /** Above this amount (payload.amount, USD) everything waits for Phil even if the kind is auto-approved. */
   maxAutoDollars: number;
+  /** Bulk actions (archive, label…) touching more than this many items wait for Phil even if the kind is auto-approved. */
+  maxAutoItems?: number;
 }
 
 export interface AgentConfig {

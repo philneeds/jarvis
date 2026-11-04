@@ -173,3 +173,15 @@ test("a hand-off runs the right agent and posts its reply", async () => {
   assert.ok(log.some((e) => e.kind === "delegate" && /Monica → Stella/.test(e.summary)));
   void jarvis;
 });
+
+test("bulk actions over the item cap wait for Phil even when the kind is auto-approved", async () => {
+  const { jarvis, store } = make();
+  const { setAgentConfig } = await import("../src/index.js");
+  await setAgentConfig(store, "monica", { rules: { autoApprove: ["record"], maxAutoDollars: 0, maxAutoItems: 100 } });
+  const small = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Archive 40", body: "", payload: { action: "x.y", max: 40 } });
+  assert.equal(small.status, "approved");
+  const big = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Archive 500", body: "", payload: { action: "x.y", max: 500 } });
+  assert.equal(big.status, "pending");
+  const ids = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Archive ids", body: "", payload: { action: "x.y", ids: new Array(150).fill("m") } });
+  assert.equal(ids.status, "pending");
+});

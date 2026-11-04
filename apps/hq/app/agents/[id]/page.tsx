@@ -128,9 +128,14 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
               </label>
             ))}
           </div>
-          <label className="flex items-center gap-3 text-[11px] tracking-[0.12em] uppercase" style={{ color: "var(--muted)" }}>
-            Auto up to $<input className="input h-9 w-32" type="number" min={0} value={cfg.rules.maxAutoDollars} onChange={(e) => setCfg({ ...cfg, rules: { ...cfg.rules, maxAutoDollars: Number(e.target.value) } })} aria-label="Dollar cap for automatic approval" />
-          </label>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-3 text-[11px] tracking-[0.12em] uppercase" style={{ color: "var(--muted)" }}>
+              Auto up to $<input className="input h-9 w-32" type="number" min={0} value={cfg.rules.maxAutoDollars} onChange={(e) => setCfg({ ...cfg, rules: { ...cfg.rules, maxAutoDollars: Number(e.target.value) } })} aria-label="Dollar cap for automatic approval" />
+            </label>
+            <label className="flex items-center gap-3 text-[11px] tracking-[0.12em] uppercase" style={{ color: "var(--muted)" }}>
+              Auto up to <input className="input h-9 w-28" type="number" min={0} value={cfg.rules.maxAutoItems ?? 100} onChange={(e) => setCfg({ ...cfg, rules: { ...cfg.rules, maxAutoItems: Number(e.target.value) } })} aria-label="Item cap for automatic bulk actions" /> items
+            </label>
+          </div>
         </section>
 
         <div className="flex items-center gap-3">
