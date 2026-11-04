@@ -6,7 +6,7 @@ import { Core, type CoreState } from "@/components/Core";
 import { Skyline } from "@/components/Skyline";
 import { useLive } from "@/lib/live";
 import { useVoice } from "@/lib/voice";
-import { useClap } from "@/lib/clap";
+import { useClap, type ClapSensitivity } from "@/lib/clap";
 import { api, post } from "@/lib/api";
 import type { ChatMessage } from "@/lib/types";
 
@@ -104,7 +104,13 @@ export default function AmbientPage() {
     }
   }, [cfg, converse]);
 
-  useClap(phase !== "off", () => { if (!busyRef.current) void converse(); });
+  // Clap-to-wake: on by default; sensitivity and on/off are remembered on this device.
+  const [clapOn, setClapOn] = useState(true);
+  const [clapSens, setClapSens] = useState<ClapSensitivity>("normal");
+  useEffect(() => { try { setClapOn(localStorage.getItem("hq.clap") !== "off"); const s = localStorage.getItem("hq.clapSens"); if (s === "low" || s === "normal" || s === "high") setClapSens(s); } catch { /* ignore */ } }, []);
+  const setClap = (on: boolean) => { setClapOn(on); try { localStorage.setItem("hq.clap", on ? "on" : "off"); } catch { /* ignore */ } };
+  const setSens = (s: ClapSensitivity) => { setClapSens(s); try { localStorage.setItem("hq.clapSens", s); } catch { /* ignore */ } };
+  useClap(phase !== "off" && clapOn, () => { if (!busyRef.current) void converse(); }, { sensitivity: clapSens });
 
   const start = async () => {
     try { wakeLock.current = await (navigator as Navigator & { wakeLock?: { request(t: "screen"): Promise<{ release(): Promise<void> }> } }).wakeLock?.request("screen") ?? null; } catch { /* some browsers refuse; the screen may dim */ }
@@ -153,7 +159,7 @@ export default function AmbientPage() {
         <div className="flex items-center gap-2">
           <span className="inline-block w-3.5 h-3.5 rounded-full border-2" style={{ borderColor: "var(--accent)", boxShadow: "0 0 8px var(--accent)" }} />
           <span className="display glow font-bold text-[15px] tracking-[0.22em]" style={{ color: "var(--ink-strong)" }}>J.A.R.V.I.S.</span>
-          <span className="text-[10px] tracking-[0.16em] uppercase ml-2" style={{ color: "var(--muted)" }}>{phase === "off" ? "always-on mode" : wakeReady === "wakeword" ? "say \"Jarvis\" or clap twice" : "clap twice to wake"}{pending.length ? ` · ${pending.length} waiting` : ""}</span>
+          <span className="text-[10px] tracking-[0.16em] uppercase ml-2" style={{ color: "var(--muted)" }}>{phase === "off" ? "always-on mode" : wakeReady === "wakeword" ? (clapOn ? "say \"Jarvis\" or clap twice" : "say \"Jarvis\"") : clapOn ? "clap twice to wake" : "clap-wake is off"}{pending.length ? ` · ${pending.length} waiting` : ""}</span>
         </div>
         <div className="text-right">
           <div className="display glow font-semibold leading-none tracking-[0.06em] text-[28px] md:text-[40px]" style={{ color: "var(--ink-bright)" }}>{now ? now.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }) : "--:--"}</div>
@@ -171,7 +177,11 @@ export default function AmbientPage() {
 
       <footer className="relative w-full max-w-3xl flex items-center justify-between gap-3" style={{ zIndex: 1 }}>
         <Link href="/" className="btn btn-sm">HQ</Link>
-        <span className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--dim)" }}>{cfg ? (cfg.voice ? "voice: ElevenLabs" : "voice: this device") : ""}{cfg && !cfg.wakeWordKey ? " · no wake-word key: clap to wake" : ""}</span>
+        <div className="flex flex-wrap items-center justify-center gap-2 text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--dim)" }}>
+          <span>{cfg ? (cfg.voice ? "voice: ElevenLabs" : "voice: this device") : ""}{cfg && !cfg.wakeWordKey ? " · no wake-word key" : ""}</span>
+          <label className="btn btn-sm cursor-pointer" style={clapOn ? { borderColor: "var(--accent)" } : undefined}><input type="checkbox" className="sr-only" checked={clapOn} onChange={(e) => setClap(e.target.checked)} />clap {clapOn ? "on" : "off"}</label>
+          {clapOn && <select className="input h-8 w-28 text-[10px] uppercase" aria-label="Clap sensitivity" value={clapSens} onChange={(e) => setSens(e.target.value as ClapSensitivity)}><option value="low">quiet room</option><option value="normal">normal</option><option value="high">big room</option></select>}
+        </div>
         {phase === "off" ? <button className="btn btn-primary" onClick={start}>Start</button> : <button className="btn" onClick={stop}>Stop</button>}
       </footer>
     </div>
