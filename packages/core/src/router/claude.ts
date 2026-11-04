@@ -95,8 +95,9 @@ export function claudeAgentSdkProvider(): Provider {
       if (error && !text && !resultText) {
         throw new ProviderError(`Claude Agent SDK error: ${error}`, "claude:agent-sdk");
       }
+      // With tools, the SDK's final result is the answer; the per-turn text blocks are "I'll look that up" progress notes.
       return {
-        text: (text || resultText || "").trim(),
+        text: ((tools.length ? resultText : undefined) || text || resultText || "").trim(),
         provider: "claude:agent-sdk",
         modelId: req.model.modelId ?? "claude",
         inputTokens: input,

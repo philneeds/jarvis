@@ -108,8 +108,10 @@ export class GoogleConnector {
   // ---- Calendar ------------------------------------------------------------
 
   async listEvents(opts: { from?: string; to?: string; max?: number; calendarId?: string } = {}) {
-    const from = opts.from ?? new Date(this.now()).toISOString();
-    const to = opts.to ?? new Date(this.now() + 7 * 86400_000).toISOString();
+    // Agents pass dates in whatever shape they think of; Google wants RFC 3339.
+    const iso = (v: string | undefined, fallback: number) => { const t = v ? Date.parse(v) : NaN; return new Date(Number.isNaN(t) ? fallback : t).toISOString(); };
+    const from = iso(opts.from, this.now());
+    const to = iso(opts.to, this.now() + 7 * 86400_000);
     const cal = encodeURIComponent(opts.calendarId ?? "primary");
     const q = new URLSearchParams({ timeMin: from, timeMax: to, singleEvents: "true", orderBy: "startTime", maxResults: String(opts.max ?? 25) });
     const j = await this.api<{ items?: { id: string; summary?: string; start?: { dateTime?: string; date?: string }; end?: { dateTime?: string; date?: string }; location?: string; attendees?: { email: string }[] }[] }>(`https://www.googleapis.com/calendar/v3/calendars/${cal}/events?${q}`);
