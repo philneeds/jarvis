@@ -107,7 +107,15 @@ export default function AmbientPage() {
   // Clap-to-wake: on by default; sensitivity and on/off are remembered on this device.
   const [clapOn, setClapOn] = useState(true);
   const [clapSens, setClapSens] = useState<ClapSensitivity>("normal");
-  useEffect(() => { try { setClapOn(localStorage.getItem("hq.clap") !== "off"); const s = localStorage.getItem("hq.clapSens"); if (s === "low" || s === "normal" || s === "high") setClapSens(s); } catch { /* ignore */ } }, []);
+  // Default: clap-wake only when there is no wake word; a saved choice on this device wins.
+  useEffect(() => {
+    if (!cfg) return;
+    try {
+      const saved = localStorage.getItem("hq.clap");
+      setClapOn(saved ? saved !== "off" : !cfg.wakeWordKey);
+      const s = localStorage.getItem("hq.clapSens"); if (s === "low" || s === "normal" || s === "high") setClapSens(s);
+    } catch { /* ignore */ }
+  }, [cfg]);
   const setClap = (on: boolean) => { setClapOn(on); try { localStorage.setItem("hq.clap", on ? "on" : "off"); } catch { /* ignore */ } };
   const setSens = (s: ClapSensitivity) => { setClapSens(s); try { localStorage.setItem("hq.clapSens", s); } catch { /* ignore */ } };
   useClap(phase !== "off" && clapOn, () => { if (!busyRef.current) void converse(); }, { sensitivity: clapSens });
