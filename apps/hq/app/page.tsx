@@ -7,7 +7,9 @@ import { Clock } from "@/components/Clock";
 import { Towers } from "@/components/Towers";
 import { Objective } from "@/components/Objective";
 import { Skyline } from "@/components/Skyline";
+import { Core, type CoreState } from "@/components/Core";
 import { useLive } from "@/lib/live";
+import { useVoice } from "@/lib/voice";
 import { api, post, timeAgo } from "@/lib/api";
 import type { ChatMessage } from "@/lib/types";
 
@@ -16,6 +18,18 @@ export default function HomePage() {
   const [on, setOn] = useState(true);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(false);
+  const voice = useVoice({
+    onHeard: async (heard) => {
+      setBusy(true);
+      try {
+        const r = await post<{ messages: ChatMessage[] }>("/api/chat", { text: heard });
+        setMessages((m) => { const ids = new Set(m.map((x) => x.id)); return [...m, ...r.messages.filter((x) => !ids.has(x.id))]; });
+        const reply = [...r.messages].reverse().find((m) => m.role !== "phil" && m.role !== "system");
+        if (reply) await voice.speak(reply.text);
+      } finally { setBusy(false); }
+    },
+  });
   const [money, setMoney] = useState<{ key: string; value: string }[]>([]);
   const [visual, setVisual] = useState<{ key: string; value: string } | null>(null);
   const [since, setSince] = useState<string>();
@@ -48,22 +62,36 @@ export default function HomePage() {
     try {
       const r = await post<{ messages: ChatMessage[] }>("/api/chat", { text: line });
       setMessages((m) => { const ids = new Set(m.map((x) => x.id)); return [...m, ...r.messages.filter((x) => !ids.has(x.id))]; });
+      if (voiceOn) { const reply = [...r.messages].reverse().find((m) => m.role !== "phil" && m.role !== "system"); if (reply) void voice.speak(reply.text); }
     } finally { setBusy(false); }
   };
 
+  const toggleVoice = () => {
+    if (voice.conversation) { voice.endConversation(); setVoiceOn(false); return; }
+    setVoiceOn(true);
+    void voice.speak("Listening.").then(() => voice.startConversation());
+  };
+  const coreState: CoreState = state?.status.killSwitch.all ? "paused" : voice.speaking ? "speaking" : voice.listening ? "listening" : busy || state?.agents.some((a) => a.status === "working") ? "thinking" : "idle";
+  const coreLabel = coreState === "paused" ? "PAUSED" : coreState === "speaking" ? "SPEAKING" : coreState === "listening" ? "LISTENING" : coreState === "thinking" ? "THINKING" : voice.conversation ? "READY" : "STANDING BY";
+
   const core = (
     <div className="flex flex-col items-center gap-4 w-full max-w-md">
-      <div className={`core ${busy || state?.agents.some((a) => a.status === "working") ? "working" : ""} ${state?.status.level === "red" ? "red" : ""}`} aria-hidden="true">
-        <i className="ring" /><i className="disc" /><i className="arc" /><i className="arc2" /><i className="dash" /><i className="dots" /><i className="glowc" />
-        <span className="word">{busy ? "THINKING" : state?.status.killSwitch.all ? "PAUSED" : "LISTENING"}</span>
-      </div>
+      <Core state={coreState} level={voice.level} label={coreLabel} />
+      {voice.conversation && voice.interim && <p className="m-0 text-center text-[12px] italic" style={{ color: "var(--amber)" }}>{voice.interim}</p>}
+      {voice.error && <p className="m-0 text-center text-[11px]" style={{ color: "var(--red)" }}>{voice.error}</p>}
       <p className="text-center text-[12px] leading-relaxed" style={{ color: "var(--ink-strong)" }}><span className="label">Jarvis ▸ </span>{recommendation}</p>
       <form onSubmit={send} className="flex gap-1.5 w-full">
         <label htmlFor="home-cmd" className="sr-only">Command Jarvis</label>
         <div className="input flex items-center gap-2 flex-1"><span style={{ color: "var(--accent)" }}>&gt;_</span><input id="home-cmd" className="flex-1 min-w-0 bg-transparent border-0 outline-none h-full" placeholder="Talk to Jarvis, @ an agent, / for commands" value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" /></div>
-        <Link href="/command" className="btn w-11 px-0 flex-none" aria-label="Open Command (voice, history)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg></Link>
+        <button type="button" className={`btn w-11 px-0 flex-none ${voice.conversation ? "btn-primary" : ""}`} onClick={toggleVoice} aria-pressed={voice.conversation} aria-label={voice.conversation ? "End voice conversation" : "Start voice conversation"} title={voice.conversation ? "End conversation" : "Talk with Jarvis"}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+        </button>
+        <button type="button" className="btn w-11 px-0 flex-none" onClick={() => { if (voice.speaking) voice.stopSpeaking(); else if (lastJarvis) void voice.speak(lastJarvis.text); }} aria-label={voice.speaking ? "Stop speaking" : "Read the last reply aloud"} title={voice.speaking ? "Stop" : "Hear it"}>
+          {voice.speaking ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" /></svg> : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" /></svg>}
+        </button>
         <button className="btn btn-primary w-11 px-0 flex-none" disabled={busy || !text.trim()} aria-label="Send"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
       </form>
+      <span className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--dim)" }}>{voice.conversation ? "say \"stop\" to end" : voice.serverTts ? "voice: ElevenLabs" : "voice: this device"}</span>
     </div>
   );
 

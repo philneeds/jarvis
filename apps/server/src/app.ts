@@ -4,6 +4,7 @@ import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import { AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
+import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
 
 export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; guard?: TradingGuard } = {}) {
@@ -23,6 +24,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   app.post("/api/logout", (c) => { logout(c); return c.json({ ok: true }); });
   app.get("/api/me", (c) => c.json({ authed: isAuthed(c), auth: authEnabled }));
   app.route("/api/passkeys", passkeyRoutes(jarvis.store));
+  app.route("/api/tts", ttsRoutes().use("*", requireAuth));
 
   const api = new Hono();
   api.use("*", requireAuth);

@@ -5,6 +5,7 @@ import { useLive } from "@/lib/live";
 import { post, fmtTime } from "@/lib/api";
 import type { ChatMessage } from "@/lib/types";
 import { Md } from "./Md";
+import { useVoice } from "@/lib/voice";
 
 const QUICK = ["/brief", "/status", "/approvals", "/usage", "/pause", "/condense", "/help"];
 
@@ -21,6 +22,8 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
   const { state, messages, setMessages, streams } = useLive();
   const [text, setText] = useState(initial ?? "");
   const [busy, setBusy] = useState(false);
+  const [readAloud, setReadAloud] = useState(false);
+  const voice = useVoice({ onHeard: async () => undefined });
   const [listening, setListening] = useState(false);
   const [error, setError] = useState<string>();
   const listRef = useRef<HTMLDivElement>(null);
@@ -37,6 +40,7 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
     try {
       const r = await post<{ messages: ChatMessage[] }>("/api/chat", { text: line });
       setMessages((m) => { const ids = new Set(m.map((x) => x.id)); return [...m, ...r.messages.filter((x) => !ids.has(x.id))]; });
+      if (readAloud) { const reply = [...r.messages].reverse().find((m) => m.role !== "phil" && m.role !== "system"); if (reply) void voice.speak(reply.text); }
     } catch (e) {
       setError((e as Error).message);
     } finally { setBusy(false); inputRef.current?.focus(); }
@@ -116,6 +120,9 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
           </div>
           <button type="button" className="btn w-11 px-0 flex-none" onClick={mic} aria-label={listening ? "Stop listening" : "Speak to Jarvis"} aria-pressed={listening} style={listening ? { borderColor: "var(--amber)", color: "var(--amber)" } : undefined}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+          </button>
+          <button type="button" className={`btn w-11 px-0 flex-none ${readAloud ? "btn-primary" : ""}`} onClick={() => { if (voice.speaking) voice.stopSpeaking(); setReadAloud(!readAloud); }} aria-pressed={readAloud} aria-label={readAloud ? "Stop reading replies aloud" : "Read replies aloud"} title={readAloud ? "Voice on" : "Voice off"}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" /></svg>
           </button>
           <button className="btn btn-primary w-11 px-0 flex-none" disabled={busy || !text.trim()} aria-label="Send">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
