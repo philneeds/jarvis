@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { AgentRequest, AgentResult, Provider } from "./types.js";
 import { ProviderError } from "./types.js";
 
@@ -7,17 +10,30 @@ import { ProviderError } from "./types.js";
  * Phil's SuperGrok plan after `grok login`. Scouts use Grok's built-in web/X search, which is read-only and
  * needs no approval; in headless mode anything that WOULD need approval (shell, file edits) is denied rather
  * than left hanging, and a turn budget keeps a scout from looping. Fallback: the xAI API with XAI_API_KEY.
- *   GROK_BIN   binary name or path (default "grok")
- *   GROK_ARGS  args before the prompt, space-separated (default "--permission-mode dontAsk --max-turns 8 -p")
- *   GROK_MODE  "cli" (default) or "api"
+ * Output is parsed from --output-format json (final text only, no progress lines). Shell, file and
+ * media tools are denied and the CLI runs in an empty directory, so a scout can read the web and X and
+ * nothing on the server.
+ *   GROK_BIN    binary name or path (default "grok")
+ *   GROK_ARGS   args before the prompt, space-separated (default below)
+ *   GROK_MODE   "cli" (default) or "api"
+ *   GROK_CWD    working directory for the CLI (default: an empty temp dir)
  */
 export function grokProvider(mode = process.env.GROK_MODE || "cli"): Provider {
   return mode === "api" ? grokApiProvider() : grokCliProvider();
 }
 
+export const GROK_DENIED_TOOLS = "run_terminal_command,read_file,search_replace,write,list_dir,grep,spawn_subagent,kill_command_or_subagent,get_command_or_subagent_output,scheduler_create,scheduler_delete,scheduler_list,monitor,search_tool,use_tool,workflow,enter_plan_mode,exit_plan_mode,ask_user_question,send_feedback,image_gen,image_edit,image_to_video,reference_to_video";
+export const GROK_DEFAULT_ARGS = `--permission-mode dontAsk --max-turns 8 --output-format json --disallowed-tools ${GROK_DENIED_TOOLS} -p`;
+
 export function grokCliProvider(): Provider {
   const bin = process.env.GROK_BIN || "grok";
-  const extra = (process.env.GROK_ARGS || "--permission-mode dontAsk --max-turns 8 -p").split(" ").filter(Boolean);
+  const extra = (process.env.GROK_ARGS || GROK_DEFAULT_ARGS).split(" ").filter(Boolean);
+  const cwd = (() => {
+    if (process.env.GROK_CWD) return process.env.GROK_CWD;
+    const d = path.join(os.tmpdir(), "jarvis-grok");
+    try { fs.mkdirSync(d, { recursive: true }); } catch { /* fall back to cwd */ }
+    return d;
+  })();
   return {
     id: "grok:cli",
     async available() {
@@ -34,9 +50,9 @@ export function grokCliProvider(): Provider {
       const args = [...extra, prompt];
       const text = await new Promise<string>((resolve, reject) => {
         let out = "", err = "";
-        const p = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" } });
+        const p = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], cwd, env: { ...process.env, NO_COLOR: "1" } });
         req.signal?.addEventListener("abort", () => p.kill("SIGTERM"));
-        p.stdout.on("data", (d) => { const s = d.toString(); out += s; req.onDelta?.(s); });
+        p.stdout.on("data", (d) => { out += d.toString(); });
         p.stderr.on("data", (d) => { err += d.toString(); });
         p.on("error", (e) => reject(new ProviderError(`Could not start '${bin}': ${e.message}`, "grok:cli", e)));
         p.on("exit", (code) => {
@@ -47,15 +63,16 @@ export function grokCliProvider(): Provider {
         const t = setTimeout(() => { p.kill("SIGTERM"); reject(new ProviderError("grok timed out after 5 minutes", "grok:cli")); }, Number(process.env.GROK_TIMEOUT_MS ?? 300_000));
         p.on("exit", () => clearTimeout(t));
       });
-      const approxIn = Math.ceil(prompt.length / 4), approxOut = Math.ceil(text.length / 4);
+      const parsed = parseGrokJson(text);
       return {
-        text: text.trim(),
+        text: (parsed?.text ?? text).trim(),
         provider: "grok:cli",
-        modelId: req.model.modelId ?? "grok",
-        inputTokens: approxIn,
-        outputTokens: approxOut,
-        costUsd: 0,
+        modelId: parsed?.model ?? req.model.modelId ?? "grok",
+        inputTokens: parsed?.input ?? Math.ceil(prompt.length / 4),
+        outputTokens: parsed?.output ?? Math.ceil(text.length / 4),
+        costUsd: 0, // on the plan; the CLI's cost figure is informational
         durationMs: Date.now() - t0,
+        raw: parsed ? { stopReason: parsed.stopReason, numTurns: parsed.numTurns, costUsd: parsed.cost } : undefined,
       };
     },
   };
@@ -101,4 +118,16 @@ export function grokApiProvider(): Provider {
       };
     },
   };
+}
+
+/** The CLI's --output-format json: {"text","stopReason","num_turns","usage":{...},"modelUsage":{"<model>":{...}}}. */
+export function parseGrokJson(raw: string): { text: string; model?: string; input?: number; output?: number; stopReason?: string; numTurns?: number; cost?: number } | undefined {
+  const s = raw.trim();
+  const first = s.indexOf("{"), last = s.lastIndexOf("}");
+  if (first < 0 || last <= first) return undefined;
+  try {
+    const j = JSON.parse(s.slice(first, last + 1)) as { text?: unknown; stopReason?: string; num_turns?: number; total_cost_usd?: number; usage?: { input_tokens?: number; output_tokens?: number }; modelUsage?: Record<string, unknown> };
+    if (typeof j.text !== "string") return undefined;
+    return { text: j.text, model: j.modelUsage ? Object.keys(j.modelUsage)[0] : undefined, input: j.usage?.input_tokens, output: j.usage?.output_tokens, stopReason: j.stopReason, numTurns: j.num_turns, cost: j.total_cost_usd };
+  } catch { return undefined; }
 }

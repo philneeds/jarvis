@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractBlocks, parsePlan } from "../src/index.js";
+import { extractBlocks, parsePlan, parseGrokJson, GROK_DEFAULT_ARGS } from "../src/index.js";
 
 test("approval and remember blocks are pulled out of a reply", () => {
   const raw = `Draft is ready.\n\n\`\`\`approval\n{"kind":"send","title":"Email the Smiths a quote","body":"Send the $4,200 kitchen quote","payload":{"to":"smith@example.com"}}\n\`\`\`\n\n\`\`\`remember\n{"scope":"venture:jdpm","key":"smith-quote","value":"$4,200 kitchen quote sent for approval"}\n\`\`\`\nAnything else?`;
@@ -26,4 +26,15 @@ test("parsePlan tolerates fences and prose", () => {
   assert.deepEqual(parsePlan('```json\n{"delegate":[{"agent":"@Stella","task":"leads"}]}\n```'), { reply: undefined, delegate: [{ agent: "stella", task: "leads" }] });
   assert.deepEqual(parsePlan('Sure. {"reply":"ok"} done'), { reply: "ok", delegate: [] });
   assert.deepEqual(parsePlan("plain text"), { reply: "plain text", delegate: [] });
+});
+
+test("Grok CLI json output is parsed to the final text; plain output falls through", () => {
+  const j = parseGrokJson('{"text":"**@tusar1687** — 4 Nov 2026\n\n> any chance","stopReason":"end_turn","num_turns":1,"usage":{"input_tokens":16511,"output_tokens":214},"total_cost_usd":0.07,"modelUsage":{"grok-4.7-build":{}}}');
+  assert.equal(j?.text.startsWith("**@tusar1687**"), true);
+  assert.equal(j?.model, "grok-4.7-build");
+  assert.equal(j?.input, 16511);
+  assert.equal(parseGrokJson("I'll look this up. Plain text."), undefined);
+  assert.match(GROK_DEFAULT_ARGS, /--disallowed-tools [^ ]*run_terminal_command/);
+  assert.match(GROK_DEFAULT_ARGS, /--output-format json/);
+  assert.doesNotMatch(GROK_DEFAULT_ARGS, /always-approve|bypassPermissions/);
 });

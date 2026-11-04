@@ -12,7 +12,7 @@ import type { ToolContext, ToolDef } from "../tools/index.js";
 
 export * from "./types.js";
 export { claudeProvider, claudeAgentSdkProvider, claudeApiProvider } from "./claude.js";
-export { grokProvider, grokCliProvider, grokApiProvider } from "./grok.js";
+export { grokProvider, grokCliProvider, grokApiProvider, parseGrokJson, GROK_DEFAULT_ARGS, GROK_DENIED_TOOLS } from "./grok.js";
 export { mockProvider } from "./mock.js";
 
 export interface RouterOptions {
