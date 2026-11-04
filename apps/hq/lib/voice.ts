@@ -63,11 +63,38 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
     cancelAnimationFrame(levelRaf.current); setLevel(0); setSpeaking(false);
   }, []);
 
-  const speak = useCallback(async (markdown: string): Promise<void> => {
+  /**
+   * While he speaks, a narrow listener watches for stop words only: "stop", "hold on", "wait", "enough", "shut up",
+   * or "Jarvis" + any of those. A stop word that also occurs in what he is saying only counts with "Jarvis" in
+   * front of it, so he can't cut himself off. Everything else said in the room is ignored.
+   */
+  const bargeIn = useCallback((spoken: string, onStop: () => void): (() => void) => {
+    const r = recognizer();
+    if (!r) return () => undefined;
+    const own = new Set((spoken.toLowerCase().match(/\b(stop|wait|enough|hold on|shut up)\b/g) ?? []));
+    let stopped = false;
+    const check = (heard: string) => {
+      const h = heard.toLowerCase();
+      if (/\bjarvis\b[,\s]*(stop|wait|enough|hold on|shut up|quiet)\b/.test(h)) return true;
+      const m = h.match(/\b(stop|wait|enough|hold on|shut up)\b/);
+      return !!m && !own.has(m[1]!);
+    };
+    r.lang = "en-US"; r.interimResults = true; r.continuous = true;
+    r.onresult = (e) => { let s = ""; for (let i = e.resultIndex; i < e.results.length; i++) s += e.results[i]![0]!.transcript + " "; if (check(s)) { stopped = true; try { r.abort(); } catch { /* fine */ } onStop(); } };
+    r.onend = () => { if (!stopped) { try { r.start(); } catch { /* done */ } } };
+    r.onerror = () => undefined;
+    try { r.start(); } catch { /* no mic */ }
+    return () => { stopped = true; try { r.abort(); } catch { /* fine */ } };
+  }, []);
+
+  /** Speak. With bargeIn, stop words cut him off; resolves true if he was interrupted. */
+  const speak = useCallback(async (markdown: string, opts: { bargeIn?: boolean } = {}): Promise<boolean> => {
     const text = stripForSpeech(markdown).slice(0, 1800);
-    if (!text) return;
+    if (!text) return false;
     stopSpeaking();
     setSpeaking(true);
+    let interrupted = false;
+    const endBarge = opts.bargeIn ? bargeIn(text, () => { interrupted = true; stopSpeaking(); }) : () => undefined;
     try {
       if (serverTts) {
         const res = await fetch("/api/tts", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
@@ -77,12 +104,12 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
           const ctx = ctxRef.current ?? (ctxRef.current = new AudioContext());
           const src = ctx.createMediaElementSource(audio); src.connect(ctx.destination);
           const stop = meter(src, ctx);
-          await new Promise<void>((resolve) => { audio.onended = () => resolve(); audio.onerror = () => resolve(); void audio.play().catch(() => resolve()); });
+          await new Promise<void>((resolve) => { audio.onended = () => resolve(); audio.onerror = () => resolve(); audio.onpause = () => resolve(); void audio.play().catch(() => resolve()); });
           stop(); src.disconnect();
-          return;
+          return interrupted;
         }
       }
-      if (typeof speechSynthesis === "undefined") { setError("This browser can't speak."); return; }
+      if (typeof speechSynthesis === "undefined") { setError("This browser can't speak."); return false; }
       await new Promise<void>((resolve) => {
         const u = new SpeechSynthesisUtterance(text);
         const v = pickVoice(); if (v) u.voice = v;
@@ -94,10 +121,12 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
         u.onerror = () => { clearInterval(timer); resolve(); };
         speechSynthesis.speak(u);
       });
+      return interrupted;
     } finally {
+      endBarge();
       setLevel(0); setSpeaking(false);
     }
-  }, [serverTts, stopSpeaking, meter]);
+  }, [serverTts, stopSpeaking, meter, bargeIn]);
 
   const stopListening = useCallback(() => {
     recRef.current?.stop(); recRef.current = null;
@@ -105,15 +134,17 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
     cancelAnimationFrame(levelRaf.current); setLevel(0); setListening(false); setInterim("");
   }, []);
 
-  /** Listen for one utterance; resolves with the text (empty if nothing was heard). */
-  const listen = useCallback((): Promise<string> => new Promise((resolve) => {
+  /** Listen for one utterance; resolves with the text (empty if nothing was heard, or nothing within timeoutMs). */
+  const listen = useCallback((opts: { timeoutMs?: number } = {}): Promise<string> => new Promise((resolve) => {
     const r = recognizer();
     if (!r) { setError("Voice input isn't available in this browser. Chrome or Safari work."); resolve(""); return; }
     stopSpeaking();
     recRef.current = r; r.lang = "en-US"; r.interimResults = true; r.continuous = false;
-    let finalText = "", done = false;
-    const finish = () => { if (done) return; done = true; stopListening(); resolve(finalText.trim()); };
-    r.onresult = (e) => { let s = ""; for (let i = 0; i < e.results.length; i++) s += e.results[i]![0]!.transcript; setInterim(s); if (e.results[e.results.length - 1]?.isFinal) finalText = s; };
+    let finalText = "", done = false, heardAnything = false;
+    const finish = () => { if (done) return; done = true; clearTimeout(timer); stopListening(); resolve(finalText.trim()); };
+    // The reply window: if nobody has started talking by then, close the mic.
+    const timer = opts.timeoutMs ? setTimeout(() => { if (!heardAnything) { try { r.abort(); } catch { /* fine */ } finish(); } }, opts.timeoutMs) : undefined;
+    r.onresult = (e) => { heardAnything = true; let s = ""; for (let i = 0; i < e.results.length; i++) s += e.results[i]![0]!.transcript; setInterim(s); if (e.results[e.results.length - 1]?.isFinal) finalText = s; };
     r.onend = finish;
     r.onerror = (e) => { if (e.error !== "no-speech" && e.error !== "aborted") setError(`Mic: ${e.error}`); finish(); };
     setListening(true); setError(undefined);
@@ -127,6 +158,7 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
 
   const [conversation, setConversation] = useState(false);
   const convRef = useRef(false);
+  const interruptedRef = useRef(false);
   const loop = useCallback(async () => {
     while (convRef.current) {
       const heard = await listen();
@@ -134,6 +166,7 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
       if (!heard) continue;
       if (/^(stop|that's all|goodbye|exit)\b/i.test(heard)) { convRef.current = false; setConversation(false); break; }
       await onHeardRef.current(heard);
+      if (interruptedRef.current) { interruptedRef.current = false; }
     }
   }, [listen]);
 

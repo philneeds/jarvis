@@ -26,7 +26,7 @@ export default function HomePage() {
         const r = await post<{ messages: ChatMessage[] }>("/api/chat", { text: heard });
         setMessages((m) => { const ids = new Set(m.map((x) => x.id)); return [...m, ...r.messages.filter((x) => !ids.has(x.id))]; });
         const reply = [...r.messages].reverse().find((m) => m.role !== "phil" && m.role !== "system");
-        if (reply) await voice.speak(reply.text);
+        if (reply) await voice.speak(reply.text, { bargeIn: true });
       } finally { setBusy(false); }
     },
   });

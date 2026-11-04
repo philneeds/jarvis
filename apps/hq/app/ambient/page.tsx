@@ -17,6 +17,8 @@ import type { ChatMessage } from "@/lib/types";
 type Phase = "off" | "sleeping" | "awake";
 type SpeechRecognitionLike = { start(): void; stop(): void; abort(): void; lang: string; interimResults: boolean; continuous: boolean; onresult: ((e: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null };
 const IDLE_AFTER_MS = 25_000;
+const REPLY_WINDOW_MS = 6_000;
+const APPROVAL_VOICE_WINDOW_MS = 20_000;
 
 export default function AmbientPage() {
   const { state, onEvent, pending, setMessages } = useLive();
@@ -31,7 +33,7 @@ export default function AmbientPage() {
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const porcupine = useRef<{ release(): Promise<void>; terminate(): void } | null>(null);
   const wakeLock = useRef<{ release(): Promise<void> } | null>(null);
-  const pendingApproval = useRef<{ id: string; title: string } | null>(null);
+  const pendingApproval = useRef<{ id: string; title: string; kind: string; askedAt: number } | null>(null);
 
   const ask = useCallback(async (heard: string) => {
     setLine(heard); setReply("");
@@ -53,34 +55,43 @@ export default function AmbientPage() {
     } catch { /* silent */ }
   }, []);
 
-  /** One wake: listen until Phil stops talking for a while, answering each thing he says. */
+  /**
+   * One wake. Rules: a six-second window for Phil to reply, at most one follow-up without saying "Jarvis"
+   * again, stop words cut him off while he speaks, and a voice "approve" only counts within seconds of him
+   * asking, never for money or trading strategies.
+   */
   const converse = useCallback(async (opening?: string) => {
     if (busyRef.current) return;
     busyRef.current = true; setPhase("awake");
     try {
       chime(true);
-      await speak(opening ?? "Yes?");
-      let quiet = 0;
-      while (quiet < 2) {
-        const heard = await listen();
-        if (!heard) { quiet++; continue; }
-        quiet = 0;
-        if (/^(stop|that's all|thanks jarvis|thank you jarvis|go to sleep|never mind)\b/i.test(heard)) { await speak("Standing by."); break; }
-        if (pendingApproval.current) {
-          const a = pendingApproval.current; pendingApproval.current = null;
-          if (/\b(approve|approved|yes|go ahead|do it)\b/i.test(heard)) { await post(`/api/approvals/${a.id}/approve`, { note: "by voice" }); await speak(`Approved: ${a.title}.`); continue; }
+      await speak(opening ?? "Yes?", { bargeIn: true });
+      let turns = 0;
+      while (turns < 2) {
+        const heard = await listen({ timeoutMs: REPLY_WINDOW_MS });
+        if (!heard) break; // nothing in the window: back to sleep
+        if (/^(stop|that's all|thanks jarvis|thank you jarvis|go to sleep|never mind|cancel)\b/i.test(heard)) { await speak("Standing by."); break; }
+        const a = pendingApproval.current;
+        if (a && Date.now() - a.askedAt < APPROVAL_VOICE_WINDOW_MS) {
+          pendingApproval.current = null;
+          if (/\b(approve|approved|yes|go ahead|do it)\b/i.test(heard)) {
+            if (a.kind === "money" || a.kind === "strategy") { await speak("That one moves money, so it needs the screen or Telegram. It's waiting in Approvals."); continue; }
+            await post(`/api/approvals/${a.id}/approve`, { note: "by voice" }); await speak(`Approved: ${a.title}.`); continue;
+          }
           if (/\b(reject|rejected|no|don't|cancel)\b/i.test(heard)) { await post(`/api/approvals/${a.id}/reject`, { note: "by voice" }); await speak(`Rejected: ${a.title}.`); continue; }
           if (/\b(later|wait|hold)\b/i.test(heard)) { await speak("It's waiting in Approvals."); continue; }
         }
+        pendingApproval.current = null;
+        turns++;
         if (/\b(morning report|morning brief|daily brief|the brief)\b/i.test(heard)) {
           setLine(heard); setReply("");
           await speak("One moment.");
           const r = await post<{ message: ChatMessage }>("/api/brief");
-          setReply(r.message.text); await speak(r.message.text); continue;
+          setReply(r.message.text); await speak(r.message.text, { bargeIn: true }); continue;
         }
         const answer = await ask(heard);
         setReply(answer);
-        await speak(answer || "Nothing came back. Try again.");
+        await speak(answer || "Nothing came back. Try again.", { bargeIn: true });
       }
     } catch (e) {
       setNote((e as Error).message);
@@ -173,10 +184,10 @@ export default function AmbientPage() {
   // The morning brief is read out when it runs; new approvals are announced and can be answered by voice.
   useEffect(() => onEvent((e) => {
     if (phase === "off") return;
-    if (e.type === "brief") { void (async () => { if (busyRef.current) return; busyRef.current = true; setPhase("awake"); try { chime(true); setReply(e.text); await speak(`Morning, Phil. Here's the brief. ${e.text}`); } finally { busyRef.current = false; setPhase("sleeping"); } })(); }
+    if (e.type === "brief") { void (async () => { if (busyRef.current) return; busyRef.current = true; setPhase("awake"); try { chime(true); setReply(e.text); await speak(`Morning, Phil. Here's the brief. ${e.text}`, { bargeIn: true }); } finally { busyRef.current = false; setPhase("sleeping"); } })(); }
     if (e.type === "approval.new") {
       const who = state?.agents.find((a) => a.id === e.approval.agentId)?.name ?? e.approval.agentId;
-      pendingApproval.current = { id: e.approval.id, title: e.approval.title };
+      pendingApproval.current = { id: e.approval.id, title: e.approval.title, kind: e.approval.kind, askedAt: Date.now() };
       void converse(`${who} needs your OK: ${e.approval.title}. Approve, reject, or later?`);
     }
   }), [onEvent, phase, state, speak, chime, converse]);
