@@ -11,6 +11,8 @@ export function ttsRoutes() {
   const key = process.env.ELEVENLABS_API_KEY;
   const voice = process.env.ELEVENLABS_VOICE_ID || "onwK4e9ZLuTAKqWW03F9"; // "Daniel"
   const model = process.env.ELEVENLABS_MODEL || "eleven_turbo_v2_5";
+  // 1.0 is the voice's natural pace; ElevenLabs accepts 0.7–1.2.
+  const speed = Math.min(1.2, Math.max(0.7, Number(process.env.ELEVENLABS_SPEED ?? 1.1)));
 
   r.get("/status", (c) => c.json({ available: !!key, provider: key ? "elevenlabs" : "browser" }));
   r.post("/", async (c) => {
@@ -20,7 +22,7 @@ export function ttsRoutes() {
     const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_64`, {
       method: "POST",
       headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/mpeg" },
-      body: JSON.stringify({ text: p.data.text, model_id: model, voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.2 } }),
+      body: JSON.stringify({ text: p.data.text, model_id: model, voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.2, speed } }),
     });
     if (!res.ok) return c.json({ error: `voice failed: ${res.status} ${(await res.text()).slice(0, 200)}` }, 502);
     return new Response(res.body, { headers: { "content-type": "audio/mpeg", "cache-control": "no-store" } });
