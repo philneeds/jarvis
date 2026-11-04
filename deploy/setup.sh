@@ -9,8 +9,24 @@
 # systemd services behind Caddy with TLS. Re-running updates the checkout and restarts.
 set -euo pipefail
 
-DOMAIN="${DOMAIN:?set DOMAIN=hq.example.com}"
-HQ_PASSWORD="${HQ_PASSWORD:?set HQ_PASSWORD}"
+DOMAIN="${DOMAIN:-}"
+if [[ -z "$DOMAIN" ]]; then
+  # No domain given: use a free sslip.io name built from this server's public IP.
+  IP="$(curl -fsS https://api.ipify.org || hostname -I | awk '{print $1}')"
+  DOMAIN="hq.${IP//./-}.sslip.io"
+fi
+HQ_PASSWORD="${HQ_PASSWORD:-}"
+if [[ -z "$HQ_PASSWORD" && -f /opt/jarvis/.env ]]; then HQ_PASSWORD="$(grep -oP '(?<=^HQ_PASSWORD=).*' /opt/jarvis/.env || true)"; fi
+if [[ -z "$HQ_PASSWORD" ]]; then
+  if [[ -r /dev/tty ]]; then
+    while [[ ${#HQ_PASSWORD} -lt 8 ]]; do
+      read -r -s -p "Choose the HQ login password (8+ characters, nothing shows while you type): " HQ_PASSWORD </dev/tty; echo
+    done
+  else
+    HQ_PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)"
+    GENERATED_PW=1
+  fi
+fi
 BRANCH="${BRANCH:-main}"
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   REPO="${REPO:-https://x-access-token:${GITHUB_TOKEN}@github.com/philneeds/jarvis.git}"
@@ -144,6 +160,7 @@ ufw allow OpenSSH >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/d
 sleep 3
 if curl -fsS http://localhost:4000/api/health >/dev/null; then
   log "Jarvis is up at https://$DOMAIN (TLS arrives within a minute once DNS points here)."
+  [[ -n "${GENERATED_PW:-}" ]] && log "HQ login password (generated, change it in $APP_DIR/.env): $HQ_PASSWORD"
 else
   log "Server did not answer yet; check: journalctl -u jarvis-server -n 50"
 fi
