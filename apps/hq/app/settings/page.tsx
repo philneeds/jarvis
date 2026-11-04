@@ -7,7 +7,7 @@ import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 
 interface Passkey { id: string; label: string; createdAt: string }
-interface Connectors { google: { configured: boolean; connected: boolean; email?: string }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
+interface Connectors { google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
 
 export default function SettingsPage() {
   const { state, refresh } = useLive();
@@ -27,13 +27,13 @@ export default function SettingsPage() {
   useEffect(() => {
     void load();
     const q = new URLSearchParams(location.search);
-    const g = q.get("google"); if (g) setGoogleMsg(g === "connected" ? "Google connected." : g);
+    const g = q.get("google"); if (g) setGoogleMsg(g.startsWith("connected") ? `Google connected${g.includes(":") && g.split(":")[1] ? ` (${decodeURIComponent(g.split(":")[1]!)})` : ""}.` : g);
     const xq = q.get("x"); if (xq) setXMsg(xq.startsWith("connected:") ? `@${xq.slice(10)} connected.` : xq);
   }, []);
   const connectX = async () => { try { const r = await api<{ url: string }>("/api/connectors/x/auth"); location.href = r.url; } catch (e) { setXMsg((e as Error).message); } };
   const disconnectX = async (handle: string) => { if (!confirm(`Disconnect @${handle}?`)) return; await post("/api/connectors/x/disconnect", { handle }); setXMsg(undefined); await load(); };
   const connectGoogle = async () => { try { const r = await api<{ url: string }>("/api/connectors/google/auth"); location.href = r.url; } catch (e) { setGoogleMsg((e as Error).message); } };
-  const disconnectGoogle = async () => { if (!confirm("Disconnect Google? Monica and the JD PM team lose calendar and mail until you reconnect.")) return; await post("/api/connectors/google/disconnect"); setGoogleMsg(undefined); await load(); };
+  const disconnectGoogle = async (email: string) => { if (!confirm(`Disconnect ${email}? Agents lose that calendar and mailbox until you reconnect.`)) return; await post("/api/connectors/google/disconnect", { email }); setGoogleMsg(undefined); await load(); };
 
   const addPasskey = async () => {
     setBusy(true); setMsg(undefined);
@@ -85,13 +85,13 @@ export default function SettingsPage() {
           <span className="label">Connectors</span>
           <div className="flex flex-wrap items-center gap-3 text-[12px]">
             <span className={`dot ${conn?.google.connected ? "dot-working" : "dot-idle"}`} />
-            <span><b>Google</b> · Calendar for Monica, Gmail for Stella&apos;s team{conn?.google.email ? ` · ${conn.google.email}` : ""}</span>
-            {conn?.google.connected ? <button className="btn btn-sm btn-danger ml-auto" onClick={disconnectGoogle}>Disconnect</button>
-              : conn?.google.configured ? <button className="btn btn-sm btn-primary ml-auto" onClick={connectGoogle}>Connect Google</button>
+            <span><b>Google</b> · calendars and mailboxes. Connect each account you want agents to see: yours, JD PM&apos;s, ProEdge&apos;s. The first is the default.</span>
+            {conn?.google.configured ? <button className="btn btn-sm btn-primary ml-auto" onClick={connectGoogle}>{conn.google.accounts.length ? "Connect another account" : "Connect Google"}</button>
               : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET</span>}
           </div>
-          {googleMsg && <p className="m-0 text-[12px]" style={{ color: googleMsg === "Google connected." ? "var(--green)" : "var(--red)" }}>{googleMsg}</p>}
-          <p className="m-0 text-[11px]" style={{ color: "var(--muted)" }}>Reads become tools you tick per agent (calendar_list_events, gmail_search, gmail_read, gmail_create_draft). Sending mail and creating events run only after you approve.</p>
+          {conn?.google.accounts.map((a, i) => <div key={a.email} className="flex items-center gap-3 pl-6 text-[12px]"><span>{a.email}{i === 0 ? <span style={{ color: "var(--muted)" }}> · default</span> : null}</span>{a.connectedAt && <span style={{ color: "var(--dim)" }}>{fmtTime(a.connectedAt)}</span>}<button className="btn btn-sm btn-danger ml-auto" onClick={() => disconnectGoogle(a.email)}>Disconnect</button></div>)}
+          {googleMsg && <p className="m-0 text-[12px]" style={{ color: googleMsg.startsWith("Google connected") ? "var(--green)" : "var(--red)" }}>{googleMsg}</p>}
+          <p className="m-0 text-[11px]" style={{ color: "var(--muted)" }}>Reads become tools you tick per agent (calendar_list_events, gmail_search, gmail_read, gmail_create_draft). Sending mail and changing the calendar run after you approve, or on their own where an agent&apos;s rules allow that kind.</p>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }}>
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.x.accounts.length ? "dot-working" : "dot-idle"}`} />

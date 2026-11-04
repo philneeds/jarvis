@@ -199,7 +199,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   // ---- Connectors -----------------------------------------------------------
   const oauthStates = new Set<string>();
   api.get("/connectors", async (c) => c.json({
-    google: connectors.google ? { configured: true, ...(await connectors.google.status()) } : { configured: false, connected: false },
+    google: connectors.google ? { configured: true, ...(await connectors.google.status()) } : { configured: false, connected: false, accounts: [] },
     x: connectors.x ? { configured: true, ...(await connectors.x.status()) } : { configured: false, accounts: [] },
     telegram: { configured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) },
     ntfy: { configured: !!process.env.NOTIFY_WEBHOOK_URL },
@@ -218,14 +218,15 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     try {
       const t = await connectors.google.exchangeCode(code);
       await jarvis.router.log("jarvis", "system", `Phil connected Google${t.email ? ` (${t.email})` : ""}`);
-      return c.redirect("/settings?google=connected");
+      return c.redirect(`/settings?google=connected:${encodeURIComponent(t.email ?? "")}`);
     } catch (e) {
       return c.redirect(`/settings?google=${encodeURIComponent((e as Error).message)}`);
     }
   });
   api.post("/connectors/google/disconnect", async (c) => {
-    await connectors.google?.disconnect();
-    await jarvis.router.log("jarvis", "system", "Phil disconnected Google");
+    const p = z.object({ email: z.string().optional() }).safeParse(await c.req.json().catch(() => ({})));
+    await connectors.google?.disconnect(p.success ? p.data.email : undefined);
+    await jarvis.router.log("jarvis", "system", `Phil disconnected Google${p.success && p.data.email ? ` (${p.data.email})` : ""}`);
     return c.json({ ok: true });
   });
   api.get("/connectors/x/auth", (c) => {

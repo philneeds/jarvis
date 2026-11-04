@@ -4,6 +4,7 @@ import { GoogleConnector, memoryStore, Jarvis, ModelRouter, mockProvider, rawMai
 
 function fakeGoogle() {
   const calls: { url: string; init?: RequestInit }[] = [];
+  let users = 0;
   const f = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
     calls.push({ url: u, init });
@@ -12,9 +13,11 @@ function fakeGoogle() {
       const body = String(init?.body);
       return json(body.includes("grant_type=refresh_token") ? { access_token: "at2", expires_in: 3600 } : { access_token: "at1", refresh_token: "rt", expires_in: 3600, scope: "x" });
     }
-    if (u.includes("/userinfo")) return json({ email: "phil@example.com" });
+    if (u.includes("/userinfo")) { users++; return json({ email: users === 1 ? "phil@example.com" : "info@jdpm.example.com" }); }
     if (u.includes("/calendar/v3/") && (init?.method ?? "GET") === "GET") return json({ items: [{ id: "e1", summary: "Smith kitchen walkthrough", start: { dateTime: "2026-11-04T14:00:00-05:00" }, end: { dateTime: "2026-11-04T15:00:00-05:00" }, location: "12 Oak St" }] });
     if (u.includes("/calendar/v3/") && init?.method === "POST") return json({ id: "e2", htmlLink: "https://calendar/e2" });
+    if (u.includes("/calendar/v3/") && init?.method === "PATCH") return json({ id: "e1", summary: "Smith kitchen walkthrough", htmlLink: "https://calendar/e1" });
+    if (u.includes("/calendar/v3/") && init?.method === "DELETE") return new Response(null, { status: 204 });
     if (u.includes("/messages?q=")) return json({ messages: [{ id: "m1" }] });
     if (u.includes("/messages/m1")) return json({ id: "m1", snippet: "Can you send the quote?", payload: { headers: [{ name: "From", value: "smith@example.com" }, { name: "Subject", value: "Kitchen" }, { name: "Date", value: "Mon" }], mimeType: "text/plain", body: { data: Buffer.from("Hi Phil, can you send the quote?").toString("base64url") } } });
     if (u.endsWith("/drafts")) return json({ id: "d1" });
@@ -32,7 +35,7 @@ test("OAuth exchange, refresh, calendar and gmail reads", async () => {
   assert.match(g.authUrl("abc"), /accounts\.google\.com.*state=abc/);
   assert.equal((await g.status()).connected, false);
   await g.exchangeCode("code");
-  assert.deepEqual(await g.status(), { connected: true, email: "phil@example.com" });
+  assert.equal((await g.status()).email, "phil@example.com");
   const ev = await g.listEvents();
   assert.equal(ev[0]!.title, "Smith kitchen walkthrough");
   now += 2 * 3600 * 1000; // token expired → refresh
@@ -70,4 +73,32 @@ test("mail encoding helpers", () => {
   const raw = rawMail({ to: "a@b.c", subject: "Hi", body: "Line" });
   assert.match(Buffer.from(raw, "base64url").toString(), /To: a@b.c\r\nSubject: Hi/);
   assert.equal(bodyText({ mimeType: "multipart/alternative", parts: [{ mimeType: "text/html", body: { data: Buffer.from("<b>x</b>").toString("base64url") } }, { mimeType: "text/plain", body: { data: Buffer.from("plain").toString("base64url") } }] }), "plain");
+});
+
+test("several Google accounts: pick by email, move and remove events", async () => {
+  const store = memoryStore(); await store.init();
+  const { f, calls } = fakeGoogle();
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: f });
+  await g.exchangeCode("c1"); await g.exchangeCode("c2");
+  const s = await g.status();
+  assert.deepEqual(s.accounts.map((a) => a.email), ["phil@example.com", "info@jdpm.example.com"]);
+  await g.searchMessages("from:smith", 5, "jdpm");
+  await assert.rejects(g.listEvents({ account: "nobody" }), /No Google account matching/);
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("m")], grok: [mockProvider("g")] } }) });
+  jarvis.addConnector(g, GoogleConnector.promptHint());
+  const mv = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Move the walkthrough to 3pm", body: "", payload: { action: "calendar.update", id: "e1", start: "2026-11-05T15:00:00-05:00", end: "2026-11-05T16:00:00-05:00" } });
+  await jarvis.decide(mv.id, "approved");
+  assert.ok(calls.some((c) => c.init?.method === "PATCH" && c.url.includes("/events/e1")));
+  const rm = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Remove the Zoom", body: "", payload: { action: "calendar.delete", id: "e1", title: "CryptoMondays Zoom" } });
+  await jarvis.decide(rm.id, "approved");
+  assert.ok(calls.some((c) => c.init?.method === "DELETE" && c.url.includes("/events/e1")));
+  await g.disconnect("info@jdpm.example.com");
+  assert.equal((await g.status()).accounts.length, 1);
+});
+
+test("legacy single-account tokens are picked up", async () => {
+  const store = memoryStore(); await store.init();
+  await store.settings.set("google.tokens", { access_token: "at", refresh_token: "rt", expires_at: Date.now() + 100000, email: "old@example.com" });
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: fakeGoogle().f });
+  assert.equal((await g.status()).email, "old@example.com");
 });
