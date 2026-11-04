@@ -15,6 +15,13 @@
       "when": 1793745873525,
       "tag": "0001_ventures",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793771305636,
+      "tag": "0002_chat_channel",
+      "breakpoints": true
     }
   ]
 }

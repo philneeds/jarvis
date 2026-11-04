@@ -10,11 +10,10 @@ import { Skyline } from "@/components/Skyline";
 import { Core, type CoreState } from "@/components/Core";
 import { useLive } from "@/lib/live";
 import { useVoice } from "@/lib/voice";
-import { api, post, timeAgo } from "@/lib/api";
-import type { ChatMessage } from "@/lib/types";
+import { api, timeAgo } from "@/lib/api";
 
 export default function HomePage() {
-  const { state, pending, attention, activity, messages, setMessages } = useLive();
+  const { state, pending, attention, activity, messages, send: submit } = useLive();
   const [on, setOn] = useState(true);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -23,10 +22,10 @@ export default function HomePage() {
     onHeard: async (heard) => {
       setBusy(true);
       try {
-        const r = await post<{ messages: ChatMessage[] }>("/api/chat", { text: heard });
-        setMessages((m) => { const ids = new Set(m.map((x) => x.id)); return [...m, ...r.messages.filter((x) => !ids.has(x.id))]; });
-        const reply = [...r.messages].reverse().find((m) => m.role !== "phil" && m.role !== "system");
-        if (reply) await voice.speak(reply.text, { bargeIn: true });
+        const { ack, final } = await submit(heard, "voice");
+        const first = await ack;
+        if (first) await voice.speak(first.text, { bargeIn: true });
+        if (first?.kind !== "final") { const answer = await final; if (answer) await voice.speak(answer.text, { bargeIn: true }); }
       } finally { setBusy(false); }
     },
   });
@@ -62,9 +61,11 @@ export default function HomePage() {
     const line = text.trim(); if (!line || busy) return;
     setText(""); setBusy(true);
     try {
-      const r = await post<{ messages: ChatMessage[] }>("/api/chat", { text: line });
-      setMessages((m) => { const ids = new Set(m.map((x) => x.id)); return [...m, ...r.messages.filter((x) => !ids.has(x.id))]; });
-      if (voiceOn) { const reply = [...r.messages].reverse().find((m) => m.role !== "phil" && m.role !== "system"); if (reply) void voice.speak(reply.text); }
+      const { ack, final } = await submit(line);
+      const first = await ack;
+      setBusy(false);
+      if (voiceOn && first) void voice.speak(first.text);
+      if (voiceOn && first?.kind !== "final") { const answer = await final; if (answer) void voice.speak(answer.text); }
     } finally { setBusy(false); }
   };
 

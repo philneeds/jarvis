@@ -21,7 +21,7 @@ const REPLY_WINDOW_MS = 6_000;
 const APPROVAL_VOICE_WINDOW_MS = 20_000;
 
 export default function AmbientPage() {
-  const { state, onEvent, pending, setMessages } = useLive();
+  const { state, onEvent, pending, send: submit } = useLive();
   const [phase, setPhase] = useState<Phase>("off");
   const [cfg, setCfg] = useState<{ wakeWordKey: string | null; tz: string; voice: boolean } | null>(null);
   const [line, setLine] = useState("Tap Start, then say \"Jarvis\".");
@@ -35,13 +35,13 @@ export default function AmbientPage() {
   const wakeLock = useRef<{ release(): Promise<void> } | null>(null);
   const pendingApproval = useRef<{ id: string; title: string; kind: string; askedAt: number } | null>(null);
 
+  /** Ask Jarvis: returns the ack text at once plus a promise of the final answer. */
   const ask = useCallback(async (heard: string) => {
     setLine(heard); setReply("");
-    const r = await post<{ messages: ChatMessage[] }>("/api/chat", { text: heard });
-    setMessages((m) => { const ids = new Set(m.map((x) => x.id)); return [...m, ...r.messages.filter((x) => !ids.has(x.id))]; });
-    const last = [...r.messages].reverse().find((m) => m.role !== "phil" && m.role !== "system");
-    return last?.text ?? "";
-  }, [setMessages]);
+    const { ack, final } = await submit(heard, "voice");
+    const first = await ack;
+    return { ack: first, final: first?.kind === "final" ? Promise.resolve(first) : final };
+  }, [submit]);
 
   const voice = useVoice({ onHeard: async () => undefined });
   const { speak, listen, stopSpeaking, stopListening } = voice;
@@ -89,9 +89,16 @@ export default function AmbientPage() {
           const r = await post<{ message: ChatMessage }>("/api/brief");
           setReply(r.message.text); await speak(r.message.text, { bargeIn: true }); continue;
         }
-        const answer = await ask(heard);
-        setReply(answer);
-        await speak(answer || "Nothing came back. Try again.", { bargeIn: true });
+        const { ack: first, final } = await ask(heard);
+        if (!first) { await speak("Nothing came back. Try again.", { bargeIn: true }); continue; }
+        setReply(first.text);
+        await speak(first.text, { bargeIn: true });
+        if (first.kind !== "final") {
+          // He said "on it": wait for the real answer, up to a few minutes, and read it when it lands.
+          const answer = await final;
+          if (answer) { setReply(answer.text); await speak(answer.text, { bargeIn: true }); }
+          else await speak("That's taking longer than usual. It'll be in Command when it lands.", { bargeIn: true });
+        }
       }
     } catch (e) {
       setNote((e as Error).message);

@@ -18,9 +18,13 @@ test("Phil chats from Telegram; strangers are ignored", async () => {
   const store = memoryStore();
   const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
   const { f, sent } = fakeTelegram();
-  const bot = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f });
+  const bot = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f, pollTimeout: 0 });
+  bot.start();
   await bot.handle({ update_id: 1, message: { message_id: 1, chat: { id: 42 }, text: "@stella how's the board?" } });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(sent.some((s) => s.method === "sendMessage" && /^Jarvis: Stella is on it/.test(String(s.body.text))));
   assert.ok(sent.some((s) => s.method === "sendMessage" && /^Stella: /.test(String(s.body.text))));
+  bot.stop();
   await bot.handle({ update_id: 2, message: { message_id: 2, chat: { id: 99 }, text: "hi" } });
   assert.ok(sent.some((s) => s.body.chat_id === 99 && /Not for you/.test(String(s.body.text))));
   assert.equal((await store.chat.list()).some((m) => m.text === "hi"), false);

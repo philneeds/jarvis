@@ -31,6 +31,11 @@ export class TelegramBot {
   start() {
     this.running = true;
     this.off = bus.onEvent((e: JarvisEvent) => {
+      if (e.type === "chat.message" && e.message.channel === "telegram" && e.message.role !== "phil") {
+        const o = e.message;
+        const who = o.role === "jarvis" ? "Jarvis" : o.role === "system" ? "HQ" : getAgent(o.agentId ?? "")?.name ?? o.agentId ?? "Agent";
+        void this.send(`${who}: ${o.text}`);
+      }
       if (e.type === "approval.new") void this.announce(e.approval);
       if (e.type === "attention" && e.change === "raised") void this.send(`Needs you · ${getAgent(e.item.agentId)?.name ?? e.item.agentId}\n${e.item.title}\n\n${e.item.why.slice(0, 800)}${e.item.due ? `\nDue ${e.item.due}` : ""}`, { reply_markup: { inline_keyboard: [[{ text: "✔ Done", callback_data: `att:${e.item.id}:done` }, { text: "💤 Snooze 3d", callback_data: `att:${e.item.id}:snoozed` }]] } });
     });
@@ -84,11 +89,8 @@ export class TelegramBot {
     if (String(msg.chat.id) !== this.opts.chatId) { await this.api("sendMessage", { chat_id: msg.chat.id, text: "This is Phil's Jarvis. Not for you." }).catch(() => undefined); return; }
     const text = msg.text.trim();
     if (text === "/start") { await this.send("Jarvis here. Talk to me, @ an agent, or /help."); return; }
-    const out = await this.jarvis.handle(text);
-    for (const o of out) {
-      const who = o.role === "jarvis" ? "Jarvis" : o.role === "system" ? "HQ" : getAgent(o.agentId ?? "")?.name ?? o.agentId ?? "Agent";
-      await this.send(`${who}: ${o.text}`);
-    }
+    // Replies (ack, late reports, final) are forwarded as they land by the chat.message listener in start().
+    await this.jarvis.submit(text, { channel: "telegram" });
   }
 }
 

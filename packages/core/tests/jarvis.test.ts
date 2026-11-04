@@ -25,9 +25,12 @@ test("Phil asks Jarvis, gets an answer from a Claude agent and a Grok agent (Pha
 test("@agent talks to the agent directly", async () => {
   const { jarvis } = make();
   const out = await jarvis.handle("@munger how's the week?");
-  assert.equal(out[0]!.role, "agent");
-  assert.equal(out[0]!.agentId, "munger");
-  assert.match(out[0]!.text, /Charlie Munger here/);
+  assert.equal(out[0]!.kind, "ack");
+  assert.match(out[0]!.text, /Charlie Munger is on it/);
+  assert.equal(out[1]!.role, "agent");
+  assert.equal(out[1]!.agentId, "munger");
+  assert.match(out[1]!.text, /Charlie Munger here/);
+  assert.equal(out[1]!.kind, "final");
 });
 
 test("kill switch and pause block runs", async () => {
@@ -166,7 +169,7 @@ test("a hand-off runs the right agent and posts its reply", async () => {
   handing.run = async (req) => { const r = await base(req); if (req.agent.id === "monica") r.text += '\n\n```handoff\n{"agent":"stella","task":"A kitchen lead from Dana Smith came in by email; follow up."}\n```'; return r; };
   const j2 = new J({ store, router: new MR({ store, providers: { claude: [handing], grok: [mp("g")] } }) });
   const out = await j2.handle("@monica anything in my mail?");
-  assert.ok(out[0]!.text.includes("[Handed to @stella]"));
+  assert.ok(out[1]!.text.includes("[Handed to @stella]"));
   const chat = await store.chat.list();
   assert.ok(chat.some((m) => m.role === "agent" && m.agentId === "stella" && m.via?.includes("monica")));
   const log = await store.activity.list({ agentId: "monica" });
@@ -193,7 +196,7 @@ test("attention items: raised from a reply, deduped, snoozed, done, and in Jarvi
   flag.run = async (req) => { const r = await base(req); if (req.agent.id === "monica") r.text += '\n\n```attention\n{"title":"Change your Chainstack password","why":"Breach notice on Nov 3.","due":"2026-11-05"}\n```'; return r; };
   const j2 = new J({ store, router: new MR({ store, providers: { claude: [flag], grok: [mp("g")] } }) });
   const out = await j2.handle("@monica anything important?");
-  assert.match(out[0]!.text, /\[Needs you: Change your Chainstack password\]/);
+  assert.match(out[1]!.text, /\[Needs you: Change your Chainstack password\]/);
   let items = await j2.attention();
   assert.equal(items.length, 1);
   assert.equal(items[0]!.due, "2026-11-05");
@@ -208,4 +211,28 @@ test("attention items: raised from a reply, deduped, snoozed, done, and in Jarvi
   assert.match(await j2.command("/waiting"), /Nothing is waiting/);
   assert.equal(extractBlocks("```attention\n{\"why\":\"no title\"}\n```").attention.length, 0);
   void jarvis;
+});
+
+test("submit answers at once; the final follows; a slow delegate posts a late report", async () => {
+  const { store } = make();
+  const { mockProvider: mp, ModelRouter: MR, Jarvis: J } = await import("../src/index.js");
+  const slow = mp("m"); const base = slow.run.bind(slow);
+  slow.run = async (req) => { if (req.agent.id === "lucas") await new Promise((r) => setTimeout(r, 300)); return base(req); };
+  const j2 = new J({ store, router: new MR({ store, providers: { claude: [slow], grok: [slow] } }) });
+  J.DELEGATE_TIMEOUT_MS = 100;
+  const t0 = Date.now();
+  const { message, done } = await j2.submit("Status from @stella and @lucas please", { channel: "telegram" });
+  assert.equal(message.channel, "telegram");
+  assert.ok(Date.now() - t0 < 250, "submit returns before the work is done");
+  const out = await done;
+  const ack = out.find((m) => m.kind === "ack")!;
+  assert.match(ack.text, /Asking Stella and Lucas/);
+  assert.equal(ack.replyTo, message.id);
+  assert.equal(ack.channel, "telegram");
+  const final = out.find((m) => m.kind === "final")!;
+  assert.match(final.text, /Lucas/); // named as still working
+  await new Promise((r) => setTimeout(r, 400));
+  const chat = await store.chat.list();
+  assert.ok(chat.some((m) => m.kind === "progress" && m.agentId === "lucas" && /Late report/.test(m.text)));
+  J.DELEGATE_TIMEOUT_MS = 120_000;
 });

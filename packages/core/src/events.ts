@@ -39,6 +39,12 @@ export interface ChatMessage {
   runId?: string;
   /** Which agents contributed, for the chat card. */
   via?: string[];
+  /** Where the conversation came from; replies inherit it so Telegram answers go back to Telegram. */
+  channel?: "hq" | "telegram" | "voice" | "schedule";
+  /** The Phil message this answers. */
+  replyTo?: string;
+  /** ack = "on it" within seconds; progress = someone finished late; final = the answer. */
+  kind?: "ack" | "progress" | "final";
 }
 
 export type ApprovalKind = "send" | "post" | "money" | "strategy" | "config" | "record" | "other";

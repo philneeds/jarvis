@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { bus, type Approval, type AttentionItem, type ChatMessage, type SystemStatus } from "../events.js";
 import { AGENTS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
 import { ModelRouter } from "../router/index.js";
@@ -62,16 +63,35 @@ export class Jarvis {
 
   // ---- Chat -------------------------------------------------------------
 
-  /** Handle one message from Phil. Returns the messages produced (already stored and broadcast). */
-  async handle(text: string): Promise<ChatMessage[]> {
+  /** The conversation a reply belongs to, carried through async work so every say() in it is tagged. */
+  private convo = new AsyncLocalStorage<{ channel: ChatMessage["channel"]; replyTo: string }>();
+
+  /**
+   * Submit a message from Phil and return at once with his message; the work continues in the background and
+   * every reply (ack, progress, final) arrives as a chat.message event tagged with replyTo = his message id.
+   */
+  async submit(text: string, opts: { channel?: ChatMessage["channel"] } = {}): Promise<{ message: ChatMessage; done: Promise<ChatMessage[]> }> {
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error("empty message");
+    const message = await this.say({ role: "phil", text: trimmed, channel: opts.channel ?? "hq" });
+    const done = this.convo.run({ channel: opts.channel ?? "hq", replyTo: message.id }, () => this.handleStored(trimmed).catch(async (e) => [await this.say({ role: "jarvis", text: `Something broke on my side: ${(e as Error).message}`, kind: "final" })]));
+    return { message, done };
+  }
+
+  /** Handle one message from Phil and wait for everything. Returns the replies (already stored and broadcast). */
+  async handle(text: string, opts: { channel?: ChatMessage["channel"] } = {}): Promise<ChatMessage[]> {
     const trimmed = text.trim();
     if (!trimmed) return [];
-    await this.say({ role: "phil", text: trimmed });
+    const { done } = await this.submit(trimmed, opts);
+    return done;
+  }
+
+  private async handleStored(trimmed: string): Promise<ChatMessage[]> {
     const out: ChatMessage[] = [];
 
     if (trimmed.startsWith("/")) {
       const reply = await this.command(trimmed);
-      out.push(await this.say({ role: "jarvis", text: reply }));
+      out.push(await this.say({ role: "jarvis", text: reply, kind: "final" }));
       return out;
     }
 
@@ -79,17 +99,22 @@ export class Jarvis {
     if (mention) {
       const agent = findAgent(mention[1]!);
       if (!agent) {
-        out.push(await this.say({ role: "jarvis", text: `No agent called "${mention[1]}". Try a name from the web, like @stella or @munger.` }));
+        out.push(await this.say({ role: "jarvis", text: `No agent called "${mention[1]}". Try a name from the web, like @stella or @munger.`, kind: "final" }));
         return out;
       }
       if (agent.id === "jarvis") return this.converse(mention[2] || trimmed, out);
+      // Say who's on it right away; the agent's answer follows when it lands.
+      out.push(await this.say({ role: "jarvis", text: `${agent.name} is on it.`, kind: "ack" }));
       const r = await this.runAgent(agent, mention[2] || "Give Phil a status update in your own voice.", { direct: true });
-      out.push(await this.say({ role: "agent", agentId: agent.id, text: r.blocked ? `(${agent.name} did not run: ${r.blocked})` : r.text, runId: r.runId }));
+      out.push(await this.say({ role: "agent", agentId: agent.id, text: r.blocked ? `(${agent.name} did not run: ${r.blocked})` : r.text, runId: r.runId, kind: "final" }));
       return out;
     }
 
     return this.converse(trimmed, out);
   }
+
+  /** How long a delegated agent may take before Jarvis answers without it (its part arrives later). */
+  static DELEGATE_TIMEOUT_MS = Number(process.env.JARVIS_DELEGATE_TIMEOUT_MS ?? 120_000);
 
   private async converse(userText: string, out: ChatMessage[]): Promise<ChatMessage[]> {
     const jarvis = getAgent("jarvis")!;
@@ -113,17 +138,22 @@ export class Jarvis {
     if (!delegations.length) {
       const { text, approvals, remember } = extractBlocks(plan.reply ?? planRun.text);
       await this.absorb(jarvis, approvals, remember, planRun.runId);
-      out.push(await this.say({ role: "jarvis", text: text || "Done.", runId: planRun.runId }));
+      out.push(await this.say({ role: "jarvis", text: text || "Done.", runId: planRun.runId, kind: "final" }));
       return out;
     }
 
-    if (plan.reply) out.push(await this.say({ role: "jarvis", text: plan.reply, runId: planRun.runId }));
+    // Ack within seconds: who's being asked and that the answer follows.
+    const names = delegations.map((d) => d.agent.name);
+    const ack = plan.reply?.trim() || `On it. Asking ${names.length === 1 ? names[0] : names.slice(0, -1).join(", ") + " and " + names[names.length - 1]}; I'll be back within a couple of minutes.`;
+    out.push(await this.say({ role: "jarvis", text: ack, runId: planRun.runId, kind: "ack" }));
     for (const d of delegations) await this.router.log("jarvis", "delegate", `Jarvis → ${d.agent.name}: ${d.task.slice(0, 200)}`, planRun.runId);
 
-    const reports = await Promise.all(delegations.map(async (d) => {
-      const r = await this.runAgent(d.agent, d.task, { direct: true, parentRunId: planRun.runId, from: "Jarvis" });
-      return { agent: d.agent, task: d.task, text: r.text, blocked: r.blocked };
-    }));
+    // Each delegate is time-boxed. A slow one doesn't hold the answer: Jarvis answers with what's in, names who's still
+    // working, and that agent's report posts on its own when it lands.
+    type Report = { agent: AgentDef; task: string; text: string; blocked?: string; late?: boolean };
+    const runs = delegations.map((d) => this.runAgent(d.agent, d.task, { direct: true, parentRunId: planRun.runId, from: "Jarvis" }).then((r) => ({ agent: d.agent, task: d.task, text: r.text, blocked: r.blocked }) as Report));
+    const reports: Report[] = await Promise.all(runs.map((pr, i) => Promise.race([pr, new Promise<Report>((res) => setTimeout(() => res({ agent: delegations[i]!.agent, task: delegations[i]!.task, text: "", blocked: "still working; their report will follow", late: true }), Jarvis.DELEGATE_TIMEOUT_MS))])));
+    reports.forEach((r, i) => { if (r.late) void runs[i]!.then(async (late) => { await this.say({ role: "agent", agentId: late.agent.id, text: late.blocked ? `(${late.agent.name} did not run: ${late.blocked})` : `Late report: ${late.text}`, kind: "progress", via: ["jarvis"] }); }); });
 
     const synth = await this.router.run(jarvis, { system, prompt: synthesisPrompt(userText, reports), direct: true, parentRunId: planRun.runId, maxTurns: 1, onDelta: this.streamer("jarvis") });
     const final = synth.blocked
@@ -131,7 +161,7 @@ export class Jarvis {
       : synth.text;
     const { text, approvals, remember } = extractBlocks(final);
     await this.absorb(jarvis, approvals, remember, synth.runId);
-    out.push(await this.say({ role: "jarvis", text, runId: synth.runId, via: reports.map((r) => r.agent.id) }));
+    out.push(await this.say({ role: "jarvis", text, runId: synth.runId, via: reports.map((r) => r.agent.id), kind: "final" }));
     return out;
   }
 
@@ -292,7 +322,8 @@ export class Jarvis {
   }
 
   async say(m: Omit<ChatMessage, "id" | "at">): Promise<ChatMessage> {
-    const msg: ChatMessage = { id: randomUUID(), at: new Date().toISOString(), ...m };
+    const ctx = this.convo.getStore();
+    const msg: ChatMessage = { id: randomUUID(), at: new Date().toISOString(), ...(ctx && m.role !== "phil" ? { channel: ctx.channel, replyTo: ctx.replyTo } : {}), ...m };
     await this.store.chat.add(msg);
     bus.emitEvent({ type: "chat.message", message: msg });
     return msg;

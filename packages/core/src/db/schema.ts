@@ -8,6 +8,9 @@ export const chatMessages = pgTable("chat_messages", {
   text: text("text").notNull(),
   runId: text("run_id"),
   via: jsonb("via").$type<string[]>(),
+  channel: text("channel"),
+  replyTo: text("reply_to"),
+  kind: text("kind"),
 }, (t) => [index("chat_at_idx").on(t.at)]);
 
 export const runs = pgTable("runs", {

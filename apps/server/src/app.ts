@@ -39,10 +39,12 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
 
   api.get("/chat", async (c) => c.json({ messages: await jarvis.store.chat.list(Number(c.req.query("limit") ?? 100)) }));
   api.post("/chat", async (c) => {
-    const parsed = z.object({ text: z.string().min(1).max(8000) }).safeParse(await c.req.json().catch(() => ({})));
+    const parsed = z.object({ text: z.string().min(1).max(8000), wait: z.boolean().optional(), channel: z.enum(["hq", "telegram", "voice", "schedule"]).optional() }).safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "text required" }, 400);
-    const messages = await jarvis.handle(parsed.data.text);
-    return c.json({ messages });
+    const { message, done } = await jarvis.submit(parsed.data.text, { channel: parsed.data.channel ?? "hq" });
+    if (parsed.data.wait) return c.json({ messages: await done, replyTo: message.id });
+    // Replies stream in over the websocket as chat.message events with replyTo = this message's id.
+    return c.json({ messages: [message], replyTo: message.id, pending: true });
   });
 
   api.get("/brief", async (c) => {

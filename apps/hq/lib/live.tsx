@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { JarvisEvent } from "@jarvis/core";
-import { api, wsUrl } from "./api";
+import { api, post, wsUrl } from "./api";
 import type { State, ChatMessage, Approval, ActivityEntry, AttentionItem } from "./types";
 
 interface Live {
@@ -19,6 +19,8 @@ interface Live {
   ventureTick: number;
   /** Raw event feed for pages that react to specific events (the always-on device). Returns an unsubscribe. */
   onEvent: (fn: (e: JarvisEvent) => void) => () => void;
+  /** Send to Jarvis; resolves with the ack (fast) and a promise of the final answer (slower). */
+  send: (text: string, channel?: ChatMessage["channel"]) => Promise<{ replyTo: string; ack: Promise<ChatMessage | null>; final: Promise<ChatMessage | null> }>;
   refresh: () => Promise<void>;
   setMessages: (fn: (m: ChatMessage[]) => ChatMessage[]) => void;
   setPending: (fn: (a: Approval[]) => Approval[]) => void;
@@ -37,6 +39,18 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [streams, setStreams] = useState<Record<string, { agentId: string; text: string; at: number }>>({});
   const [ventureTick, setVentureTick] = useState(0);
   const listeners = useRef(new Set<(e: JarvisEvent) => void>());
+  const waiters = useRef<{ replyTo: string; kinds: string[]; resolve: (m: ChatMessage | null) => void }[]>([]);
+  const waitForReply = useCallback((replyTo: string, kinds: string[], timeoutMs: number) => new Promise<ChatMessage | null>((resolve) => {
+    const w = { replyTo, kinds, resolve: (m: ChatMessage | null) => { clearTimeout(t); waiters.current = waiters.current.filter((x) => x !== w); resolve(m); } };
+    const t = setTimeout(() => w.resolve(null), timeoutMs);
+    waiters.current.push(w);
+  }), []);
+  const send = useCallback(async (text: string, channel?: ChatMessage["channel"]) => {
+    const r = await post<{ messages: ChatMessage[]; replyTo: string }>("/api/chat", { text, channel });
+    setMessagesState((m) => { const ids = new Set(m.map((x) => x.id)); return [...m, ...r.messages.filter((x) => !ids.has(x.id))]; });
+    // The ack is any reply inside 40 s; the final answer may take a few minutes.
+    return { replyTo: r.replyTo, ack: waitForReply(r.replyTo, ["ack", "final"], 40_000), final: waitForReply(r.replyTo, ["final"], 6 * 60_000) };
+  }, [waitForReply]);
   const onEvent = useCallback((fn: (e: JarvisEvent) => void) => { listeners.current.add(fn); return () => { listeners.current.delete(fn); }; }, []);
   const wsRef = useRef<WebSocket | null>(null);
   const [wsGen, setWsGen] = useState(0);
@@ -85,6 +99,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             break;
           case "chat.message":
             setMessagesState((m) => (m.some((x) => x.id === e.message.id) ? m : [...m, e.message].slice(-500)));
+            for (const w of [...waiters.current]) if (e.message.replyTo === w.replyTo && e.message.kind && w.kinds.includes(e.message.kind)) w.resolve(e.message);
             setStreams((st) => { const n = { ...st }; for (const [k, v] of Object.entries(n)) if (v.agentId === (e.message.agentId ?? (e.message.role === "jarvis" ? "jarvis" : v.agentId))) delete n[k]; return n; });
             break;
           case "chat.stream":
@@ -122,10 +137,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [wsGen]);
 
   const value = useMemo<Live>(() => ({
-    state, connected, error, messages, pending, attention, activity, streams, ventureTick, onEvent, refresh,
+    state, connected, error, messages, pending, attention, activity, streams, ventureTick, onEvent, send, refresh,
     setMessages: (fn) => setMessagesState(fn),
     setPending: (fn) => setPendingState(fn),
-  }), [state, connected, error, messages, pending, attention, activity, streams, ventureTick, onEvent, refresh]);
+  }), [state, connected, error, messages, pending, attention, activity, streams, ventureTick, onEvent, send, refresh]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

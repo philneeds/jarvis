@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useLive } from "@/lib/live";
-import { post, fmtTime } from "@/lib/api";
+import { fmtTime } from "@/lib/api";
 import type { ChatMessage } from "@/lib/types";
 import { Md } from "./Md";
 import { useVoice } from "@/lib/voice";
@@ -19,7 +19,7 @@ function speech(): Recognition | null {
 }
 
 export function Chat({ compact, initial }: { compact?: boolean; initial?: string }) {
-  const { state, messages, setMessages, streams } = useLive();
+  const { state, messages, streams, send: submit } = useLive();
   const [text, setText] = useState(initial ?? "");
   const [busy, setBusy] = useState(false);
   const [readAloud, setReadAloud] = useState(false);
@@ -38,12 +38,15 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
     if (!line || busy) return;
     setText(""); setSuggest([]); setBusy(true); setError(undefined);
     try {
-      const r = await post<{ messages: ChatMessage[] }>("/api/chat", { text: line });
-      setMessages((m) => { const ids = new Set(m.map((x) => x.id)); return [...m, ...r.messages.filter((x) => !ids.has(x.id))]; });
-      if (readAloud) { const reply = [...r.messages].reverse().find((m) => m.role !== "phil" && m.role !== "system"); if (reply) void voice.speak(reply.text); }
+      const { ack, final } = await submit(line);
+      const first = await ack;                       // "on it" lands in seconds; the box frees up here
+      setBusy(false); inputRef.current?.focus();
+      if (readAloud && first) void voice.speak(first.text);
+      const answer = await final;                    // the real answer streams in later; speak it if asked
+      if (readAloud && answer && answer.id !== first?.id) void voice.speak(answer.text);
     } catch (e) {
       setError((e as Error).message);
-    } finally { setBusy(false); inputRef.current?.focus(); }
+    } finally { setBusy(false); }
   };
 
   const onSubmit = (e: FormEvent) => { e.preventDefault(); void send(); };

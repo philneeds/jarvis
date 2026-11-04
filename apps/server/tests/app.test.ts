@@ -34,9 +34,13 @@ test("login gates the API", async () => {
   assert.equal(j.agents.length, 53);
   assert.equal(j.status.level, "green");
 
-  const chat = await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "@stella anything new?" }) });
-  const cj = await chat.json() as { messages: { role: string; agentId?: string }[] };
-  assert.equal(cj.messages[0]!.agentId, "stella");
+  const quick = await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "@stella anything new?" }) });
+  const qj = await quick.json() as { messages: { role: string }[]; pending?: boolean; replyTo: string };
+  assert.equal(qj.pending, true);
+  assert.equal(qj.messages[0]!.role, "phil");
+  const chat = await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "@stella anything new?", wait: true }) });
+  const cj = await chat.json() as { messages: { role: string; agentId?: string; kind?: string }[] };
+  assert.equal(cj.messages.find((m) => m.kind === "final")!.agentId, "stella");
 
   const kill = await call("/api/kill", { method: "POST", cookie, body: JSON.stringify({ scope: "all", paused: true }) });
   assert.equal(((await kill.json()) as { status: { level: string } }).status.level, "red");
