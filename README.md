@@ -94,7 +94,8 @@ curl -fsSL https://raw.githubusercontent.com/philneeds/jarvis/main/deploy/setup.
 
 ```bash
 sudo -iu jarvis
-claude login && grok login
+claude login
+grok login --device-auth
 exit
 systemctl restart jarvis-server
 ```

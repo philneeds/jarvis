@@ -8,6 +8,7 @@
 # Installs Node 22, pnpm, Postgres, Caddy; clones the repo to /opt/jarvis; builds; migrates; starts two
 # systemd services behind Caddy with TLS. Re-running updates the checkout and restarts.
 set -euo pipefail
+rand() { head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-"${1:-32}"; }
 
 DOMAIN="${DOMAIN:-}"
 if [[ -z "$DOMAIN" ]]; then
@@ -23,7 +24,7 @@ if [[ -z "$HQ_PASSWORD" ]]; then
       read -r -s -p "Choose the HQ login password (8+ characters, nothing shows while you type): " HQ_PASSWORD </dev/tty; echo
     done
   else
-    HQ_PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)"
+    HQ_PASSWORD="$(rand 20)"
     GENERATED_PW=1
   fi
 fi
@@ -49,6 +50,8 @@ if ! command -v node >/dev/null || [[ "$(node -v)" != v22* ]]; then
   apt-get install -y -qq nodejs >/dev/null
 fi
 command -v pnpm >/dev/null || npm install -g pnpm@10 >/dev/null
+command -v claude >/dev/null || { log "Claude Code"; npm install -g @anthropic-ai/claude-code >/dev/null; }
+command -v grok >/dev/null || { log "Grok Build CLI"; npm install -g @xai-official/grok >/dev/null; }
 
 if ! command -v caddy >/dev/null; then
   log "Caddy"
@@ -72,17 +75,17 @@ fi
 log "Postgres"
 systemctl enable --now postgresql >/dev/null
 if ! sudo -u postgres psql -tAc "select 1 from pg_roles where rolname='jarvis'" | grep -q 1; then
-  DB_PASS="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"
+  DB_PASS="$(rand 32)"
   sudo -u postgres psql -qc "create role jarvis login password '$DB_PASS'"
   sudo -u postgres psql -qc "create database jarvis owner jarvis"
 else
   DB_PASS="$(grep -oP '(?<=^DATABASE_URL=postgres://jarvis:)[^@]+' "$APP_DIR/.env" 2>/dev/null || true)"
-  if [[ -z "$DB_PASS" ]]; then DB_PASS="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"; sudo -u postgres psql -qc "alter role jarvis password '$DB_PASS'"; fi
+  if [[ -z "$DB_PASS" ]]; then DB_PASS="$(rand 32)"; sudo -u postgres psql -qc "alter role jarvis password '$DB_PASS'"; fi
 fi
 
 log "Environment"
 if [[ ! -f "$APP_DIR/.env" ]]; then
-  SESSION_SECRET="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48)"
+  SESSION_SECRET="$(rand 48)"
   cat > "$APP_DIR/.env" <<EOF
 NODE_ENV=production
 HQ_PASSWORD=$HQ_PASSWORD
@@ -90,7 +93,7 @@ HQ_SESSION_SECRET=$SESSION_SECRET
 HQ_ORIGIN=https://$DOMAIN
 HQ_RP_ID=$DOMAIN
 NEXT_PUBLIC_WS_URL=wss://$DOMAIN/ws
-NEXT_PUBLIC_CITY=Rochester, NY
+NEXT_PUBLIC_CITY="Rochester, NY"
 NEXT_PUBLIC_LAT=43.16
 NEXT_PUBLIC_LON=-77.61
 DATABASE_URL=postgres://jarvis:$DB_PASS@localhost:5432/jarvis
@@ -168,8 +171,8 @@ cat <<EOF
 
 Next, sign the plans in as the app user (once):
   sudo -iu $APP_USER
-  claude login     # Claude Code on your plan
-  grok login       # Grok Build CLI on SuperGrok
+  claude login                 # Claude Code on your plan
+  grok login --device-auth     # Grok Build CLI on SuperGrok (device code: no browser needed on the server)
   exit
   systemctl restart jarvis-server
 Secrets go in $APP_DIR/.env, then: systemctl restart jarvis-server jarvis-hq
