@@ -3,10 +3,12 @@ import type { AgentRequest, AgentResult, Provider } from "./types.js";
 import { ProviderError } from "./types.js";
 
 /**
- * Grok provider. Default mode calls the Grok Build CLI non-interactively (`grok -p "<prompt>"`),
- * which runs on Phil's SuperGrok plan after `grok login`. Fallback: the xAI API with XAI_API_KEY.
+ * Grok provider. Default mode calls the Grok Build CLI headless (`grok ... -p "<prompt>"`), which runs on
+ * Phil's SuperGrok plan after `grok login`. Scouts use Grok's built-in web/X search, which is read-only and
+ * needs no approval; in headless mode anything that WOULD need approval (shell, file edits) is denied rather
+ * than left hanging, and a turn budget keeps a scout from looping. Fallback: the xAI API with XAI_API_KEY.
  *   GROK_BIN   binary name or path (default "grok")
- *   GROK_ARGS  extra args, space-separated (default "-p")
+ *   GROK_ARGS  args before the prompt, space-separated (default "--permission-mode dontAsk --max-turns 8 -p")
  *   GROK_MODE  "cli" (default) or "api"
  */
 export function grokProvider(mode = process.env.GROK_MODE || "cli"): Provider {
@@ -15,7 +17,7 @@ export function grokProvider(mode = process.env.GROK_MODE || "cli"): Provider {
 
 export function grokCliProvider(): Provider {
   const bin = process.env.GROK_BIN || "grok";
-  const extra = (process.env.GROK_ARGS || "-p").split(" ").filter(Boolean);
+  const extra = (process.env.GROK_ARGS || "--permission-mode dontAsk --max-turns 8 -p").split(" ").filter(Boolean);
   return {
     id: "grok:cli",
     async available() {
@@ -41,6 +43,9 @@ export function grokCliProvider(): Provider {
           if (code === 0) resolve(out);
           else reject(new ProviderError(`grok exited ${code}: ${err.trim() || out.trim()}`.slice(0, 500), "grok:cli"));
         });
+        // A scout stuck on something interactive must not hold the run forever.
+        const t = setTimeout(() => { p.kill("SIGTERM"); reject(new ProviderError("grok timed out after 5 minutes", "grok:cli")); }, Number(process.env.GROK_TIMEOUT_MS ?? 300_000));
+        p.on("exit", () => clearTimeout(t));
       });
       const approxIn = Math.ceil(prompt.length / 4), approxOut = Math.ceil(text.length / 4);
       return {

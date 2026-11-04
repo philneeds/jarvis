@@ -129,11 +129,13 @@ export class ModelRouter {
         await this.store.agentState.set(agent.id, { status: "idle", lastRunAt: finishedAt, lastRunId: runId, lastError: "" });
         bus.emitEvent({ type: "agent.status", agentId: agent.id, status: "idle", at: finishedAt, detail: `last run ${res.durationMs}ms on ${res.modelId}` });
         await this.log(agent.id, "run", `${agent.name} ran on ${res.modelId} (${res.provider}) in ${(res.durationMs / 1000).toFixed(1)}s`, runId, { prompt: opts.prompt.slice(0, 500), output: res.text.slice(0, 2000), tokens: res.inputTokens + res.outputTokens });
+        console.log(`[run] ${agent.id} ok ${res.provider} ${res.modelId} ${res.durationMs}ms ${res.text.length}ch`);
         bus.emitEvent({ type: "usage", usage: await usageSummary(this.store) });
         return { ...base, ...res, runId, agentId: agent.id };
       } catch (e) {
         const msg = e instanceof ProviderError ? e.message : (e as Error).message;
         errors.push(`${p.id}: ${msg}`);
+        console.warn(`[run] ${agent.id} failed on ${p.id}: ${msg.slice(0, 300)}`);
         if (opts.signal?.aborted) break;
       }
     }
