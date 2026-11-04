@@ -15,6 +15,7 @@ import type { ChatMessage } from "@/lib/types";
  * The morning brief is read out when it runs; approvals are announced and can be decided by voice.
  */
 type Phase = "off" | "sleeping" | "awake";
+type SpeechRecognitionLike = { start(): void; stop(): void; abort(): void; lang: string; interimResults: boolean; continuous: boolean; onresult: ((e: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null };
 const IDLE_AFTER_MS = 25_000;
 
 export default function AmbientPage() {
@@ -89,9 +90,35 @@ export default function AmbientPage() {
     }
   }, [ask, chime, listen, speak]);
 
-  // Wake word (Porcupine, built-in "Jarvis") when a key is configured; otherwise double-clap only.
+  // Without a Picovoice key: keep the browser's own speech recognition running and watch for the word "Jarvis".
+  // It restarts itself when the browser ends a session and stays quiet while he's awake.
+  const wordListener = useRef<{ stop(): void } | null>(null);
+  const startWordListener = useCallback(() => {
+    const w = window as unknown as { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike };
+    const C = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+    if (!C) return false;
+    let stopped = false, rec: SpeechRecognitionLike | null = null;
+    const spin = () => {
+      if (stopped) return;
+      if (busyRef.current) { setTimeout(spin, 800); return; }
+      rec = new C(); rec.lang = "en-US"; rec.interimResults = true; rec.continuous = true;
+      rec.onresult = (e) => {
+        if (busyRef.current) return;
+        let s = ""; for (let i = e.resultIndex; i < e.results.length; i++) s += e.results[i]![0]!.transcript + " ";
+        if (/\b(jarvis|hey jarvis|ok jarvis)\b/i.test(s)) { try { rec?.abort(); } catch { /* fine */ } void converse(); }
+      };
+      rec.onend = () => { if (!stopped) setTimeout(spin, 300); };
+      rec.onerror = () => { /* onend follows and restarts */ };
+      try { rec.start(); } catch { setTimeout(spin, 1500); }
+    };
+    spin();
+    wordListener.current = { stop: () => { stopped = true; try { rec?.abort(); } catch { /* fine */ } } };
+    return true;
+  }, [converse]);
+
+  // Wake word: Porcupine (on-device) when a key is configured; else the browser's speech recognition; else clap only.
   const startWake = useCallback(async () => {
-    if (!cfg?.wakeWordKey) { setWakeReady("clap"); return; }
+    if (!cfg?.wakeWordKey) { setWakeReady(startWordListener() ? "wakeword" : "clap"); return; }
     try {
       const [{ PorcupineWorker, BuiltInKeyword }, { WebVoiceProcessor }] = await Promise.all([import("@picovoice/porcupine-web"), import("@picovoice/web-voice-processor")]);
       const w = await PorcupineWorker.create(cfg.wakeWordKey, [BuiltInKeyword.Jarvis], () => { if (!busyRef.current) void converse(); }, { publicPath: "/porcupine_params.pv" });
@@ -102,7 +129,7 @@ export default function AmbientPage() {
       setNote(`Wake word unavailable (${(e as Error).message.slice(0, 120)}); clapping still works.`);
       setWakeReady("clap");
     }
-  }, [cfg, converse]);
+  }, [cfg, converse, startWordListener]);
 
   // Clap-to-wake: on by default; sensitivity and on/off are remembered on this device.
   const [clapOn, setClapOn] = useState(true);
@@ -112,7 +139,7 @@ export default function AmbientPage() {
     if (!cfg) return;
     try {
       const saved = localStorage.getItem("hq.clap");
-      setClapOn(saved ? saved !== "off" : !cfg.wakeWordKey);
+      setClapOn(saved ? saved !== "off" : false);
       const s = localStorage.getItem("hq.clapSens"); if (s === "low" || s === "normal" || s === "high") setClapSens(s);
     } catch { /* ignore */ }
   }, [cfg]);
@@ -129,6 +156,7 @@ export default function AmbientPage() {
   };
   const stop = async () => {
     stopListening(); stopSpeaking();
+    wordListener.current?.stop(); wordListener.current = null;
     await porcupine.current?.release().catch(() => undefined); porcupine.current = null;
     await wakeLock.current?.release().catch(() => undefined); wakeLock.current = null;
     try { if (document.fullscreenElement) await document.exitFullscreen(); } catch { /* fine */ }
@@ -153,7 +181,7 @@ export default function AmbientPage() {
     }
   }), [onEvent, phase, state, speak, chime, converse]);
 
-  useEffect(() => () => { void porcupine.current?.release().catch(() => undefined); void wakeLock.current?.release().catch(() => undefined); }, []);
+  useEffect(() => () => { wordListener.current?.stop(); void porcupine.current?.release().catch(() => undefined); void wakeLock.current?.release().catch(() => undefined); }, []);
 
   const coreState: CoreState = state?.status.killSwitch.all ? "paused" : voice.speaking ? "speaking" : voice.listening ? "listening" : phase === "awake" ? "thinking" : "idle";
   const label = phase === "off" ? "OFFLINE" : coreState === "speaking" ? "SPEAKING" : coreState === "listening" ? "LISTENING" : coreState === "thinking" ? "THINKING" : coreState === "paused" ? "PAUSED" : "STANDING BY";
@@ -186,7 +214,7 @@ export default function AmbientPage() {
       <footer className="relative w-full max-w-3xl flex items-center justify-between gap-3" style={{ zIndex: 1 }}>
         <Link href="/" className="btn btn-sm">HQ</Link>
         <div className="flex flex-wrap items-center justify-center gap-2 text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--dim)" }}>
-          <span>{cfg ? (cfg.voice ? "voice: ElevenLabs" : "voice: this device") : ""}{cfg && !cfg.wakeWordKey ? " · no wake-word key" : ""}</span>
+          <span>{cfg ? (cfg.voice ? "voice: ElevenLabs" : "voice: this device") : ""}{cfg ? (cfg.wakeWordKey ? " · wake word: on-device" : " · wake word: speech service") : ""}</span>
           <label className="btn btn-sm cursor-pointer" style={clapOn ? { borderColor: "var(--accent)" } : undefined}><input type="checkbox" className="sr-only" checked={clapOn} onChange={(e) => setClap(e.target.checked)} />clap {clapOn ? "on" : "off"}</label>
           {clapOn && <select className="input h-8 w-28 text-[10px] uppercase" aria-label="Clap sensitivity" value={clapSens} onChange={(e) => setSens(e.target.value as ClapSensitivity)}><option value="low">quiet room</option><option value="normal">normal</option><option value="high">big room</option></select>}
         </div>
