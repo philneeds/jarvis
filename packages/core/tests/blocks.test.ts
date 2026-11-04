@@ -29,7 +29,7 @@ test("parsePlan tolerates fences and prose", () => {
 });
 
 test("Grok CLI json output is parsed to the final text; plain output falls through", () => {
-  const j = parseGrokJson('{"text":"**@tusar1687** — 4 Nov 2026\n\n> any chance","stopReason":"end_turn","num_turns":1,"usage":{"input_tokens":16511,"output_tokens":214},"total_cost_usd":0.07,"modelUsage":{"grok-4.7-build":{}}}');
+  const j = parseGrokJson('{"text":"**@tusar1687** — 4 Nov 2026\\n\\n> any chance","stopReason":"end_turn","num_turns":1,"usage":{"input_tokens":16511,"output_tokens":214},"total_cost_usd":0.07,"modelUsage":{"grok-4.7-build":{}}}');
   assert.equal(j?.text.startsWith("**@tusar1687**"), true);
   assert.equal(j?.model, "grok-4.7-build");
   assert.equal(j?.input, 16511);
