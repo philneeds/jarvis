@@ -4,16 +4,18 @@ export interface ApprovalBlock { kind: ApprovalKind; title: string; body: string
 export interface RememberBlock { scope: string; key: string; value: string }
 export interface MetricBlock { venture: string; key: string; value: number; at?: string }
 export interface RecordBlock { venture: string; kind: string; id?: string; title: string; status?: string; fields?: Record<string, unknown> }
+export interface HandoffBlock { agent: string; task: string }
 
 const KINDS: ApprovalKind[] = ["send", "post", "money", "strategy", "config", "record", "other"];
 
 /** Pull fenced ```approval and ```remember JSON blocks out of an agent's reply. */
-export function extractBlocks(text: string): { text: string; approvals: ApprovalBlock[]; remember: RememberBlock[]; metrics: MetricBlock[]; records: RecordBlock[] } {
+export function extractBlocks(text: string): { text: string; approvals: ApprovalBlock[]; remember: RememberBlock[]; metrics: MetricBlock[]; records: RecordBlock[]; handoffs: HandoffBlock[] } {
   const approvals: ApprovalBlock[] = [];
   const remember: RememberBlock[] = [];
   const metrics: MetricBlock[] = [];
   const records: RecordBlock[] = [];
-  const re = /```(approval|remember|metric|record)\s*\n([\s\S]*?)```/g;
+  const handoffs: HandoffBlock[] = [];
+  const re = /```(approval|remember|metric|record|handoff)\s*\n([\s\S]*?)```/g;
   const cleaned = text.replace(re, (_m, tag: string, body: string) => {
     let parsed: unknown;
     try { parsed = JSON.parse(body.trim()); } catch { return _m; }
@@ -25,6 +27,14 @@ export function extractBlocks(text: string): { text: string; approvals: Approval
         approvals.push({ kind: KINDS.includes(o.kind as ApprovalKind) ? (o.kind as ApprovalKind) : "other", title: String(o.title), body: String(o.body ?? ""), payload: o.payload && typeof o.payload === "object" ? (o.payload as Record<string, unknown>) : undefined });
       }
       return approvals.length ? `[Approval queued: ${approvals[approvals.length - 1]!.title}]` : _m;
+    }
+    if (tag === "handoff") {
+      for (const it of items) {
+        const o = it as Partial<HandoffBlock>;
+        if (!o || typeof o !== "object" || !o.agent || !o.task) continue;
+        handoffs.push({ agent: String(o.agent).replace(/^@/, "").toLowerCase(), task: String(o.task) });
+      }
+      return handoffs.length ? `[Handed to ${handoffs.map((h) => "@" + h.agent).join(", ")}]` : _m;
     }
     if (tag === "metric") {
       for (const it of items) {
@@ -49,7 +59,7 @@ export function extractBlocks(text: string): { text: string; approvals: Approval
     }
     return "";
   });
-  return { text: cleaned.replace(/\n{3,}/g, "\n\n").trim(), approvals, remember, metrics, records };
+  return { text: cleaned.replace(/\n{3,}/g, "\n\n").trim(), approvals, remember, metrics, records, handoffs };
 }
 
 /** Parse Jarvis's plan JSON, tolerating fences and stray prose around it. */

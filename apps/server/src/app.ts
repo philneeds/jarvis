@@ -120,9 +120,10 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const p = z.object({
       persona: z.object({ reportsTo: str, job: str, daily: str, tools: str, alone: str, approval: str, preferredAI: str, good: str }).partial().optional(),
       model: z.enum(Object.keys(MODELS) as [string, ...string[]]).nullable().optional(),
-      schedule: z.object({ enabled: z.boolean(), when: z.string().regex(/^(daily@\d{2}:\d{2}|every:\d{1,4}|)$/), task: z.string().max(2000) }).nullable().optional(),
+      schedule: z.object({ enabled: z.boolean(), when: z.string().regex(/^(daily@\d{2}:\d{2}|weekly:(sun|mon|tue|wed|thu|fri|sat)@\d{2}:\d{2}|every:\d{1,4}|)$/), task: z.string().max(2000) }).nullable().optional(),
       rules: z.object({ autoApprove: z.array(z.enum(["send", "post", "money", "strategy", "config", "record", "other"])), maxAutoDollars: z.number().min(0).max(1_000_000) }).partial().optional(),
       tools: z.array(z.string()).optional(),
+      accounts: z.array(z.string().email()).optional(),
     }).safeParse(await c.req.json().catch(() => ({})));
     if (!p.success) return c.json({ error: "bad body", issues: p.error.issues }, 400);
     const known = new Set(jarvis.allTools().map((t) => t.name));

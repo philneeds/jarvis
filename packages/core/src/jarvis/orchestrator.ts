@@ -136,7 +136,7 @@ export class Jarvis {
   }
 
   /** Run one agent on a task with its persona, memory and safety rules; queue approvals and memories it emits. */
-  async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string } = {}) {
+  async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string; depth?: number } = {}) {
     const memory = [...(await this.store.memory.list("phil")), ...(await this.store.memory.list(`venture:${agent.venture}`)), ...(await this.store.memory.list(`agent:${agent.id}`))];
     const cfg = await getAgentConfig(this.store, agent.id);
     const tools = this.allTools().filter((t) => cfg.tools.includes(t.name));
@@ -144,8 +144,18 @@ export class Jarvis {
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
     const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id) });
     if (r.blocked) return r;
-    const { text, approvals, remember, metrics, records } = extractBlocks(r.text);
+    const { text, approvals, remember, metrics, records, handoffs } = extractBlocks(r.text);
     await this.absorb(agent, approvals, remember, r.runId, metrics, records);
+    // Hand-offs: something that isn't this agent's job goes to the agent whose job it is, one hop deep.
+    if (handoffs.length && (opts.depth ?? 0) < 1) {
+      for (const h of handoffs.slice(0, 3)) {
+        const to = getAgent(h.agent) ?? findAgent(h.agent);
+        if (!to || to.id === agent.id || to.id === "jarvis") continue;
+        await this.router.log(agent.id, "delegate", `${agent.name} → ${to.name}: ${h.task.slice(0, 200)}`, r.runId);
+        const hr = await this.runAgent(to, h.task, { direct: opts.direct, parentRunId: r.runId, from: agent.name, depth: (opts.depth ?? 0) + 1 });
+        await this.say({ role: "agent", agentId: to.id, text: hr.blocked ? `(${to.name} did not run: ${hr.blocked})` : hr.text, runId: hr.runId, via: [agent.id] });
+      }
+    }
     return { ...r, text };
   }
 

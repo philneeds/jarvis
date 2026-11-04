@@ -25,12 +25,16 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
   const { state, refresh } = useLive();
   const [cfg, setCfg] = useState<AgentConfig | null>(null);
   const [toolNames, setToolNames] = useState<string[]>([]);
+  const [googleAccounts, setGoogleAccounts] = useState<string[]>([]);
   const [saved, setSaved] = useState<string>();
   const [busy, setBusy] = useState(false);
   const agent = state?.agents.find((a) => a.id === id);
   const [registryDefault, setRegistryDefault] = useState<ModelKey | undefined>();
 
-  useEffect(() => { api<{ config: AgentConfig; tools: string[]; defaultModel: ModelKey }>(`/api/agents/${id}/config`).then((r) => { setCfg(r.config); setToolNames(r.tools); setRegistryDefault(r.defaultModel); }).catch((e) => setSaved((e as Error).message)); }, [id]);
+  useEffect(() => {
+    api<{ config: AgentConfig; tools: string[]; defaultModel: ModelKey }>(`/api/agents/${id}/config`).then((r) => { setCfg(r.config); setToolNames(r.tools); setRegistryDefault(r.defaultModel); }).catch((e) => setSaved((e as Error).message));
+    api<{ google: { accounts: { email: string }[] } }>("/api/connectors").then((r) => setGoogleAccounts(r.google.accounts.map((a) => a.email))).catch(() => undefined);
+  }, [id]);
 
   const save = async () => {
     if (!cfg) return;
@@ -87,13 +91,28 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
           </div>
         </section>
 
+        {googleAccounts.length > 0 && (
+          <section className="card flex flex-col gap-3" aria-label="Google accounts">
+            <span className="label">Google accounts this agent may use</span>
+            <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing ticked = all connected accounts. Tick some to fence the agent in (Stella to the JD PM mailbox, say).</span>
+            <div className="flex flex-wrap gap-2">
+              {googleAccounts.map((e) => (
+                <label key={e} className="btn btn-sm cursor-pointer normal-case tracking-normal" style={(cfg.accounts ?? []).includes(e) ? { borderColor: "var(--accent)", background: "rgba(60,130,255,0.25)" } : undefined}>
+                  <input type="checkbox" className="sr-only" checked={(cfg.accounts ?? []).includes(e)} onChange={(ev) => setCfg({ ...cfg, accounts: ev.target.checked ? [...(cfg.accounts ?? []), e] : (cfg.accounts ?? []).filter((x) => x !== e) })} />
+                  {e}
+                </label>
+              ))}
+            </div>
+          </section>
+        )}
+
         <section className="card flex flex-col gap-3" aria-label="Schedule">
           <span className="label">Schedule</span>
           <div className="flex flex-wrap gap-2 items-center">
             <label className="btn btn-sm cursor-pointer" style={sched.enabled ? { borderColor: "var(--accent)", background: "rgba(60,130,255,0.25)" } : undefined}>
               <input type="checkbox" className="sr-only" checked={sched.enabled} onChange={(e) => setCfg({ ...cfg, schedule: { ...sched, enabled: e.target.checked } })} />{sched.enabled ? "On" : "Off"}
             </label>
-            <input className="input h-9 w-40" placeholder="daily@07:00 or every:60" aria-label="When" value={sched.when} onChange={(e) => setCfg({ ...cfg, schedule: { ...sched, when: e.target.value } })} />
+            <input className="input h-9 w-40" placeholder="daily@07:00, weekly:sun@04:00 or every:60" aria-label="When" value={sched.when} onChange={(e) => setCfg({ ...cfg, schedule: { ...sched, when: e.target.value } })} />
           </div>
           <textarea className="input py-2 h-16" placeholder="What it does on that timer" aria-label="Scheduled task" value={sched.task} onChange={(e) => setCfg({ ...cfg, schedule: { ...sched, task: e.target.value } })} />
           <span className="text-[11px]" style={{ color: "var(--muted)" }}>Runs when there is room in the plan; scouts back off at 70%. Built-in schedules are on the Usage screen.</span>

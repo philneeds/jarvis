@@ -35,6 +35,8 @@ export interface AgentConfig {
   rules: ApprovalRules;
   /** Tool names this agent may call (Claude agents only in this phase). */
   tools: string[];
+  /** Google accounts (emails) this agent may use. Empty = all connected accounts. */
+  accounts?: string[];
 }
 
 export const DEFAULT_CONFIG: AgentConfig = { persona: {}, model: null, schedule: null, rules: { autoApprove: [], maxAutoDollars: 0 }, tools: [] };

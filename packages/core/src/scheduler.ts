@@ -18,6 +18,7 @@ export interface Schedule {
 export const SCHEDULES: Schedule[] = [
   { id: "daily-brief", agentId: "jarvis", task: "brief", when: process.env.BRIEF_AT ? `daily@${process.env.BRIEF_AT}` : "daily@07:00", phase: 0 },
   { id: "oscar-condense", agentId: "oscar", task: "condense", when: "daily@03:30", phase: 0 },
+  { id: "oscar-inbox", agentId: "oscar", task: "Weekly inbox cleanup with Monica. For each of Phil's personal Google accounts: use gmail_senders on 'in:inbox older_than:14d' and 'category:promotions older_than:30d', then propose ONE archive plan per account as an approval (gmail.archive by query, with the match count in the body). Never trash. Keep anything from a real person or about money, travel, health or a job.", when: "weekly:sun@04:00", phase: 0 },
   { id: "monica-day", agentId: "monica", task: "Lay out Phil's day: what's on the calendar, what's unscheduled, what to protect.", when: "daily@06:45", phase: 1 },
   { id: "stella-leads", agentId: "stella", task: "Review new leads and open jobs for JD PM; flag anything waiting on a customer reply.", when: "daily@06:50", phase: 1 },
   { id: "mantis-markets", agentId: "mantis", task: "Market read for the day: what moved on-chain overnight and what the team should watch.", when: "daily@06:55", phase: 1 },
@@ -62,7 +63,9 @@ export class Scheduler {
         const mins = Number(s.when.slice(6));
         return now.getTime() - last >= mins * 60_000;
       }
-      const m = s.when.match(/^daily@(\d{2}):(\d{2})$/);
+      const wk = s.when.match(/^weekly:(sun|mon|tue|wed|thu|fri|sat)@(\d{2}):(\d{2})$/);
+      if (wk && ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][now.getDay()] !== wk[1]) return false;
+      const m = s.when.match(/^(?:daily|weekly:[a-z]{3})@(\d{2}):(\d{2})$/);
       if (!m) return false;
       const target = new Date(now); target.setHours(Number(m[1]), Number(m[2]), 0, 0);
       const within = now.getTime() >= target.getTime() && now.getTime() - target.getTime() < 10 * 60_000;

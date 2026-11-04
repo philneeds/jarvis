@@ -156,3 +156,20 @@ test("an approval nothing can act on says so when approved", async () => {
   const e = await jarvis.decide(b.id, "approved");
   assert.match(e!.note!, /No connector handles "gmail.send" yet/);
 });
+
+test("a hand-off runs the right agent and posts its reply", async () => {
+  const { jarvis, store } = make();
+  const { mockProvider: mp, ModelRouter: MR, Jarvis: J } = await import("../src/index.js");
+  // A provider that makes Monica hand a lead to Stella.
+  const handing = mp("m");
+  const base = handing.run.bind(handing);
+  handing.run = async (req) => { const r = await base(req); if (req.agent.id === "monica") r.text += '\n\n```handoff\n{"agent":"stella","task":"A kitchen lead from Dana Smith came in by email; follow up."}\n```'; return r; };
+  const j2 = new J({ store, router: new MR({ store, providers: { claude: [handing], grok: [mp("g")] } }) });
+  const out = await j2.handle("@monica anything in my mail?");
+  assert.ok(out[0]!.text.includes("[Handed to @stella]"));
+  const chat = await store.chat.list();
+  assert.ok(chat.some((m) => m.role === "agent" && m.agentId === "stella" && m.via?.includes("monica")));
+  const log = await store.activity.list({ agentId: "monica" });
+  assert.ok(log.some((e) => e.kind === "delegate" && /Monica → Stella/.test(e.summary)));
+  void jarvis;
+});

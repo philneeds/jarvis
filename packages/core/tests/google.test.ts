@@ -21,6 +21,9 @@ function fakeGoogle() {
     if (u.includes("/messages?q=")) return json({ messages: [{ id: "m1" }] });
     if (u.includes("/messages/m1")) return json({ id: "m1", snippet: "Can you send the quote?", payload: { headers: [{ name: "From", value: "smith@example.com" }, { name: "Subject", value: "Kitchen" }, { name: "Date", value: "Mon" }], mimeType: "text/plain", body: { data: Buffer.from("Hi Phil, can you send the quote?").toString("base64url") } } });
     if (u.endsWith("/drafts")) return json({ id: "d1" });
+    if (u.endsWith("/messages/batchModify")) return new Response(null, { status: 204 });
+    if (u.endsWith("/users/me/labels") && (init?.method ?? "GET") === "GET") return json({ labels: [{ id: "L1", name: "Receipts" }] });
+    if (u.includes("/messages?q=") && u.includes("older_than")) return json({ messages: [{ id: "m1" }, { id: "m2" }, { id: "m3" }] });
     if (u.endsWith("/messages/send")) return json({ id: "sent1" });
     return json({ error: "unexpected " + u }, 500);
   }) as typeof fetch;
@@ -102,3 +105,40 @@ test("legacy single-account tokens are picked up", async () => {
   const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: fakeGoogle().f });
   assert.equal((await g.status()).email, "old@example.com");
 });
+
+test("inbox cleanup: senders overview, archive by query, trash waits, account limit per agent", async () => {
+  const store = memoryStore(); await store.init();
+  const { f, calls } = fakeGoogle();
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: f });
+  await g.exchangeCode("c1"); await g.exchangeCode("c2");
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("m")], grok: [mockProvider("g")] } }) });
+  jarvis.addConnector(g, GoogleConnector.promptHint());
+  const senders = jarvis.allTools().find((t) => t.name === "gmail_senders")!;
+  assert.match(await senders.handler({ query: "category:promotions older_than:30d" }, { store, agentId: "oscar" }), /smith@example.com/);
+  const { setAgentConfig } = await import("../src/index.js");
+  await setAgentConfig(store, "monica", { rules: { autoApprove: ["record"], maxAutoDollars: 0 } });
+  const arch = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Archive 3 old promos", body: "", payload: { action: "gmail.archive", query: "category:promotions older_than:30d", max: 100 } });
+  assert.equal(arch.status, "approved");
+  assert.ok(calls.some((c) => c.url.endsWith("/messages/batchModify") && String(c.init?.body).includes('"removeLabelIds":["INBOX"]')));
+  const trash = await jarvis.requestApproval({ agentId: "monica", kind: "other", title: "Trash 3 old promos", body: "", payload: { action: "gmail.trash", query: "category:promotions older_than:30d" } });
+  assert.equal(trash.status, "pending");
+  // Stella fenced to the JD PM mailbox: the default account becomes that one, and the other is refused.
+  await setAgentConfig(store, "stella", { accounts: ["info@jdpm.example.com"] });
+  const accounts = jarvis.allTools().find((t) => t.name === "google_accounts")!;
+  assert.match(await accounts.handler({}, { store, agentId: "stella" }), /^\(default\) info@jdpm.example.com$/);
+  const search = jarvis.allTools().find((t) => t.name === "gmail_search")!;
+  await assert.rejects(search.handler({ query: "x", account: "phil@example.com" }, { store, agentId: "stella" }), /No Google account matching/);
+});
+
+test("all-day events report their real last day", async () => {
+  const store = memoryStore(); await store.init();
+  const { f } = fakeGoogle();
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: (async (u: string | URL | Request, i?: RequestInit) => {
+    if (String(u).includes("/calendar/v3/")) return new Response(JSON.stringify({ items: [{ id: "t1", summary: "Joe in Niagara Falls", start: { date: "2026-09-23" }, end: { date: "2026-11-05" } }] }), { headers: { "content-type": "application/json" } });
+    return f(u, i);
+  }) as typeof fetch });
+  await g.exchangeCode("c1");
+  const tool = jarvisTools(g).find((t) => t.name === "calendar_list_events")!;
+  assert.match(await tool.handler({}, { store, agentId: "monica" }), /all day 2026-09-23 through 2026-11-04/);
+});
+function jarvisTools(g: GoogleConnector) { return g.tools(); }
