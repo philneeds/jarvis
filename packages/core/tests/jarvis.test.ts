@@ -144,3 +144,15 @@ test("custom per-agent schedules merge with the built-in ones", async () => {
   assert.deepEqual(all.map((x) => x.id), ["custom:karol"]);
   assert.equal(s.due(new Date(), 0, all).length, 1);
 });
+
+test("an approval nothing can act on says so when approved", async () => {
+  const { jarvis, store } = make();
+  const a = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Email Dana", body: "the draft" });
+  const d = await jarvis.decide(a.id, "approved");
+  assert.match(d!.note!, /nothing was sent or changed/);
+  const chat = await store.chat.list();
+  assert.match(chat[chat.length - 1]!.text, /Do it by hand/);
+  const b = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Email Dana", body: "", payload: { action: "gmail.send", to: "dana@x.com" } });
+  const e = await jarvis.decide(b.id, "approved");
+  assert.match(e!.note!, /No connector handles "gmail.send" yet/);
+});

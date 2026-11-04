@@ -190,6 +190,7 @@ export class GoogleConnector {
       "gmail.send": async (a) => {
         const p = a.payload as { to?: string; subject?: string; body?: string };
         if (!p.to || !p.subject || !p.body) throw new Error("gmail.send needs to, subject and body in the payload");
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.to.trim())) throw new Error(`"${p.to}" isn't an email address; nothing sent`);
         const r = await this.sendMessage({ to: p.to, subject: p.subject, body: p.body });
         return `Email sent to ${p.to} (${r.id}).`;
       },

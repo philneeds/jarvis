@@ -387,10 +387,15 @@ export class Jarvis {
           await this.router.log(a.agentId, "error", outcome, a.runId, { approvalId: a.id, action });
         }
       }
-      // No executor: the decision is recorded and the connector that executes it (email, X, CRM, wallet) hooks in via onApproved().
+      else {
+        // Nothing can act on this approval: say so plainly rather than let "approved" read as "done".
+        outcome = typeof action === "string" ? `No connector handles "${action}" yet; nothing was sent or changed. Do it by hand.` : "Recorded only: no connector is attached to this, so nothing was sent or changed. Do it by hand.";
+        await this.router.log(a.agentId, "system", `Approved "${a.title}" — ${outcome}`, a.runId, { approvalId: a.id, action: action ?? null });
+      }
     }
+    if (outcome) await this.store.approvals.update(a.id, { note: [a.note, outcome].filter(Boolean).join(" · ") });
     await this.say({ role: "system", text: `${decision === "approved" ? "Approved" : decision === "rejected" ? "Rejected" : "Edited and approved"}: ${a.title} (${getAgent(a.agentId)?.name ?? a.agentId})${outcome ? ` — ${outcome}` : ""}` });
-    return a;
+    return { ...a, note: outcome ? [a.note, outcome].filter(Boolean).join(" · ") : a.note };
   }
 
   // ---- Status -------------------------------------------------------------

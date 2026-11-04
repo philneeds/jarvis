@@ -65,7 +65,7 @@ export class TelegramBot {
       if (m) {
         const a = await this.jarvis.decide(m[1]!, m[2] as "approved" | "rejected", "via Telegram");
         await this.api("answerCallbackQuery", { callback_query_id: q.id, text: a ? `${m[2]}` : "not found" }).catch(() => undefined);
-        if (a && q.message) await this.api("editMessageText", { chat_id: q.message.chat.id, message_id: q.message.message_id, text: `${m[2] === "approved" ? "✅ Approved" : "❌ Rejected"} · ${a.title}` }).catch(() => undefined);
+        if (a && q.message) await this.api("editMessageText", { chat_id: q.message.chat.id, message_id: q.message.message_id, text: `${m[2] === "approved" ? "✅ Approved" : "❌ Rejected"} · ${a.title}${a.note ? `\n${a.note}` : ""}` }).catch(() => undefined);
       }
       return;
     }
