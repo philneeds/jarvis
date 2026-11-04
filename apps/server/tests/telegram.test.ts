@@ -43,3 +43,20 @@ test("approvals arrive with buttons and the button decides", async () => {
   assert.ok(sent.some((s) => s.method === "editMessageText" && /Rejected/.test(String(s.body.text))));
   bot.stop();
 });
+
+test("attention items reach Telegram with Done and Snooze buttons", async () => {
+  const store = memoryStore();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
+  const { f, sent } = fakeTelegram();
+  const bot = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f, pollTimeout: 0 });
+  bot.start();
+  const item = await jarvis.raiseAttention({ title: "Revoke the old GitHub token", why: "Repo is public now.", agentId: "monica" });
+  await new Promise((r) => setTimeout(r, 50));
+  const msg = sent.find((s) => s.method === "sendMessage" && /Revoke the old GitHub token/.test(String(s.body.text)));
+  assert.ok(msg);
+  const kb = (msg!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard[0]!;
+  await bot.handle({ update_id: 9, callback_query: { id: "cq2", from: { id: 42 }, data: kb[0]!.callback_data, message: { message_id: 8, chat: { id: 42 } } } });
+  assert.equal((await jarvis.attention(true))[0]!.status, "done");
+  assert.equal(item.id, (await jarvis.attention(true))[0]!.id);
+  bot.stop();
+});

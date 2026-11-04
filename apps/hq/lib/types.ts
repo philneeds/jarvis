@@ -1,6 +1,6 @@
-import type { AgentDef, Venture, VentureId, ModelSpec, ModelKey, SystemStatus, UsageSummary, ChatMessage, Approval, ActivityEntry, Schedule, MetricDef, RecordKindDef } from "@jarvis/core";
+import type { AgentDef, Venture, VentureId, ModelSpec, ModelKey, SystemStatus, UsageSummary, ChatMessage, Approval, ActivityEntry, Schedule, MetricDef, RecordKindDef, AttentionItem } from "@jarvis/core";
 
-export type { AgentDef, Venture, VentureId, ModelSpec, ModelKey, SystemStatus, UsageSummary, ChatMessage, Approval, ActivityEntry, Schedule, MetricDef, RecordKindDef };
+export type { AgentDef, Venture, VentureId, ModelSpec, ModelKey, SystemStatus, UsageSummary, ChatMessage, Approval, ActivityEntry, Schedule, MetricDef, RecordKindDef, AttentionItem };
 
 export type AgentLive = AgentDef & {
   live: boolean;
@@ -17,6 +17,7 @@ export interface State {
   models: Record<ModelKey, ModelSpec>;
   status: SystemStatus;
   pendingApprovals: number;
+  waiting: number;
   usage: UsageSummary;
   providers: Record<string, { ok: boolean; reason?: string }>;
   schedules: Schedule[];

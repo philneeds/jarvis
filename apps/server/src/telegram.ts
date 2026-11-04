@@ -30,7 +30,10 @@ export class TelegramBot {
 
   start() {
     this.running = true;
-    this.off = bus.onEvent((e: JarvisEvent) => { if (e.type === "approval.new") void this.announce(e.approval); });
+    this.off = bus.onEvent((e: JarvisEvent) => {
+      if (e.type === "approval.new") void this.announce(e.approval);
+      if (e.type === "attention" && e.change === "raised") void this.send(`Needs you · ${getAgent(e.item.agentId)?.name ?? e.item.agentId}\n${e.item.title}\n\n${e.item.why.slice(0, 800)}${e.item.due ? `\nDue ${e.item.due}` : ""}`, { reply_markup: { inline_keyboard: [[{ text: "✔ Done", callback_data: `att:${e.item.id}:done` }, { text: "💤 Snooze 3d", callback_data: `att:${e.item.id}:snoozed` }]] } });
+    });
     void this.loop();
   }
   stop() { this.running = false; this.off?.(); }
@@ -61,6 +64,13 @@ export class TelegramBot {
     if (u.callback_query) {
       const q = u.callback_query;
       if (String(q.from.id) !== this.opts.chatId && String(q.message?.chat.id) !== this.opts.chatId) return;
+      const att = q.data?.match(/^att:([^:]+):(done|snoozed)$/);
+      if (att) {
+        const item = await this.jarvis.attentionUpdate(att[1]!, att[2] as "done" | "snoozed");
+        await this.api("answerCallbackQuery", { callback_query_id: q.id, text: item ? att[2] : "not found" }).catch(() => undefined);
+        if (item && q.message) await this.api("editMessageText", { chat_id: q.message.chat.id, message_id: q.message.message_id, text: `${att[2] === "done" ? "✔ Done" : "💤 Snoozed 3 days"} · ${item.title}` }).catch(() => undefined);
+        return;
+      }
       const m = q.data?.match(/^apr:([^:]+):(approved|rejected)$/);
       if (m) {
         const a = await this.jarvis.decide(m[1]!, m[2] as "approved" | "rejected", "via Telegram");

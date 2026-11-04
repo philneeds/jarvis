@@ -185,3 +185,27 @@ test("bulk actions over the item cap wait for Phil even when the kind is auto-ap
   const ids = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Archive ids", body: "", payload: { action: "x.y", ids: new Array(150).fill("m") } });
   assert.equal(ids.status, "pending");
 });
+
+test("attention items: raised from a reply, deduped, snoozed, done, and in Jarvis's prompt", async () => {
+  const { jarvis, store } = make();
+  const { mockProvider: mp, ModelRouter: MR, Jarvis: J, extractBlocks } = await import("../src/index.js");
+  const flag = mp("m"); const base = flag.run.bind(flag);
+  flag.run = async (req) => { const r = await base(req); if (req.agent.id === "monica") r.text += '\n\n```attention\n{"title":"Change your Chainstack password","why":"Breach notice on Nov 3.","due":"2026-11-05"}\n```'; return r; };
+  const j2 = new J({ store, router: new MR({ store, providers: { claude: [flag], grok: [mp("g")] } }) });
+  const out = await j2.handle("@monica anything important?");
+  assert.match(out[0]!.text, /\[Needs you: Change your Chainstack password\]/);
+  let items = await j2.attention();
+  assert.equal(items.length, 1);
+  assert.equal(items[0]!.due, "2026-11-05");
+  await j2.handle("@monica anything important?"); // same title again: no duplicate
+  assert.equal((await j2.attention()).length, 1);
+  assert.match(await j2.attentionText(), /Chainstack/);
+  await j2.attentionUpdate(items[0]!.id, "snoozed", 2);
+  assert.equal((await j2.attention())[0]!.status, "snoozed");
+  await j2.attentionUpdate(items[0]!.id, "done");
+  assert.equal((await j2.attention()).length, 0);
+  assert.equal((await j2.attention(true)).length, 1);
+  assert.match(await j2.command("/waiting"), /Nothing is waiting/);
+  assert.equal(extractBlocks("```attention\n{\"why\":\"no title\"}\n```").attention.length, 0);
+  void jarvis;
+});

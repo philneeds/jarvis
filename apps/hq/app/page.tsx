@@ -14,7 +14,7 @@ import { api, post, timeAgo } from "@/lib/api";
 import type { ChatMessage } from "@/lib/types";
 
 export default function HomePage() {
-  const { state, pending, activity, messages, setMessages } = useLive();
+  const { state, pending, attention, activity, messages, setMessages } = useLive();
   const [on, setOn] = useState(true);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,7 +47,9 @@ export default function HomePage() {
   const lastJarvis = [...messages].reverse().find((m) => m.role === "jarvis");
   const recommendation = lastJarvis?.text.split("\n").find((l) => l.trim())?.slice(0, 220) ?? "Say the word. I'm listening.";
   const errors = state?.agents.filter((a) => a.status === "error") ?? [];
+  const openItems = attention.filter((i) => i.status === "open");
   const needs = [
+    ...openItems.slice(0, 4).map((i) => ({ tag: (state?.agents.find((a) => a.id === i.agentId)?.name ?? i.agentId).toUpperCase(), color: "var(--amber)", text: i.title, href: "/attention" })),
     ...pending.slice(0, 3).map((p) => ({ tag: state?.ventures[state.agents.find((a) => a.id === p.agentId)?.venture ?? "root"]?.short ?? p.agentId.toUpperCase(), color: state?.ventures[state.agents.find((a) => a.id === p.agentId)?.venture ?? "root"]?.color, text: p.title, href: "/approvals" })),
     ...errors.slice(0, 2).map((a) => ({ tag: a.name.toUpperCase(), color: "var(--red)", text: a.lastError?.slice(0, 80) ?? "error", href: `/web?agent=${a.id}` })),
   ];
@@ -118,10 +120,10 @@ export default function HomePage() {
             <div className="grid gap-6 md:grid-cols-[300px_1fr_300px] md:items-start">
               <div className="flex flex-col gap-7 order-2 md:order-1">
                 <section aria-label="Needs your attention" className="flex flex-col gap-2">
-                  <span className="label label-amber">❬ Needs your attention · {pending.length + errors.length}</span>
+                  <span className="label label-amber">❬ Needs your attention · {openItems.length + pending.length + errors.length}</span>
                   {needs.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing. Enjoy it.</span>}
                   {needs.map((n, i) => <Link key={i} href={n.href} className="flex gap-2 text-[12px] leading-snug" style={{ color: "var(--ink-bright)" }}><span className="w-20 flex-none text-[11px]" style={{ color: n.color }}>{n.tag}</span><span>{n.text}</span></Link>)}
-                  <Link href="/approvals" className="text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--amber)" }}>Open all ›</Link>
+                  <Link href="/attention" className="text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--amber)" }}>Open all ›</Link>
                 </section>
                 <section aria-label="Money pulse" className="flex flex-col gap-2">
                   <span className="label" style={{ color: "var(--gold)" }}>❬ Money pulse · Munger</span>

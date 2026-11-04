@@ -5,17 +5,19 @@ export interface RememberBlock { scope: string; key: string; value: string }
 export interface MetricBlock { venture: string; key: string; value: number; at?: string }
 export interface RecordBlock { venture: string; kind: string; id?: string; title: string; status?: string; fields?: Record<string, unknown> }
 export interface HandoffBlock { agent: string; task: string }
+export interface AttentionBlock { title: string; why: string; due?: string; venture?: string }
 
 const KINDS: ApprovalKind[] = ["send", "post", "money", "strategy", "config", "record", "other"];
 
 /** Pull fenced ```approval and ```remember JSON blocks out of an agent's reply. */
-export function extractBlocks(text: string): { text: string; approvals: ApprovalBlock[]; remember: RememberBlock[]; metrics: MetricBlock[]; records: RecordBlock[]; handoffs: HandoffBlock[] } {
+export function extractBlocks(text: string): { text: string; approvals: ApprovalBlock[]; remember: RememberBlock[]; metrics: MetricBlock[]; records: RecordBlock[]; handoffs: HandoffBlock[]; attention: AttentionBlock[] } {
   const approvals: ApprovalBlock[] = [];
   const remember: RememberBlock[] = [];
   const metrics: MetricBlock[] = [];
   const records: RecordBlock[] = [];
   const handoffs: HandoffBlock[] = [];
-  const re = /```(approval|remember|metric|record|handoff)\s*\n([\s\S]*?)```/g;
+  const attention: AttentionBlock[] = [];
+  const re = /```(approval|remember|metric|record|handoff|attention)\s*\n([\s\S]*?)```/g;
   const cleaned = text.replace(re, (_m, tag: string, body: string) => {
     let parsed: unknown;
     try { parsed = JSON.parse(body.trim()); } catch { return _m; }
@@ -27,6 +29,14 @@ export function extractBlocks(text: string): { text: string; approvals: Approval
         approvals.push({ kind: KINDS.includes(o.kind as ApprovalKind) ? (o.kind as ApprovalKind) : "other", title: String(o.title), body: String(o.body ?? ""), payload: o.payload && typeof o.payload === "object" ? (o.payload as Record<string, unknown>) : undefined });
       }
       return approvals.length ? `[Approval queued: ${approvals[approvals.length - 1]!.title}]` : _m;
+    }
+    if (tag === "attention") {
+      for (const it of items) {
+        const o = it as Partial<AttentionBlock>;
+        if (!o || typeof o !== "object" || !o.title) continue;
+        attention.push({ title: String(o.title).slice(0, 160), why: String(o.why ?? "").slice(0, 600), due: o.due ? String(o.due) : undefined, venture: o.venture ? String(o.venture) : undefined });
+      }
+      return attention.length ? `[Needs you: ${attention.map((a) => a.title).join("; ")}]` : _m;
     }
     if (tag === "handoff") {
       for (const it of items) {
@@ -59,7 +69,7 @@ export function extractBlocks(text: string): { text: string; approvals: Approval
     }
     return "";
   });
-  return { text: cleaned.replace(/\n{3,}/g, "\n\n").trim(), approvals, remember, metrics, records, handoffs };
+  return { text: cleaned.replace(/\n{3,}/g, "\n\n").trim(), approvals, remember, metrics, records, handoffs, attention };
 }
 
 /** Parse Jarvis's plan JSON, tolerating fences and stray prose around it. */

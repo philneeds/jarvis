@@ -11,6 +11,7 @@ const TABS = [
   { href: "/command", label: "Command" },
   { href: "/web", label: "Agent Web" },
   { href: "/approvals", label: "Approvals" },
+  { href: "/attention", label: "Needs you" },
   { href: "/activity", label: "Activity" },
   { href: "/usage", label: "Usage" },
 ];
@@ -26,7 +27,8 @@ const LEVEL: Record<string, string> = { green: "var(--green)", yellow: "var(--ye
 
 export function Shell({ children, bare }: { children: React.ReactNode; bare?: boolean }) {
   const path = usePathname();
-  const { state, connected, pending, refresh } = useLive();
+  const { state, connected, pending, attention, refresh } = useLive();
+  const openCount = attention.filter((i) => i.status === "open").length;
   const [busy, setBusy] = useState(false);
   const [more, setMore] = useState(false);
   const level = state?.status.level ?? "green";
@@ -55,6 +57,7 @@ export function Shell({ children, bare }: { children: React.ReactNode; bare?: bo
               <Link key={t.href} href={t.href} aria-current={path === t.href || (t.href === "/web" && path.startsWith("/agents")) || (t.href === "/ventures" && path.startsWith("/ventures/")) ? "page" : undefined}>
                 {t.label.replace("Daily ", "")}
                 {t.href === "/approvals" && pending.length > 0 && <span className="badge">{pending.length}</span>}
+                {t.href === "/attention" && openCount > 0 && <span className="badge">{openCount}</span>}
               </Link>
             ))}
           </nav>
@@ -69,14 +72,15 @@ export function Shell({ children, bare }: { children: React.ReactNode; bare?: bo
         <div className="fixed bottom-0 left-0 right-0 md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)", background: "rgba(5,12,32,0.92)", zIndex: 20 }}>
           {more && (
             <div className="tabs flex-wrap border-b" style={{ borderColor: "var(--line)" }} role="menu">
-              {[...TABS.slice(4), ...MORE].map((t) => <Link key={t.href} href={t.href} role="menuitem" onClick={() => setMore(false)} aria-current={path === t.href ? "page" : undefined} style={{ flexBasis: "33%" }}>{t.label}</Link>)}
+              {[TABS[2]!, ...TABS.slice(5), ...MORE].map((t) => <Link key={t.href} href={t.href} role="menuitem" onClick={() => setMore(false)} aria-current={path === t.href ? "page" : undefined} style={{ flexBasis: "33%" }}>{t.label}</Link>)}
             </div>
           )}
           <nav className="tabs" aria-label="HQ screens">
-            {TABS.slice(0, 4).map((t) => (
+            {[TABS[0]!, TABS[1]!, TABS[3]!, TABS[4]!].map((t) => (
               <Link key={t.href} href={t.href} aria-current={path === t.href || (t.href === "/web" && path.startsWith("/agents")) ? "page" : undefined}>
                 {t.label.replace("Agent ", "")}
                 {t.href === "/approvals" && pending.length > 0 && <span className="badge">{pending.length}</span>}
+                {t.href === "/attention" && openCount > 0 && <span className="badge">{openCount}</span>}
               </Link>
             ))}
             <button onClick={() => setMore(!more)} aria-expanded={more} aria-label="More screens" style={more ? { borderColor: "var(--accent)" } : undefined}>More</button>

@@ -12,7 +12,23 @@ export type JarvisEvent =
   | { type: "usage"; usage: UsageSummary }
   | { type: "system"; status: SystemStatus }
   | { type: "venture"; venture: string }
-  | { type: "brief"; text: string; at: string };
+  | { type: "brief"; text: string; at: string }
+  | { type: "attention"; item: AttentionItem; change: "raised" | "done" | "snoozed" | "reopened" };
+
+/** Something Phil has to act on. Lives until he ticks it off; raised by agents or by Phil. */
+export interface AttentionItem {
+  id: string;
+  at: string;
+  title: string;
+  why: string;
+  agentId: string;
+  venture?: string;
+  due?: string;
+  status: "open" | "snoozed" | "done";
+  snoozedUntil?: string;
+  doneAt?: string;
+  source?: { runId?: string; approvalId?: string };
+}
 
 export interface ChatMessage {
   id: string;

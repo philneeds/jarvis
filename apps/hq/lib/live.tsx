@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { JarvisEvent } from "@jarvis/core";
 import { api, wsUrl } from "./api";
-import type { State, ChatMessage, Approval, ActivityEntry } from "./types";
+import type { State, ChatMessage, Approval, ActivityEntry, AttentionItem } from "./types";
 
 interface Live {
   state: State | null;
@@ -11,6 +11,7 @@ interface Live {
   error?: string;
   messages: ChatMessage[];
   pending: Approval[];
+  attention: AttentionItem[];
   activity: ActivityEntry[];
   /** Agents mid-reply: partial text by run. */
   streams: Record<string, { agentId: string; text: string; at: number }>;
@@ -31,6 +32,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string>();
   const [messages, setMessagesState] = useState<ChatMessage[]>([]);
   const [pending, setPendingState] = useState<Approval[]>([]);
+  const [attention, setAttention] = useState<AttentionItem[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [streams, setStreams] = useState<Record<string, { agentId: string; text: string; at: number }>>({});
   const [ventureTick, setVentureTick] = useState(0);
@@ -41,15 +43,17 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, chat, appr, act] = await Promise.all([
+      const [s, chat, appr, act, att] = await Promise.all([
         api<State>("/api/state"),
         api<{ messages: ChatMessage[] }>("/api/chat?limit=200"),
         api<{ approvals: Approval[] }>("/api/approvals?status=pending"),
         api<{ entries: ActivityEntry[] }>("/api/activity?limit=100"),
+        api<{ items: AttentionItem[] }>("/api/attention"),
       ]);
       setState(s);
       setMessagesState(chat.messages);
       setPendingState(appr.approvals);
+      setAttention(att.items);
       setActivity(act.entries);
       setError(undefined);
       if (wsRef.current?.readyState !== WebSocket.OPEN) setWsGen((g) => g + 1);
@@ -106,6 +110,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           case "venture":
             setVentureTick((n) => n + 1);
             break;
+          case "attention":
+            setAttention((list) => { const rest = list.filter((i) => i.id !== e.item.id); return e.item.status === "done" ? rest : [e.item, ...rest]; });
+            break;
         }
       };
     };
@@ -115,10 +122,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [wsGen]);
 
   const value = useMemo<Live>(() => ({
-    state, connected, error, messages, pending, activity, streams, ventureTick, onEvent, refresh,
+    state, connected, error, messages, pending, attention, activity, streams, ventureTick, onEvent, refresh,
     setMessages: (fn) => setMessagesState(fn),
     setPending: (fn) => setPendingState(fn),
-  }), [state, connected, error, messages, pending, activity, streams, ventureTick, onEvent, refresh]);
+  }), [state, connected, error, messages, pending, attention, activity, streams, ventureTick, onEvent, refresh]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

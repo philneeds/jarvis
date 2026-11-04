@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { bus, type Approval, type ChatMessage, type SystemStatus } from "../events.js";
+import { bus, type Approval, type AttentionItem, type ChatMessage, type SystemStatus } from "../events.js";
 import { AGENTS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
 import { ModelRouter } from "../router/index.js";
 import type { Store } from "../store/types.js";
@@ -96,7 +96,7 @@ export class Jarvis {
     const memory = await this.store.memory.list();
     const status = await this.systemStatus();
     const recent = (await this.store.chat.list(12)).slice(0, -1).map((m) => `${m.role === "phil" ? "Phil" : m.agentId ?? "Jarvis"}: ${m.text.slice(0, 300)}`).join("\n");
-    const system = jarvisSystemPrompt(memory, status.text);
+    const system = jarvisSystemPrompt(memory, status.text, await this.attentionText());
 
     const planRun = await this.router.run(jarvis, { system, prompt: planPrompt(userText, recent), direct: true, maxTurns: 1 });
     if (planRun.blocked) {
@@ -144,10 +144,11 @@ export class Jarvis {
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
     const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id) });
     if (r.blocked) return r;
-    const { text, approvals, remember, metrics, records, handoffs } = extractBlocks(r.text);
+    const { text, approvals, remember, metrics, records, handoffs, attention } = extractBlocks(r.text);
     await this.absorb(agent, approvals, remember, r.runId, metrics, records);
-    // Hand-offs: something that isn't this agent's job goes to the agent whose job it is, one hop deep.
-    if (handoffs.length && (opts.depth ?? 0) < 1) {
+    for (const a of attention) await this.raiseAttention({ ...a, agentId: agent.id, source: { runId: r.runId } });
+    // Hand-offs: something that isn't this agent's job goes to the agent whose job it is; the receiver may hand back once.
+    if (handoffs.length && (opts.depth ?? 0) < 2) {
       for (const h of handoffs.slice(0, 6)) {
         const to = getAgent(h.agent) ?? findAgent(h.agent);
         if (!to || to.id === agent.id || to.id === "jarvis") continue;
@@ -167,6 +168,58 @@ export class Jarvis {
     }
     for (const m of metrics) await this.recordMetric(m.venture as VentureId, m.key, m.value, agent.id, m.at, runId);
     for (const r of records) await this.upsertRecord({ venture: r.venture as VentureId, kind: r.kind, id: r.id, title: r.title, status: r.status, fields: r.fields, source: agent.id }, runId);
+  }
+
+  // ---- Needs you: the attention list ----------------------------------------------
+
+  private async attentionList(): Promise<AttentionItem[]> { return this.store.settings.get<AttentionItem[]>("attention", []); }
+  private async saveAttention(list: AttentionItem[]) { await this.store.settings.set("attention", list.slice(-500)); }
+
+  /** Open and snoozed-but-due items, newest first. */
+  async attention(includeDone = false): Promise<AttentionItem[]> {
+    const now = Date.now();
+    const list = (await this.attentionList()).map((i) => (i.status === "snoozed" && i.snoozedUntil && Date.parse(i.snoozedUntil) <= now ? { ...i, status: "open" as const } : i));
+    return list.filter((i) => includeDone || i.status !== "done").sort((a, b) => (a.at < b.at ? 1 : -1));
+  }
+
+  /** Raise an item; a same-titled open item is refreshed rather than duplicated. */
+  async raiseAttention(a: { title: string; why: string; due?: string; venture?: string; agentId: string; source?: AttentionItem["source"] }): Promise<AttentionItem> {
+    const list = await this.attentionList();
+    const key = a.title.trim().toLowerCase();
+    const existing = list.find((i) => i.status !== "done" && i.title.trim().toLowerCase() === key);
+    if (existing) {
+      existing.why = a.why || existing.why; existing.due = a.due ?? existing.due; existing.status = "open"; existing.snoozedUntil = undefined;
+      await this.saveAttention(list);
+      return existing;
+    }
+    const item: AttentionItem = { id: randomUUID(), at: new Date().toISOString(), title: a.title.trim(), why: a.why, agentId: a.agentId, venture: a.venture, due: a.due, status: "open", source: a.source };
+    list.push(item);
+    await this.saveAttention(list);
+    await this.router.log(a.agentId, "approval", `${getAgent(a.agentId)?.name ?? a.agentId} flagged for Phil: ${item.title}`, a.source?.runId, { why: item.why, due: item.due });
+    bus.emitEvent({ type: "attention", item, change: "raised" });
+    await this.notify?.(`Needs you: ${item.title}`, item.why.slice(0, 200)).catch(() => undefined);
+    return item;
+  }
+
+  async attentionUpdate(id: string, change: "done" | "snoozed" | "reopened", days = 3): Promise<AttentionItem | undefined> {
+    const list = await this.attentionList();
+    const item = list.find((i) => i.id === id);
+    if (!item) return undefined;
+    if (change === "done") { item.status = "done"; item.doneAt = new Date().toISOString(); }
+    else if (change === "snoozed") { item.status = "snoozed"; item.snoozedUntil = new Date(Date.now() + days * 86400_000).toISOString(); }
+    else { item.status = "open"; item.snoozedUntil = undefined; item.doneAt = undefined; }
+    await this.saveAttention(list);
+    await this.router.log("jarvis", "decision", `Phil marked "${item.title}" ${change}${change === "snoozed" ? ` for ${days} day(s)` : ""}`);
+    bus.emitEvent({ type: "attention", item, change });
+    return item;
+  }
+
+  /** Short text of what's waiting, for prompts and the brief. */
+  async attentionText(limit = 15): Promise<string> {
+    const open = (await this.attention()).filter((i) => i.status === "open");
+    if (!open.length) return "Nothing is waiting on Phil.";
+    const age = (iso: string) => Math.floor((Date.now() - Date.parse(iso)) / 86400_000);
+    return open.slice(0, limit).map((i) => `- ${i.title} (${getAgent(i.agentId)?.name ?? i.agentId}, ${age(i.at) === 0 ? "today" : `${age(i.at)}d old`}${i.due ? `, due ${i.due}` : ""}): ${i.why}`).join("\n") + (open.length > limit ? `\n- …and ${open.length - limit} more` : "");
   }
 
   // ---- Venture dashboards -------------------------------------------------------
@@ -252,7 +305,7 @@ export class Jarvis {
     const arg = rest.join(" ").trim();
     switch ((cmd ?? "").toLowerCase()) {
       case "help":
-        return "Commands: /brief (morning rundown), /status (who's doing what), /pause [agent|trading|all], /resume [agent|trading|all], /approvals, /usage, /memory, /condense (Oscar tidies memory). Talk to any agent with @name.";
+        return "Commands: /brief (morning rundown), /status (who's doing what), /pause [agent|trading|all], /resume [agent|trading|all], /approvals, /waiting (what needs you), /usage, /memory, /condense (Oscar tidies memory). Talk to any agent with @name.";
       case "brief":
         return this.brief();
       case "status": {
@@ -262,7 +315,8 @@ export class Jarvis {
         const errors = states.filter((x) => x.status === "error").map((x) => x.id);
         const paused = states.filter((x) => x.paused).map((x) => x.id);
         const pending = (await this.store.approvals.list("pending")).length;
-        return [`Status ${s.level.toUpperCase()}: ${s.text}.`, `Working: ${working.join(", ") || "nobody"}.`, `Errors: ${errors.join(", ") || "none"}.`, `Paused: ${paused.join(", ") || "none"}${s.killSwitch.all ? " (whole web paused)" : s.killSwitch.trading ? " (trading paused)" : ""}.`, `${pending} approval(s) waiting.`].join(" ");
+        const waiting = (await this.attention()).filter((i) => i.status === "open").length;
+        return [`Status ${s.level.toUpperCase()}: ${s.text}.`, `${waiting} thing(s) waiting on you.`, `Working: ${working.join(", ") || "nobody"}.`, `Errors: ${errors.join(", ") || "none"}.`, `Paused: ${paused.join(", ") || "none"}${s.killSwitch.all ? " (whole web paused)" : s.killSwitch.trading ? " (trading paused)" : ""}.`, `${pending} approval(s) waiting.`].join(" ");
       }
       case "pause":
         return this.pause(arg || "all", true);
@@ -276,6 +330,9 @@ export class Jarvis {
         const u = await usageSummary(this.store);
         return u.plans.filter((p) => p.window !== "manual").map((p) => `${p.label}: ${Math.round(p.used * 100)}% of ${p.window}, ${p.runs} runs${p.throttled ? " (scouts paused)" : ""}`).join("\n");
       }
+      case "waiting":
+      case "todo":
+        return this.attentionText(30);
       case "condense":
         return this.condenseMemory();
       case "memory": {
@@ -334,9 +391,10 @@ export class Jarvis {
       errors: states.filter((x) => x.status === "error").map((x) => x.id),
       recent,
       reports,
+      waiting: await this.attentionText(12),
     }, now);
     const memory = await this.store.memory.list();
-    const r = await this.router.run(jarvis, { system: jarvisSystemPrompt(memory, (await this.systemStatus()).text), prompt, direct: true, maxTurns: 1 });
+    const r = await this.router.run(jarvis, { system: jarvisSystemPrompt(memory, (await this.systemStatus()).text, await this.attentionText()), prompt, direct: true, maxTurns: 1 });
     if (r.blocked) return `No brief: ${r.blocked}`;
     const { text, approvals, remember } = extractBlocks(r.text);
     await this.absorb(jarvis, approvals, remember, r.runId);

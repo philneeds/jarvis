@@ -33,7 +33,8 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const [agents, status, pending, usage, providers] = await Promise.all([
       jarvis.snapshot(), jarvis.systemStatus(), jarvis.store.approvals.list("pending"), usageSummary(jarvis.store), jarvis.router.providerStatus(),
     ]);
-    return c.json({ agents, ventures: VENTURES, models: MODELS, status, pendingApprovals: pending.length, usage, providers, schedules: SCHEDULES });
+    const waiting = (await jarvis.attention()).filter((i) => i.status === "open").length;
+    return c.json({ agents, ventures: VENTURES, models: MODELS, status, pendingApprovals: pending.length, waiting, usage, providers, schedules: SCHEDULES });
   });
 
   api.get("/chat", async (c) => c.json({ messages: await jarvis.store.chat.list(Number(c.req.query("limit") ?? 100)) }));
@@ -67,6 +68,21 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const a = await jarvis.decide(c.req.param("id"), decision === "approve" ? "approved" : decision === "reject" ? "rejected" : "edited", body.data.note, { body: body.data.body, payload: body.data.payload });
     if (!a) return c.json({ error: "not found" }, 404);
     return c.json({ approval: a });
+  });
+
+  // ---- Needs you ---------------------------------------------------------------
+  api.get("/attention", async (c) => c.json({ items: await jarvis.attention(c.req.query("all") === "1") }));
+  api.post("/attention", async (c) => {
+    const p = z.object({ title: z.string().min(1).max(160), why: z.string().max(600).default(""), due: z.string().optional(), venture: z.string().optional() }).safeParse(await c.req.json().catch(() => ({})));
+    if (!p.success) return c.json({ error: "title required" }, 400);
+    return c.json({ item: await jarvis.raiseAttention({ ...p.data, agentId: "jarvis" }) });
+  });
+  api.post("/attention/:id/:change", async (c) => {
+    const change = c.req.param("change");
+    if (!["done", "snoozed", "reopened"].includes(change)) return c.json({ error: "change must be done, snoozed or reopened" }, 400);
+    const p = z.object({ days: z.number().int().min(1).max(60).optional() }).safeParse(await c.req.json().catch(() => ({})));
+    const item = await jarvis.attentionUpdate(c.req.param("id"), change as "done" | "snoozed" | "reopened", p.success ? p.data.days : undefined);
+    return item ? c.json({ item }) : c.json({ error: "not found" }, 404);
   });
 
   api.get("/activity", async (c) => c.json({ entries: await jarvis.store.activity.list({ q: c.req.query("q") || undefined, agentId: c.req.query("agent") || undefined, limit: Number(c.req.query("limit") ?? 200) }) }));

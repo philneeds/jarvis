@@ -70,6 +70,7 @@ Both plans have caps, so work is rationed by priority instead of paying for API 
 | Command | Chat with Jarvis by text or voice; `@stella` talks to an agent directly; `/brief`, `/status`, `/pause`, `/resume`, `/approvals`, `/usage`, `/memory`, `/help`. |
 | Agent Web | The live map: every bubble shows working, idle, waiting on Phil, error or paused, plus last run and model. Tap one for its job, team, model switch, pause and a task box. Faded bubbles are not live in the current phase. |
 | Approvals | One inbox for every send, post, money move, record change and strategy. Approve, edit or reject with a note. |
+| Needs you | Things only Phil can do, raised by agents with an `attention` block (or by Phil). They wait until ticked off, oldest first, show on the home screen, reach Telegram with Done / Snooze buttons, and Jarvis reads the open ones in the morning brief. |
 | Activity | Searchable record of who did what, when and why, with the prompt and reply behind each run. |
 | Usage | Each plan against its pool this week, per agent; provider readiness; the schedule table. |
 | Ventures | One page per venture: metrics over time with sparklines, a board of tracker records (JD PM leads and jobs, Analyzer strategies, Money holdings, Philneeds posts, Range.cool milestones…), the team's live status, what's waiting on Phil, recent activity. Agents feed it with `metric` and `record` blocks; Phil edits anything by hand. The home towers open these. |
