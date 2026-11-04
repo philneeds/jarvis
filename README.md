@@ -84,15 +84,19 @@ The web moves phase by phase; agents fade in on the map as their phase arrives. 
 
 ## Deploy (cloud server)
 
-The Claude and Grok plan sign-ins live on the box, so the simplest shape is one VPS running both apps under systemd with Postgres and Caddy in front.
+The Claude and Grok plan sign-ins live on the box, so the simplest shape is one VPS running both apps under systemd with Postgres and Caddy in front. On a fresh Ubuntu server, as root:
 
 ```bash
-# once
+curl -fsSL https://raw.githubusercontent.com/philneeds/jarvis/main/deploy/setup.sh | DOMAIN=hq.example.com HQ_PASSWORD='a-long-one' BRANCH=main bash
+```
+
+`deploy/setup.sh` installs Node, pnpm, Postgres and Caddy, clones to `/opt/jarvis`, writes `.env`, builds, migrates, starts `jarvis-server` and `jarvis-hq` under systemd, and puts Caddy with TLS in front. Re-run it to update. Then sign in the plans once as the app user:
+
+```bash
+sudo -iu jarvis
 claude login && grok login
-pnpm install && pnpm build && pnpm db:migrate
-# serve
-PORT=4000 node apps/server/dist/index.js        # systemd unit 1
-pnpm --filter @jarvis/hq start                   # systemd unit 2 (port 3000)
+exit
+systemctl restart jarvis-server
 ```
 
 `deploy/Caddyfile` routes `/api/*` and `/ws` to the server and everything else to HQ on one domain with TLS; `deploy/docker-compose.yml` brings up Postgres and Caddy. Set `HQ_ORIGIN`, `HQ_RP_ID` and `NEXT_PUBLIC_WS_URL` to the domain. `NOTIFY_WEBHOOK_URL` (an ntfy topic) and/or `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` push approvals and alerts to the phone.
