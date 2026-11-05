@@ -159,7 +159,7 @@ export default function HomePage() {
                 </section>
               </div>
 
-              <div className="flex flex-col items-center order-1 lg:order-2 lg:pt-4">{core}</div>
+              <div className="flex flex-col items-center order-1 lg:order-2">{core}</div>
 
               <div className="flex flex-col gap-7 order-3 lg:items-end lg:text-right">
                 <Towers />
