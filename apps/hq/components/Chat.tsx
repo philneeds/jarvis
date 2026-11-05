@@ -70,8 +70,9 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
     setText(""); setSuggest([]); setBusy(true); setError(undefined);
     try {
       const { ack, final } = await submit(line);
-      const first = await ack;                       // "on it" lands in seconds; the box frees up here
+      // The box frees up as soon as the message is in; Phil can send the next one while this is answered.
       setBusy(false); inputRef.current?.focus();
+      const first = await ack;
       if (readAloud && first) void voice.speak(first.text);
       const answer = await final;                    // the real answer streams in later; speak it if asked
       if (readAloud && answer && answer.id !== first?.id) void voice.speak(answer.text);

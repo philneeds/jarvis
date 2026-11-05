@@ -188,7 +188,7 @@ export class Jarvis {
 
     const planRun = await this.router.run(jarvis, { system, prompt: planPrompt(userText, recent), direct: true, maxTurns: 1 });
     if (planRun.blocked) {
-      out.push(await this.say({ role: "jarvis", text: `I can't think right now: ${planRun.blocked}` }));
+      out.push(await this.say({ role: "jarvis", text: `I can't think right now: ${planRun.blocked}`, kind: "final" }));
       return out;
     }
     const plan = parsePlan(planRun.text);
@@ -248,7 +248,7 @@ export class Jarvis {
         if (!to || to.id === agent.id || to.id === "jarvis") continue;
         await this.router.log(agent.id, "delegate", `${agent.name} → ${to.name}: ${h.task.slice(0, 200)}`, r.runId);
         const hr = await this.runAgent(to, h.task, { direct: opts.direct, parentRunId: r.runId, from: agent.name, depth: (opts.depth ?? 0) + 1 });
-        await this.say({ role: "agent", agentId: to.id, text: hr.blocked ? `(${to.name} did not run: ${hr.blocked})` : hr.text, runId: hr.runId, via: [agent.id] });
+        await this.say({ role: "agent", agentId: to.id, text: hr.blocked ? `(${to.name} did not run: ${hr.blocked})` : hr.text, runId: hr.runId, via: [agent.id], kind: "progress" });
       }
     }
     return { ...r, text };

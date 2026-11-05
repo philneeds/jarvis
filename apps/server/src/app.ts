@@ -184,7 +184,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.get("/agents/:id/config", async (c) => {
     const agent = findAgent(c.req.param("id"));
     if (!agent) return c.json({ error: "no such agent" }, 404);
-    return c.json({ config: await getAgentConfig(jarvis.store, agent.id), tools: jarvis.allTools().map((t) => t.name), defaultModel: agent.model, charter: CHARTERS[agent.id] ?? null });
+    return c.json({ config: await getAgentConfig(jarvis.store, agent.id), tools: [...new Set([...jarvis.allTools().map((t) => t.name), ...Object.values(CHARTERS).flatMap((ch) => ch.tools ?? [])])], defaultModel: agent.model, charter: CHARTERS[agent.id] ?? null });
   });
   api.put("/agents/:id/config", async (c) => {
     const agent = findAgent(c.req.param("id"));
@@ -199,8 +199,11 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
       accounts: z.array(z.string().email()).optional(),
     }).safeParse(await c.req.json().catch(() => ({})));
     if (!p.success) return c.json({ error: "bad body", issues: p.error.issues }, 400);
-    const known = new Set(jarvis.allTools().map((t) => t.name));
-    if (p.data.tools?.some((t) => !known.has(t))) return c.json({ error: "unknown tool" }, 400);
+    // A tool from a connector that isn't connected yet (Gmail, X) is still a real tool: keep it, it switches on when
+    // the connector does. Only names nothing in HQ knows are refused.
+    const known = new Set([...jarvis.allTools().map((t) => t.name), ...Object.values(CHARTERS).flatMap((ch) => ch.tools ?? [])]);
+    const unknown = p.data.tools?.filter((t) => !known.has(t)) ?? [];
+    if (unknown.length) return c.json({ error: `unknown tool: ${unknown.join(", ")}` }, 400);
     const config = await setAgentConfig(jarvis.store, agent.id, p.data as Parameters<typeof setAgentConfig>[2]);
     if (p.data.model !== undefined) await jarvis.store.agentState.set(agent.id, { modelOverride: p.data.model && p.data.model !== agent.model ? p.data.model : "" });
     await jarvis.router.log("jarvis", "system", `Phil updated ${agent.name}'s settings`, undefined, { changed: Object.keys(p.data) });

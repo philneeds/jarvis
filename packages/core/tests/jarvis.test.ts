@@ -367,3 +367,13 @@ test("web_health summarises the week for Einstein: runs, errors, blocked runs, a
   assert.match(out, /Lucas \(1\): grok CLI missing/);
   assert.match(out, /rejected 1 \(Stephanie\)/);
 });
+
+test("when the web is paused, the reply is still marked final so the chat never waits forever", async () => {
+  const { jarvis, store } = make();
+  await store.init();
+  await store.settings.set("killSwitch", { all: true, trading: false, agents: [] });
+  const out = await jarvis.handle("what's on today?");
+  const last = out[out.length - 1]!;
+  assert.match(last.text, /can't think right now/);
+  assert.equal(last.kind, "final");
+});
