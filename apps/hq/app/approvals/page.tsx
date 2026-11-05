@@ -80,9 +80,9 @@ export default function ApprovalsPage() {
   return (
     <Shell>
       <div className="max-w-3xl w-full mx-auto p-4 flex flex-col gap-4">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="display font-bold text-2xl tracking-[0.2em] m-0" style={{ color: "var(--amber)" }}>APPROVALS</h1>
-          <span className="text-[12px]" style={{ color: "var(--muted)" }}>{pending.length} waiting</span>
+          <span className="text-[12px] whitespace-nowrap" style={{ color: "var(--muted)" }}>{pending.length} waiting</span>
           <div className="tabs ml-auto" style={{ width: 200 }}>
             <button aria-pressed={tab === "pending"} onClick={() => setTab("pending")} style={tab === "pending" ? { borderColor: "var(--accent)" } : undefined}>Waiting</button>
             <button aria-pressed={tab === "decided"} onClick={() => setTab("decided")} style={tab === "decided" ? { borderColor: "var(--accent)" } : undefined}>Decided</button>

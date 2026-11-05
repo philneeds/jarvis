@@ -63,7 +63,7 @@ export default function AttentionPage() {
           <button className="btn btn-sm btn-primary h-9" disabled={!title.trim()}>Add</button>
         </form>
 
-        {list.length === 0 && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>{tab === "open" ? "Nothing waiting on you." : "Nothing done yet."}</div>}
+        {list.length === 0 && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>{tab === "open" ? "Nothing waiting on you. When an agent needs a call from you, it lands here." : "Nothing done yet. Items you tick off are kept here."}</div>}
         {list.map((i) => {
           const age = Math.floor((Date.now() - Date.parse(i.at)) / 86400_000);
           return (

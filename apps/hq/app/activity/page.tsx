@@ -15,6 +15,8 @@ export default function ActivityPage() {
   const { state, activity } = useLive();
   const [q, setQ] = useState("");
   const [agent, setAgent] = useState("");
+  // "Full log ›" links pass ?agent=<id>; open the log already filtered to that agent.
+  useEffect(() => { const a = new URLSearchParams(window.location.search).get("agent"); if (a) setAgent(a); }, []);
   const [runs, setRuns] = useState(false);
   const [rows, setRows] = useState<{ entries: ActivityEntry[]; at: string } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
