@@ -54,7 +54,7 @@ export function isOutbound(a: Pick<Approval, "kind" | "payload">): boolean {
   if (Array.isArray(p.attendees) && p.attendees.length) return true;
   if (Array.isArray(p.guests) && p.guests.length) return true;
   // An action no connector recognises is treated as outbound: when unsure, ask.
-  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|spotify\.playlist\.(create|add)|goals\.update|memory\.replace|record\.)/.test(p.action);
+  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|spotify\.playlist\.(create|add)|goals\.update|watchlist\.add|memory\.replace|record\.)/.test(p.action);
 }
 
 /** Something Phil deleted, kept for a while so he can undo it. */
@@ -111,6 +111,15 @@ export class Jarvis {
       if (!g) throw new Error("no goal with that id; check goals_list");
       return `"${g.name}" is now ${g.pct}% done.`;
     });
+    // A scout's own idea for the stock watchlist, added once Phil approves.
+    this.executors.set("watchlist.add", async (a) => {
+      const p = (a.payload ?? {}) as { symbol?: unknown; sector?: unknown; thesis?: unknown };
+      const symbol = String(p.symbol ?? "").trim().toUpperCase();
+      if (!/^[A-Z0-9.\-]{1,10}$/.test(symbol)) throw new Error("watchlist.add needs a ticker symbol");
+      await this.upsertRecord({ venture: "money", kind: "holding", title: symbol, status: "watch", fields: { sector: String(p.sector ?? ""), thesis: String(p.thesis ?? a.body ?? "").slice(0, 300) }, source: a.agentId }, a.runId);
+      return `${symbol} is on the watchlist.`;
+    });
+    this.describers.set("watchlist.add", (p) => `Adds ${String(p.symbol ?? "").toUpperCase()} to your stock watchlist on the Money board. Nothing is bought.`);
     this.describers.set("goals.update", (p) => `Sets a goal's progress to ${Number(p.pct)}% on your home screen. Nothing leaves HQ.`);
     this.describers.set("goals.set", (p) => {
       const add = (Array.isArray(p.add) ? p.add : []) as { name?: string; primary?: boolean; deadline?: string }[];

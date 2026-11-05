@@ -96,6 +96,17 @@ export function buildTools(): ToolDef[] {
       },
     }),
     defineTool({
+      name: "chat_recent",
+      description: "What Phil himself said to Jarvis over the last N days (newest first), optionally only lines containing a word. Use it to pick up what he's been talking about, such as stocks he mentioned.",
+      schema: { days: z.number().int().min(1).max(30).optional(), query: z.string().max(60).optional() },
+      async handler({ days, query }, { store }) {
+        const since = Date.now() - (days ?? 7) * 86_400_000;
+        const q = query?.toLowerCase();
+        const rows = (await store.chat.list(1000)).filter((m) => m.role === "phil" && Date.parse(m.at) >= since && (!q || m.text.toLowerCase().includes(q))).reverse().slice(0, 80);
+        return rows.length ? rows.map((m) => `${m.at.slice(0, 16)} ${m.text.slice(0, 400)}`).join("\n") : "Nothing from Phil in that window.";
+      },
+    }),
+    defineTool({
       name: "activity_recent",
       description: "Recent activity log entries, optionally for one agent. Use it to see what already happened before doing it again.",
       schema: { agent: z.string().optional().describe("agent id"), limit: z.number().int().min(1).max(50).optional() },

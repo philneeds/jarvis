@@ -546,3 +546,20 @@ test("Phil's to-do list: /todo adds, and Jarvis adds what Phil asks him to", asy
   const titles = (await j2.attention()).map((i) => i.title);
   assert.ok(titles.includes("Decide on Higgsfield for Joi"), titles.join(" | "));
 });
+
+test("Watchlist: a scout's own idea waits for Phil and lands on the Money board; Buffett can see what Phil said", async () => {
+  const { jarvis, store } = make();
+  await store.init();
+  const a = await jarvis.requestApproval({ agentId: "house", kind: "record", title: "Watch VRTX?", body: "Two catalysts in Q1", payload: { action: "watchlist.add", symbol: "vrtx", sector: "biotech", thesis: "Two catalysts in Q1" } });
+  assert.equal(a.status, "pending", "a scout's own idea asks first");
+  assert.match(a.effect!, /Adds VRTX to your stock watchlist/);
+  await jarvis.decide(a.id, "approved");
+  const recs = await store.records.list("money");
+  assert.ok(recs.some((r) => r.title === "VRTX" && r.status === "watch" && (r.fields as { sector?: string }).sector === "biotech"));
+  await jarvis.handle("thinking about NVDA after earnings");
+  const { TOOLS } = await import("../src/tools/index.js");
+  assert.match(await TOOLS.find((t) => t.name === "chat_recent")!.handler({ query: "nvda" }, { store, agentId: "buffett" }), /thinking about NVDA after earnings/);
+  const { CHARTERS } = await import("../src/index.js");
+  assert.ok(CHARTERS.buffett!.tools!.includes("chat_recent"));
+  assert.ok(CHARTERS.house!.owns.some((o) => /watchlist\.add/.test(o)));
+});

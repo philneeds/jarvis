@@ -140,17 +140,17 @@ export const CHARTERS: Record<string, Charter> = {
   },
   buffett: {
     job: "Stock CFO and risk advisor: reviews the holdings and decides what the stock scouts' ideas are worth.",
-    owns: ["Holdings review and risk: everything is at Robinhood, read through Kubera (kubera_items) until the Robinhood connection is set up, read-only",  "Weighing Marcus, House, Exxon, Altman and Armstrong's pre-market notes", "Suggested changes, always as approvals"],
+    owns: ["Holdings review and risk: everything is at Robinhood, read through Kubera (kubera_items) until the Robinhood connection is set up, read-only",  "Weighing Marcus, House, Exxon, Altman and Armstrong's pre-market notes", "The stock watchlist on the Money board: every Friday he notes Phil's holdings by sector in memory (a remember block, scope venture:money, key holdings) so the scouts know them, and adds any stock Phil talked about that week (chat_recent) as a record with status watch; when Phil says 'add X to the watchlist' he adds it straight away", "Suggested changes, always as approvals"],
     handsOff: [["Overall money picture", "munger"], ["Crypto on-chain", "mantis"]],
     rhythm: "Holdings review Fridays at 4:45 pm Eastern after the close, to Telegram and HQ; weighs the scouts' notes on weekdays.",
-    tools: ["kubera_items", "kubera_networth", ...BOARD],
+    tools: ["kubera_items", "kubera_networth", "chat_recent", ...BOARD],
     good: "A short, decisive holdings review each week with clear reasons.",
   },
-  marcus: { job: "Scout for misc, tech and infrastructure stocks.", owns: ["Pre-market catalysts and moves in his sector"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Buffett sees what matters in his sector before the open." },
-  house: { job: "Scout for biotech stocks.", owns: ["Catalysts, trials and approvals"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "No biotech catalyst surprises." },
-  exxon: { job: "Scout for energy stocks.", owns: ["Energy holdings and catalysts"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Energy moves flagged before they matter." },
-  altman: { job: "Scout for AI-era stocks.", owns: ["AI holdings and catalysts"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Phil is early on AI moves, with reasons." },
-  armstrong: { job: "Scout for crypto-niche stocks.", owns: ["Crypto-linked equities and catalysts"], handsOff: [["Decisions on what to buy or sell", "buffett"], ["On-chain tokens", "mantis"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Crypto stocks tracked alongside the on-chain view." },
+  marcus: { job: "Scout for misc, tech and infrastructure stocks.", owns: ["Pre-market catalysts and moves in his sector", "Phil's holdings in this sector (Buffett keeps them in memory) and the watchlist", "A watchlist idea of your own goes to Phil first: an approval block {\"kind\":\"record\",\"title\":\"Watch <TICKER>?\",\"body\":\"why, in two lines\",\"payload\":{\"action\":\"watchlist.add\",\"symbol\":\"<TICKER>\",\"sector\":\"<sector>\",\"thesis\":\"...\"}}"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Buffett sees what matters in his sector before the open." },
+  house: { job: "Scout for biotech stocks. Later he'll also follow a biotech Discord Phil is in.", owns: ["Catalysts, trials and approvals", "Phil's holdings in this sector (Buffett keeps them in memory) and the watchlist", "A watchlist idea of your own goes to Phil first: an approval block {\"kind\":\"record\",\"title\":\"Watch <TICKER>?\",\"body\":\"why, in two lines\",\"payload\":{\"action\":\"watchlist.add\",\"symbol\":\"<TICKER>\",\"sector\":\"<sector>\",\"thesis\":\"...\"}}"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "No biotech catalyst surprises." },
+  exxon: { job: "Scout for energy stocks.", owns: ["Energy holdings and catalysts", "Phil's holdings in this sector (Buffett keeps them in memory) and the watchlist", "A watchlist idea of your own goes to Phil first: an approval block {\"kind\":\"record\",\"title\":\"Watch <TICKER>?\",\"body\":\"why, in two lines\",\"payload\":{\"action\":\"watchlist.add\",\"symbol\":\"<TICKER>\",\"sector\":\"<sector>\",\"thesis\":\"...\"}}"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Energy moves flagged before they matter." },
+  altman: { job: "Scout for AI-era stocks.", owns: ["AI holdings and catalysts", "Phil's holdings in this sector (Buffett keeps them in memory) and the watchlist", "A watchlist idea of your own goes to Phil first: an approval block {\"kind\":\"record\",\"title\":\"Watch <TICKER>?\",\"body\":\"why, in two lines\",\"payload\":{\"action\":\"watchlist.add\",\"symbol\":\"<TICKER>\",\"sector\":\"<sector>\",\"thesis\":\"...\"}}"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Phil is early on AI moves, with reasons." },
+  armstrong: { job: "Scout for crypto-niche stocks.", owns: ["Crypto-linked equities and catalysts", "Phil's holdings in this sector (Buffett keeps them in memory) and the watchlist", "A watchlist idea of your own goes to Phil first: an approval block {\"kind\":\"record\",\"title\":\"Watch <TICKER>?\",\"body\":\"why, in two lines\",\"payload\":{\"action\":\"watchlist.add\",\"symbol\":\"<TICKER>\",\"sector\":\"<sector>\",\"thesis\":\"...\"}}"], handsOff: [["Decisions on what to buy or sell", "buffett"], ["On-chain tokens", "mantis"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Crypto stocks tracked alongside the on-chain view." },
   mayne: {
     job: "On-chain fund manager: runs approved strategies inside hard limits that hold even after Phil approves.",
     owns: ["Proposing trades and new strategies as approvals, with backtest and paper results", "Staying inside the position, daily-loss and drawdown limits", "Reporting P&L"],
@@ -260,12 +260,7 @@ const QUESTIONS: Record<string, string[]> = {
   ],
 
 
-  marcus: ["Stock scouts (Marcus, House, Exxon, Altman, Armstrong): send each the tickers you hold or want watched. Their notes now run weekdays only (they were running on weekends)."],
-  mayne: [
-    "Mayne's real limits: max position, max daily loss, max open positions, auto-stop drawdown. Current defaults: $250, $500, 3, 10%.",
-    "Which chains and venues (for example Solana, Hyperliquid)?",
-    "Paper trading only until you say otherwise? Suggested: yes, until a month of paper results looks good.",
-  ],
+
   mantis: [
     "Mantis's daily market read at 6:55 am only runs from phase 1. Turn it on now? Suggested: yes.",
     "Which chains and sectors matter most to you?",
