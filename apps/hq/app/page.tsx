@@ -213,7 +213,7 @@ export default function HomePage() {
             <div className="flex items-end justify-between gap-4 mt-auto">
               <div className="flex items-center gap-3">
                 <div className="w-11 h-11 rounded-full border-2 flex items-center justify-center" style={{ borderColor: "var(--accent)", boxShadow: "0 0 12px rgba(124,196,255,0.6)" }}><span className="display font-bold text-lg" style={{ color: "var(--ink-strong)" }}>P</span></div>
-                <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.12em]"><span style={{ color: "var(--ink-strong)" }}>PHIL</span><span style={{ color: "var(--muted)" }}>RECOVERY — · DOC (PHASE 3)</span></div>
+                <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.12em]"><span style={{ color: "var(--ink-strong)" }}>PHIL</span><span style={{ color: "var(--muted)" }}>RECOVERY — · DOC</span></div>
               </div>
               <div className="flex"><button className="btn btn-sm" onClick={toggle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" /></svg>Display off</button></div>
             </div>
