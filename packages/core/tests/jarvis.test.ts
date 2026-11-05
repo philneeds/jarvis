@@ -209,6 +209,8 @@ test("an approval carries context and a plain 'if you approve' line, and Phil ca
   const revised = await jarvis.askAboutApproval(a!.id, "make it shorter");
   assert.match(revised!.body, /revised: make it shorter/);
   assert.equal(revised?.original, originalBody);
+  assert.equal(revised?.editedBy, "agent");
+  assert.equal((await jarvis.updateApproval(a!.id, { body: "Phil's words" }))?.editedBy, "phil");
   assert.match(revised!.thread![3]!.text, /cut it down/);
   assert.doesNotMatch(revised!.thread![3]!.text, /```revise/);
   assert.equal((await store.approvals.list("pending")).length, 1);

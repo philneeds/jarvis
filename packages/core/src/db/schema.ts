@@ -52,6 +52,7 @@ export const approvals = pgTable("approvals", {
   effect: text("effect"),
   thread: jsonb("thread").$type<{ at: string; from: "phil" | "agent"; text: string }[]>(),
   original: text("original"),
+  editedBy: text("edited_by"),
   status: text("status").notNull().default("pending"),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
   note: text("note"),

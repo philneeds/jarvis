@@ -22,6 +22,7 @@ export interface JarvisOptions {
 /** Runs an approved action. Registered by the payload's `action` name; connectors add theirs. */
 export type Executor = (approval: Approval, jarvis: Jarvis) => Promise<string | void>;
 export type Describer = (payload: Record<string, unknown>, approval: Pick<Approval, "agentId" | "payload" | "kind">) => string;
+export type Normalizer = (payload: Record<string, unknown>, agentId: string) => Promise<Record<string, unknown> | void>;
 /** Which payload field holds the text Phil edits on the card, per action. */
 const TEXT_FIELD: Record<string, string> = { "gmail.send": "body", "x.post": "text", "x.reply": "text", "x.dm": "text" };
 
@@ -58,12 +59,16 @@ export class Jarvis {
   onApproved(action: string, fn: Executor) { this.executors.set(action, fn); }
 
   /** Plug in a connector: its tools become available in agent settings, its actions run on approval. */
-  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer> }, hint?: string) {
+  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer>; normalize?: Normalizer }, hint?: string) {
     for (const t of c.tools()) this.connectorTools.set(t.name, t);
     for (const [k, fn] of Object.entries(c.executors())) this.executors.set(k, fn);
     for (const [k, fn] of Object.entries(c.describe?.() ?? {})) this.describers.set(k, fn);
+    if (c.normalize) this.normalizers.push(c.normalize.bind(c));
     if (hint) this.promptHints.push(hint);
   }
+
+  /** Connectors fill in what an agent left implicit (for example which account sends) before Phil sees the card. */
+  private normalizers: Normalizer[] = [];
 
   /** What approving does, in Phil's words, worked out from the payload rather than taken from the agent. */
   effectOf(a: Pick<Approval, "agentId" | "payload" | "kind">): string {
@@ -481,6 +486,8 @@ export class Jarvis {
   // ---- Approvals ----------------------------------------------------------
 
   async requestApproval(a: Omit<Approval, "id" | "at" | "status">): Promise<Approval> {
+    const payload0 = a.payload;
+    if (payload0) for (const n of this.normalizers) { try { const p = await n(a.payload ?? payload0, a.agentId); if (p) a = { ...a, payload: p }; } catch { /* a connector that can't help leaves the payload as it was */ } }
     for (const pf of this.preflights) {
       const reason = await pf(a);
       if (reason) {
@@ -521,6 +528,7 @@ export class Jarvis {
     if (edits?.body !== undefined && edits.body !== before.body) {
       Object.assign(patch, this.applyEdit({ body: before.body, payload: patch.payload ?? before.payload }, edits.body));
       patch.original = before.original ?? before.body;
+      patch.editedBy = "phil";
     }
     if (decision === "approved" && (before.original !== undefined || patch.original !== undefined)) decision = "edited";
     patch.status = decision;
@@ -559,7 +567,7 @@ export class Jarvis {
     const a = await this.store.approvals.get(id);
     if (!a || a.status !== "pending") return a;
     const applied = this.applyEdit(a, edits.body);
-    const next = await this.store.approvals.update(id, { ...applied, original: a.original ?? a.body, effect: this.effectOf({ ...a, payload: applied.payload }) });
+    const next = await this.store.approvals.update(id, { ...applied, original: a.original ?? a.body, editedBy: "phil", effect: this.effectOf({ ...a, payload: applied.payload }) });
     if (next) bus.emitEvent({ type: "approval.updated", approval: next });
     return next;
   }
@@ -595,7 +603,7 @@ export class Jarvis {
         if (typeof o.title === "string" && o.title.trim()) patch.title = o.title;
         if (o.payload && typeof o.payload === "object") patch.payload = o.payload as Record<string, unknown>;
         if (typeof o.context === "string" && o.context.trim()) patch.context = o.context;
-        if (patch.body || patch.payload) { patch.original = a.original ?? a.body; patch.effect = this.effectOf({ ...a, payload: patch.payload ?? a.payload }); }
+        if (patch.body || patch.payload) { patch.original = a.original ?? a.body; patch.editedBy = a.editedBy === "phil" ? "phil" : "agent"; patch.effect = this.effectOf({ ...a, payload: patch.payload ?? a.payload }); }
         answer = answer || "Revised as above.";
       } catch { answer += "\n\n(The revision could not be read; the proposal is unchanged.)"; }
     }

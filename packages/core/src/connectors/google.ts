@@ -364,6 +364,15 @@ export class GoogleConnector {
     };
   }
 
+  /** Fill in the account an agent left implicit, so the card says which address sends or changes. */
+  async normalize(payload: Record<string, unknown>, agentId: string): Promise<Record<string, unknown> | void> {
+    const action = String(payload.action ?? "");
+    if (!/^(gmail|calendar)\./.test(action) || (typeof payload.account === "string" && payload.account)) return;
+    const allowed = (await getAgentConfig(this.store, agentId)).accounts?.map((e) => e.toLowerCase());
+    const t = await this.pick(undefined, allowed?.length ? allowed : undefined);
+    return t.email ? { ...payload, account: t.email } : undefined;
+  }
+
   /** What each action does, in Phil's words, shown on the card before he approves. */
   describe(): Record<string, Describer> {
     const acct = (p: { account?: unknown }) => (typeof p.account === "string" && p.account ? p.account : "your first Google account");

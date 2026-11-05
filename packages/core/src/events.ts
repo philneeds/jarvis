@@ -65,8 +65,10 @@ export interface Approval {
   effect?: string;
   /** Phil's questions about the proposal and the agent's answers. */
   thread?: ApprovalMessage[];
-  /** Set once Phil saved a change to the text; the agent's original is kept here. */
+  /** Set once the text changed after the agent proposed it; the agent's original is kept here. */
   original?: string;
+  /** Who changed it last: Phil on the card, or the agent at Phil's request. */
+  editedBy?: "phil" | "agent";
   status: ApprovalStatus;
   decidedAt?: string;
   note?: string;

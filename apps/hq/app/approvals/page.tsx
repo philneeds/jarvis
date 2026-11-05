@@ -103,7 +103,7 @@ export default function ApprovalsPage() {
               <div className="flex flex-wrap items-center gap-2 text-[11px] tracking-[0.16em] uppercase">
                 <span style={{ color: v?.color }}>{v?.short} · {who}</span>
                 <span className="px-1.5 border" style={{ color: KIND[a.kind], borderColor: KIND[a.kind] }}>{a.kind}</span>
-                {a.original !== undefined && <span className="px-1.5 border" style={{ color: "var(--amber)", borderColor: "var(--amber)" }}>edited by you</span>}
+                {a.original !== undefined && <span className="px-1.5 border" style={{ color: "var(--amber)", borderColor: "var(--amber)" }}>{a.editedBy === "agent" ? `revised by ${first}` : "edited by you"}</span>}
                 <span className="ml-auto" style={{ color: "var(--dim)", letterSpacing: 0 }}>{fmtTime(a.at)}</span>
               </div>
               <h2 className="display font-bold text-2xl leading-tight m-0" style={{ color: "var(--ink-bright)" }}>{a.title}</h2>
