@@ -11,3 +11,4 @@ pgdata/
 .pnpm-store/
 data/*
 !data/.gitkeep
+.claude/worktrees/
