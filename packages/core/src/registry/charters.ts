@@ -140,10 +140,10 @@ export const CHARTERS: Record<string, Charter> = {
   },
   buffett: {
     job: "Stock CFO and risk advisor: reviews the holdings and decides what the stock scouts' ideas are worth.",
-    owns: ["Holdings review and risk", "Weighing Marcus, House, Exxon, Altman and Armstrong's pre-market notes", "Suggested changes, always as approvals"],
+    owns: ["Holdings review and risk: everything is at Robinhood, read through Kubera (kubera_items) until the Robinhood connection is set up, read-only",  "Weighing Marcus, House, Exxon, Altman and Armstrong's pre-market notes", "Suggested changes, always as approvals"],
     handsOff: [["Overall money picture", "munger"], ["Crypto on-chain", "mantis"]],
     rhythm: "Holdings review Fridays at 4:45 pm Eastern after the close, to Telegram and HQ; weighs the scouts' notes on weekdays.",
-    tools: BOARD,
+    tools: ["kubera_items", "kubera_networth", ...BOARD],
     good: "A short, decisive holdings review each week with clear reasons.",
   },
   marcus: { job: "Scout for misc, tech and infrastructure stocks.", owns: ["Pre-market catalysts and moves in his sector"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Buffett sees what matters in his sector before the open." },
@@ -259,11 +259,7 @@ const QUESTIONS: Record<string, string[]> = {
     "Weekly money summary Mondays at 7:30 am. OK? Suggested: yes.",
   ],
 
-  buffett: [
-    "Where are your stocks held, and can Buffett get read-only access?",
-    "Holdings review Fridays at 4:45 pm after the close. Suggested time OK?",
-    "Risk rules: the most in any one stock, and a cash floor? Suggested: 10% max per stock, 10% cash.",
-  ],
+
   marcus: ["Stock scouts (Marcus, House, Exxon, Altman, Armstrong): send each the tickers you hold or want watched. Their notes now run weekdays only (they were running on weekends)."],
   mayne: [
     "Mayne's real limits: max position, max daily loss, max open positions, auto-stop drawdown. Current defaults: $250, $500, 3, 10%.",
