@@ -25,7 +25,7 @@ export const VENTURE_DASH: Record<VentureId, VentureDash> = {
   crypto: {
     blurb: "Mantis's desk: what the team is watching on-chain and what Mayne holds.",
     metrics: [{ key: "pnl_week", label: "P&L / week", unit: "$", good: "up" }, { key: "open_positions", label: "Open positions", unit: "n" }, { key: "funding_avg", label: "Avg funding", unit: "%" }],
-    records: [{ kind: "watch", label: "Watchlist", statuses: ["watching", "entered", "exited", "dropped"], fields: [{ key: "symbol", label: "Symbol" }, { key: "thesis", label: "Thesis" }, { key: "scout", label: "Scout" }] }],
+    records: [{ kind: "watch", label: "Watchlist", statuses: ["watching", "entered", "exited", "dropped"], fields: [{ key: "symbol", label: "Symbol" }, { key: "thesis", label: "Thesis" }, { key: "scout", label: "Scout" }] }, { kind: "paper", label: "Paper tests (Mayne)", statuses: ["running", "won", "lost", "stopped"], fields: [{ key: "strategy", label: "Strategy" }, { key: "entry", label: "Entry" }, { key: "exit", label: "Exit" }, { key: "pnl", label: "P&L", type: "money" }] }],
   },
   philneeds: {
     blurb: "Nick's numbers for the Philneeds brand: Boo's posts and ncrypt's replies.",

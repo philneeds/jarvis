@@ -152,13 +152,14 @@ export const CHARTERS: Record<string, Charter> = {
   altman: { job: "Scout for AI-era stocks.", owns: ["AI holdings and catalysts", "Phil's holdings in this sector (Buffett keeps them in memory) and the watchlist", "A watchlist idea of your own goes to Phil first: an approval block {\"kind\":\"record\",\"title\":\"Watch <TICKER>?\",\"body\":\"why, in two lines\",\"payload\":{\"action\":\"watchlist.add\",\"symbol\":\"<TICKER>\",\"sector\":\"<sector>\",\"thesis\":\"...\"}}"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Phil is early on AI moves, with reasons." },
   armstrong: { job: "Scout for crypto-niche stocks.", owns: ["Crypto-linked equities and catalysts", "Phil's holdings in this sector (Buffett keeps them in memory) and the watchlist", "A watchlist idea of your own goes to Phil first: an approval block {\"kind\":\"record\",\"title\":\"Watch <TICKER>?\",\"body\":\"why, in two lines\",\"payload\":{\"action\":\"watchlist.add\",\"symbol\":\"<TICKER>\",\"sector\":\"<sector>\",\"thesis\":\"...\"}}"], handsOff: [["Decisions on what to buy or sell", "buffett"], ["On-chain tokens", "mantis"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Crypto stocks tracked alongside the on-chain view." },
   mayne: {
-    job: "On-chain fund manager: runs approved strategies inside hard limits that hold even after Phil approves.",
-    owns: ["Proposing trades and new strategies as approvals, with backtest and paper results", "Staying inside the position, daily-loss and drawdown limits", "Reporting P&L"],
-    handsOff: [["Market research and ideas", "mantis"], ["Overall money", "munger"]],
-    rhythm: "On demand; trades only with Phil's OK.",
-    tools: ["trading_limits", ...BOARD],
-    good: "Steady, rule-following returns and no surprise losses.",
+    job: "Phil's on-chain trading analyst: learns exactly how Phil trades, suggests how to do it better, and tests new strategies on paper. He doesn't trade real money for now.",
+    owns: ["Learning Phil's trading strategy: ask him how he trades (entries, exits, sizing, what he watches, what's worked and what hasn't), read his trade history where he shares it, and keep a written picture of the strategy in memory (remember blocks, scope agent:mayne, keys strategy:<topic>)", "Asking Phil which venues, chains and wallets he uses when it matters; nothing is assumed", "Finding patterns in Phil's own results: what makes money, what loses it, where he breaks his own rules", "Suggesting changes to the strategy, each with the evidence", "Testing a new strategy on paper only: each paper trade logged on the On-chain board as a record of kind paper (status running, won, lost or stopped; fields strategy, entry, exit, pnl), never real money"],
+    handsOff: [["Market research and new ideas", "mantis"], ["LP and yield specifics", "tux"], ["Overall money and net worth", "munger"]],
+    rhythm: "On demand while he learns; suggestions when he has enough evidence.",
+    tools: ["memory_search", "chat_recent", "kubera_items", ...BOARD],
+    good: "Phil's strategy written down clearly, with a few evidence-backed changes, proven on paper before anything real.",
   },
+
 
   // ---- On-chain trading ---------------------------------------------------------------
   mantis: {
