@@ -52,6 +52,7 @@ export function mockProvider(label = "mock"): Provider {
           text += `\n\n\`\`\`remember\n${JSON.stringify({ scope: `venture:${req.agent.venture}`, key: "note-" + Date.now().toString(36), value: req.prompt.replace(/^.*?asks:\s*/s, "").slice(0, 120) })}\n\`\`\``;
         }
       }
+      if (req.images?.length) text = `(saw ${req.images.length} image${req.images.length > 1 ? "s" : ""}) ${text}`;
       req.onDelta?.(text);
       return {
         text,

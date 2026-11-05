@@ -9,6 +9,7 @@ export * from "./jarvis/blocks.js";
 export { Jarvis, type JarvisOptions } from "./jarvis/orchestrator.js";
 export { Scheduler, SCHEDULES, type Schedule } from "./scheduler.js";
 export * from "./config.js";
+export * from "./uploads.js";
 export * from "./tools/index.js";
 export type { Executor } from "./jarvis/orchestrator.js";
 export * from "./connectors/index.js";

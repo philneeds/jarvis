@@ -11,6 +11,7 @@ export const chatMessages = pgTable("chat_messages", {
   channel: text("channel"),
   replyTo: text("reply_to"),
   kind: text("kind"),
+  images: jsonb("images").$type<string[]>(),
 }, (t) => [index("chat_at_idx").on(t.at)]);
 
 export const runs = pgTable("runs", {

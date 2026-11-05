@@ -61,6 +61,8 @@ export interface ChatMessage {
   replyTo?: string;
   /** ack = "on it" within seconds; progress = someone finished late; final = the answer. */
   kind?: "ack" | "progress" | "final";
+  /** Images Phil attached (upload ids, served at /api/uploads/<id>). */
+  images?: string[];
 }
 
 export type ApprovalKind = "send" | "post" | "money" | "strategy" | "config" | "record" | "other";

@@ -1,0 +1,46 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+
+/**
+ * Images Phil sends (a screenshot in Command, a photo on Telegram), kept on the server's disk so agents that can see
+ * (the Claude ones) get the picture itself. JARVIS_UPLOAD_DIR picks the folder; ids are opaque and checked before
+ * any file is touched.
+ */
+export interface ImageInput { mime: string; data: string /* base64 */ }
+
+const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+const MIME: Record<string, string> = Object.fromEntries(Object.entries(EXT).map(([m, e]) => [e, m]));
+/** Claude takes images up to 5 MB. */
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const ID = /^[0-9a-f-]{36}\.(jpg|png|webp|gif)$/;
+
+const dir = () => process.env.JARVIS_UPLOAD_DIR || path.join("data", "uploads");
+
+export function imageMimeOk(mime: string): boolean { return mime in EXT; }
+
+export async function saveImage(buf: Buffer, mime: string): Promise<string> {
+  const m = mime.split(";")[0]!.trim().toLowerCase();
+  if (!imageMimeOk(m)) throw new Error("only JPEG, PNG, WebP or GIF images");
+  if (!buf.length) throw new Error("empty image");
+  if (buf.length > MAX_IMAGE_BYTES) throw new Error("image is over 5 MB");
+  const id = `${randomUUID()}.${EXT[m]}`;
+  await fs.mkdir(dir(), { recursive: true });
+  await fs.writeFile(path.join(dir(), id), buf);
+  return id;
+}
+
+export async function loadImage(id: string): Promise<{ mime: string; data: Buffer } | undefined> {
+  if (!ID.test(id)) return undefined;
+  try { return { mime: MIME[id.split(".").pop()!]!, data: await fs.readFile(path.join(dir(), id)) }; }
+  catch { return undefined; }
+}
+
+export async function imageExists(id: string): Promise<boolean> { return !!(await loadImage(id)); }
+
+/** The images as model input, skipping any that are gone. */
+export async function imageInputs(ids: string[] = []): Promise<ImageInput[]> {
+  const out: ImageInput[] = [];
+  for (const id of ids.slice(0, 4)) { const f = await loadImage(id); if (f) out.push({ mime: f.mime, data: f.data.toString("base64") }); }
+  return out;
+}

@@ -11,6 +11,7 @@ import { getAgentConfig } from "../config.js";
 import { VENTURES, type VentureId } from "../registry/ventures.js";
 import { VENTURE_DASH, recordKind } from "../ventures/dashboards.js";
 import { TOOLS } from "../tools/index.js";
+import { imageInputs } from "../uploads.js";
 
 export interface JarvisOptions {
   store: Store;
@@ -147,24 +148,26 @@ export class Jarvis {
   // ---- Chat -------------------------------------------------------------
 
   /** The conversation a reply belongs to, carried through async work so every say() in it is tagged. */
-  private convo = new AsyncLocalStorage<{ channel: ChatMessage["channel"]; replyTo: string }>();
+  private convo = new AsyncLocalStorage<{ channel: ChatMessage["channel"]; replyTo: string; images?: string[] }>();
 
   /**
    * Submit a message from Phil and return at once with his message; the work continues in the background and
    * every reply (ack, progress, final) arrives as a chat.message event tagged with replyTo = his message id.
    */
-  async submit(text: string, opts: { channel?: ChatMessage["channel"] } = {}): Promise<{ message: ChatMessage; done: Promise<ChatMessage[]> }> {
-    const trimmed = text.trim();
+  async submit(text: string, opts: { channel?: ChatMessage["channel"]; images?: string[] } = {}): Promise<{ message: ChatMessage; done: Promise<ChatMessage[]> }> {
+    const images = opts.images?.slice(0, 4);
+    // A picture on its own is a question too.
+    const trimmed = text.trim() || (images?.length ? "What do you think of this?" : "");
     if (!trimmed) throw new Error("empty message");
-    const message = await this.say({ role: "phil", text: trimmed, channel: opts.channel ?? "hq" });
-    const done = this.convo.run({ channel: opts.channel ?? "hq", replyTo: message.id }, () => this.handleStored(trimmed).catch(async (e) => [await this.say({ role: "jarvis", text: `Something broke on my side: ${(e as Error).message}`, kind: "final" })]));
+    const message = await this.say({ role: "phil", text: trimmed, channel: opts.channel ?? "hq", ...(images?.length ? { images } : {}) });
+    const done = this.convo.run({ channel: opts.channel ?? "hq", replyTo: message.id, images }, () => this.handleStored(trimmed).catch(async (e) => [await this.say({ role: "jarvis", text: `Something broke on my side: ${(e as Error).message}`, kind: "final" })]));
     return { message, done };
   }
 
   /** Handle one message from Phil and wait for everything. Returns the replies (already stored and broadcast). */
-  async handle(text: string, opts: { channel?: ChatMessage["channel"] } = {}): Promise<ChatMessage[]> {
+  async handle(text: string, opts: { channel?: ChatMessage["channel"]; images?: string[] } = {}): Promise<ChatMessage[]> {
     const trimmed = text.trim();
-    if (!trimmed) return [];
+    if (!trimmed && !opts.images?.length) return [];
     const { done } = await this.submit(trimmed, opts);
     return done;
   }
@@ -206,7 +209,9 @@ export class Jarvis {
     const recent = (await this.store.chat.list(12)).slice(0, -1).map((m) => `${m.role === "phil" ? "Phil" : m.agentId ?? "Jarvis"}: ${m.text.slice(0, 300)}`).join("\n");
     const system = jarvisSystemPrompt(memory, status.text, await this.attentionText());
 
-    const planRun = await this.router.run(jarvis, { system, prompt: planPrompt(userText, recent), direct: true, maxTurns: 1 });
+    const imageIds = this.convo.getStore()?.images ?? [];
+    const planText = imageIds.length ? `${userText}\n\n(Phil attached ${imageIds.length} image${imageIds.length > 1 ? "s" : ""}. Anything about how something looks goes to Joi; the image goes with the task.)` : userText;
+    const planRun = await this.router.run(jarvis, { system, prompt: planPrompt(planText, recent), direct: true, maxTurns: 1, images: await imageInputs(imageIds) });
     if (planRun.blocked) {
       out.push(await this.say({ role: "jarvis", text: `I can't think right now: ${planRun.blocked}`, kind: "final" }));
       return out;
@@ -255,7 +260,9 @@ export class Jarvis {
     const tools = this.allTools().filter((t) => cfg.tools.includes(t.name));
     const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "");
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
-    const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id) });
+    // Images Phil attached to this conversation go with every run in it, including hand-offs.
+    const images = await imageInputs(this.convo.getStore()?.images);
+    const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id), images });
     if (r.blocked) return r;
     if (opts.noBlocks) return r; // the caller reads the reply itself (approval Q&A)
     const { text, approvals, remember, metrics, records, handoffs, attention } = extractBlocks(r.text);

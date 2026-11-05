@@ -20,7 +20,7 @@ interface Live {
   /** Raw event feed for pages that react to specific events (the always-on device). Returns an unsubscribe. */
   onEvent: (fn: (e: JarvisEvent) => void) => () => void;
   /** Send to Jarvis; resolves with the ack (fast) and a promise of the final answer (slower). */
-  send: (text: string, channel?: ChatMessage["channel"]) => Promise<{ replyTo: string; ack: Promise<ChatMessage | null>; final: Promise<ChatMessage | null> }>;
+  send: (text: string, channel?: ChatMessage["channel"], images?: string[]) => Promise<{ replyTo: string; ack: Promise<ChatMessage | null>; final: Promise<ChatMessage | null> }>;
   refresh: () => Promise<void>;
   setMessages: (fn: (m: ChatMessage[]) => ChatMessage[]) => void;
   setPending: (fn: (a: Approval[]) => Approval[]) => void;
@@ -50,8 +50,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     const t = setTimeout(() => w.resolve(null), timeoutMs);
     waiters.current.push(w);
   }), []);
-  const send = useCallback(async (text: string, channel?: ChatMessage["channel"]) => {
-    const r = await post<{ messages: ChatMessage[]; replyTo: string }>("/api/chat", { text, channel });
+  const send = useCallback(async (text: string, channel?: ChatMessage["channel"], images?: string[]) => {
+    const r = await post<{ messages: ChatMessage[]; replyTo: string }>("/api/chat", { text, channel, ...(images?.length ? { images } : {}) });
     setMessagesState((m) => { const ids = new Set(m.map((x) => x.id)); return [...m, ...r.messages.filter((x) => !ids.has(x.id))]; });
     // The ack is any reply inside 40 s; the final answer may take a few minutes.
     return { replyTo: r.replyTo, ack: waitForReply(r.replyTo, ["ack", "final"], 40_000), final: waitForReply(r.replyTo, ["final"], 6 * 60_000) };

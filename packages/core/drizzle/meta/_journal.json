@@ -36,6 +36,13 @@
       "when": 1793844053155,
       "tag": "0004_approval_edited_by",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793857240484,
+      "tag": "0005_chat_images",
+      "breakpoints": true
     }
   ]
 }

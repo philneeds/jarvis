@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 process.env.JARVIS_MOCK = "1";
 process.env.HQ_PASSWORD = "open-sesame";
+{ const os = await import("node:os"); const fs = await import("node:fs"); const path = await import("node:path"); process.env.JARVIS_UPLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-app-up-")); }
 const { Jarvis, memoryStore } = await import("@jarvis/core");
 const { createApp } = await import("../src/app.js");
 
@@ -176,4 +177,27 @@ test("editing and undo over the API: needs-you items, goals, metric readings, me
   await send(`/api/undo/${rdel.undoId}`, "POST");
   assert.equal((await send(`/api/ventures/jdpm/records/${rec.record.id}`, "DELETE")).status, 200);
   assert.equal((await send("/api/undo/nope", "POST")).status, 404);
+});
+
+
+test("images: upload, serve, attach to a message; junk and missing ids are refused", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a1b9b3a60000000049454e44ae426082", "hex");
+  assert.equal((await app.request("http://hq/api/uploads", { method: "POST", body: png, headers: { "content-type": "image/png" } })).status, 401, "uploads need login");
+  const up = await app.request("http://hq/api/uploads", { method: "POST", body: png, headers: { "content-type": "image/png", cookie } });
+  assert.equal(up.status, 200);
+  const { id } = (await up.json()) as { id: string };
+  const got = await call(`/api/uploads/${id}`, { cookie });
+  assert.equal(got.headers.get("content-type"), "image/png");
+  assert.equal(Buffer.from(await got.arrayBuffer()).length, png.length);
+  assert.equal((await app.request("http://hq/api/uploads", { method: "POST", body: "hi", headers: { "content-type": "text/plain", cookie } })).status, 415);
+  assert.equal((await call("/api/uploads/..%2F..%2Fetc%2Fpasswd", { cookie })).status, 404);
+  const sent = await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "", images: [id], wait: true }) });
+  assert.equal(sent.status, 200);
+  const stored = (await store.chat.list()).filter((m) => m.role === "phil").pop()!;
+  assert.deepEqual(stored.images, [id]);
+  assert.equal(stored.text, "What do you think of this?");
+  assert.equal((await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "look", images: ["00000000-0000-0000-0000-000000000000.png"] }) })).status, 400);
+  assert.equal((await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "" }) })).status, 400);
 });

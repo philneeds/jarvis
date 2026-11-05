@@ -50,6 +50,7 @@ export function Transcript({ limit = 8, pendingText }: { limit?: number; pending
           return (
             <p key={m.id} className={`m-0 text-[12px] leading-relaxed whitespace-pre-line text-center ${m.kind === "ack" || m.kind === "progress" ? "msg-ack" : ""} ${long ? "cursor-pointer" : ""}`} style={{ color: "var(--ink)" }} onClick={() => long && setOpen(full ? null : m.id)} title={long ? (full ? "Tap to shorten" : "Tap to read all of it") : undefined}>
               <span className="text-[10px] tracking-[0.14em] uppercase mr-2" style={{ color: tone(m) }}>{who(m)}</span>
+              {m.images?.length ? <span style={{ color: "var(--muted)" }}>[{m.images.length} image{m.images.length > 1 ? "s" : ""}] </span> : null}
               {shown}
               {long && full && <span className="ml-2 text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>less ▴</span>}
             </p>

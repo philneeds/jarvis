@@ -51,8 +51,14 @@ export function claudeAgentSdkProvider(): Provider {
       const abort = new AbortController();
       req.signal?.addEventListener("abort", () => abort.abort());
       try {
+        // With images, the prompt is one user message carrying the pictures and the text.
+        const prompt = req.images?.length
+          ? (async function* () {
+              yield { type: "user" as const, parent_tool_use_id: null, message: { role: "user" as const, content: [...req.images!.map((im) => ({ type: "image" as const, source: { type: "base64" as const, media_type: im.mime as "image/jpeg", data: im.data } })), { type: "text" as const, text: req.prompt }] } };
+            })()
+          : req.prompt;
         const q = query({
-          prompt: req.prompt,
+          prompt,
           options: {
             model: req.model.modelId,
             systemPrompt: req.system,
@@ -132,7 +138,7 @@ export function claudeApiProvider(): Provider {
             model: req.model.modelId ?? "claude-sonnet-5-5",
             max_tokens: 4096,
             system: req.system,
-            messages: [{ role: "user", content: req.prompt }],
+            messages: [{ role: "user", content: req.images?.length ? [...req.images.map((im) => ({ type: "image" as const, source: { type: "base64" as const, media_type: im.mime as "image/jpeg", data: im.data } })), { type: "text" as const, text: req.prompt }] : req.prompt }],
           },
           { signal: req.signal },
         );

@@ -18,11 +18,11 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
     async close() { /* postgres-js pool closes with the process */ },
     chat: {
       async add(m) {
-        await db.insert(t.chatMessages).values({ id: m.id, at: new Date(m.at), role: m.role, agentId: m.agentId, text: m.text, runId: m.runId, via: m.via, channel: m.channel, replyTo: m.replyTo, kind: m.kind });
+        await db.insert(t.chatMessages).values({ id: m.id, at: new Date(m.at), role: m.role, agentId: m.agentId, text: m.text, runId: m.runId, via: m.via, channel: m.channel, replyTo: m.replyTo, kind: m.kind, images: m.images });
       },
       async list(limit = 100) {
         const rows = await db.select().from(t.chatMessages).orderBy(desc(t.chatMessages.at)).limit(limit);
-        return rows.reverse().map((r) => ({ id: r.id, at: r.at.toISOString(), role: r.role as ChatMessage["role"], agentId: r.agentId ?? undefined, text: r.text, runId: r.runId ?? undefined, via: r.via ?? undefined, channel: (r.channel ?? undefined) as ChatMessage["channel"], replyTo: r.replyTo ?? undefined, kind: (r.kind ?? undefined) as ChatMessage["kind"] }));
+        return rows.reverse().map((r) => ({ id: r.id, at: r.at.toISOString(), role: r.role as ChatMessage["role"], agentId: r.agentId ?? undefined, text: r.text, runId: r.runId ?? undefined, via: r.via ?? undefined, channel: (r.channel ?? undefined) as ChatMessage["channel"], replyTo: r.replyTo ?? undefined, kind: (r.kind ?? undefined) as ChatMessage["kind"], images: r.images ?? undefined }));
       },
     },
     runs: {

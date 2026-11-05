@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, CHARTERS } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, CHARTERS, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -39,12 +39,29 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
 
   api.get("/chat", async (c) => c.json({ messages: await jarvis.store.chat.list(Number(c.req.query("limit") ?? 100)) }));
   api.post("/chat", async (c) => {
-    const parsed = z.object({ text: z.string().min(1).max(8000), wait: z.boolean().optional(), channel: z.enum(["hq", "telegram", "voice", "schedule"]).optional() }).safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "text required" }, 400);
-    const { message, done } = await jarvis.submit(parsed.data.text, { channel: parsed.data.channel ?? "hq" });
+    const parsed = z.object({ text: z.string().max(8000), wait: z.boolean().optional(), channel: z.enum(["hq", "telegram", "voice", "schedule"]).optional(), images: z.array(z.string().max(80)).max(4).optional() })
+      .refine((b) => b.text.trim().length > 0 || (b.images?.length ?? 0) > 0)
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "text required (up to 8000 characters), or an image" }, 400);
+    for (const id of parsed.data.images ?? []) if (!(await imageExists(id))) return c.json({ error: "image not found; upload it first" }, 400);
+    const { message, done } = await jarvis.submit(parsed.data.text, { channel: parsed.data.channel ?? "hq", images: parsed.data.images });
     if (parsed.data.wait) return c.json({ messages: await done, replyTo: message.id });
     // Replies stream in over the websocket as chat.message events with replyTo = this message's id.
     return c.json({ messages: [message], replyTo: message.id, pending: true });
+  });
+
+  // Images Phil attaches: the raw image in the body (JPEG, PNG, WebP or GIF, up to 5 MB), an id back.
+  api.post("/uploads", async (c) => {
+    const type = c.req.header("content-type") ?? "";
+    if (!imageMimeOk(type.split(";")[0]!.trim().toLowerCase())) return c.json({ error: "only JPEG, PNG, WebP or GIF images" }, 415);
+    const buf = Buffer.from(await c.req.arrayBuffer());
+    if (buf.length > MAX_IMAGE_BYTES) return c.json({ error: "image is over 5 MB" }, 413);
+    try { return c.json({ id: await saveImage(buf, type) }); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
+  api.get("/uploads/:id", async (c) => {
+    const f = await loadImage(c.req.param("id"));
+    if (!f) return c.json({ error: "not found" }, 404);
+    return new Response(new Uint8Array(f.data), { headers: { "content-type": f.mime, "cache-control": "private, max-age=86400" } });
   });
 
   api.get("/brief", async (c) => {

@@ -32,6 +32,8 @@ export interface RunOptions {
   maxTurns?: number;
   tools?: ToolDef[];
   toolContext?: ToolContext;
+  /** Images Phil attached; only providers that can see get them, the rest are told one was attached. */
+  images?: import("../uploads.js").ImageInput[];
 }
 
 export interface RunOutcome extends AgentResult {
@@ -122,7 +124,10 @@ export class ModelRouter {
       const avail = await p.available();
       if (!avail.ok) { errors.push(`${p.id}: ${avail.reason}`); continue; }
       try {
-        const res = await p.run({ agent, model, system: opts.system, prompt: opts.prompt, runId, onDelta: opts.onDelta, signal: opts.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext });
+        const sees = model.provider === "claude";
+        const n = opts.images?.length ?? 0;
+        const prompt = n && !sees ? `${opts.prompt}\n\n(Phil attached ${n} image${n > 1 ? "s" : ""} you can't see. Say so, and hand anything visual to Joi.)` : opts.prompt;
+        const res = await p.run({ agent, model, system: opts.system, prompt, runId, onDelta: opts.onDelta, signal: opts.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext, images: sees && n ? opts.images : undefined });
         const finishedAt = new Date().toISOString();
         await this.store.runs.update(runId, { status: "done", output: res.text, provider: res.provider, modelId: res.modelId, finishedAt, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd });
         await this.store.usage.add({ id: randomUUID(), at: finishedAt, plan: model.plan, provider: res.provider, agentId: agent.id, modelId: res.modelId, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd, runId });

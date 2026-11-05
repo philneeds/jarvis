@@ -10,6 +10,6 @@ coverage/
 pgdata/
 .pnpm-store/
 data/*
-**/data/*.json
+apps/*/data/
 !data/.gitkeep
 .claude/worktrees/

@@ -435,3 +435,33 @@ test("Adam's monthly goals: a monthly schedule fires on its day, and an approved
   const goals = await jarvis.goals();
   assert.deepEqual(goals.map((g) => [g.name, g.primary]), [["Close 6 JD PM jobs", true], ["Ship Range.cool beta", false]]);
 });
+
+test("images: Phil's picture reaches the agents that can see, and Grok agents are told one was attached", async () => {
+  const os = await import("node:os"); const path = await import("node:path"); const fs = await import("node:fs");
+  process.env.JARVIS_UPLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-up-"));
+  const { saveImage, loadImage, imageInputs } = await import("../src/index.js");
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a1b9b3a60000000049454e44ae426082", "hex");
+  const id = await saveImage(png, "image/png");
+  assert.match(id, /\.png$/);
+  assert.equal((await loadImage("../../etc/passwd")), undefined, "ids are checked before touching disk");
+  await assert.rejects(saveImage(Buffer.from("x"), "text/plain"), /only JPEG, PNG/);
+  assert.equal((await imageInputs([id]))[0]!.mime, "image/png");
+
+  const { jarvis, store } = make();
+  await store.init();
+  const prompts: { agent: string; images: number; prompt: string }[] = [];
+  const { mockProvider: mp, ModelRouter: MR, Jarvis: J } = await import("../src/index.js");
+  const spy = (label: string) => { const p = mp(label); const base = p.run.bind(p); p.run = async (req) => { prompts.push({ agent: req.agent.id, images: req.images?.length ?? 0, prompt: req.prompt }); return base(req); }; return p; };
+  const j2 = new J({ store, router: new MR({ store, providers: { claude: [spy("c")], grok: [spy("g")] } }) });
+  const out = await j2.handle("", { images: [id] });   // a picture with no words
+  assert.equal((await store.chat.list()).find((m) => m.role === "phil")?.text, "What do you think of this?");
+  assert.ok(prompts.some((p) => p.agent === "jarvis" && p.images === 1), "Jarvis sees it when planning");
+  await j2.handle("@joi what do you think of this logo?", { images: [id] });
+  assert.ok(prompts.some((p) => p.agent === "joi" && p.images === 1), "Joi sees it");
+  await j2.handle("@tux is this pool any good?", { images: [id] });
+  const tux = prompts.find((p) => p.agent === "tux")!;
+  assert.equal(tux.images, 0);
+  assert.match(tux.prompt, /attached 1 image you can't see/);
+  assert.ok(out.length > 0);
+  void jarvis;
+});

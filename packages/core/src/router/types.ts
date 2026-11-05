@@ -1,6 +1,7 @@
 import type { AgentDef } from "../registry/agents.js";
 import type { ModelSpec } from "../models.js";
 import type { ToolContext, ToolDef } from "../tools/index.js";
+import type { ImageInput } from "../uploads.js";
 
 export interface AgentRequest {
   agent: AgentDef;
@@ -15,6 +16,8 @@ export interface AgentRequest {
   /** Tools the agent may call (providers that support tool use). */
   tools?: ToolDef[];
   toolContext?: ToolContext;
+  /** Images to look at with the prompt (providers that can see). */
+  images?: ImageInput[];
 }
 
 export interface AgentResult {

@@ -1,4 +1,4 @@
-import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent } from "@jarvis/core";
+import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent, saveImage } from "@jarvis/core";
 
 /**
  * Two-way Telegram: Phil talks to Jarvis from his phone, and approvals arrive with Approve / Reject buttons.
@@ -44,6 +44,18 @@ export class TelegramBot {
   }
   stop() { this.running = false; this.off?.(); }
 
+  /** Fetch a photo Phil sent and keep it as an upload. */
+  private async downloadImage(fileId: string): Promise<string> {
+    const r = (await (await this.api("getFile", { file_id: fileId })).json()) as { ok: boolean; result?: { file_path?: string; file_size?: number } };
+    const fp = r.result?.file_path;
+    if (!r.ok || !fp) throw new Error("Telegram didn't give me the file");
+    const res = await this.f(`https://api.telegram.org/file/bot${this.opts.token}/${fp}`);
+    if (!res.ok) throw new Error(`download failed (${res.status})`);
+    const ext = fp.split(".").pop()?.toLowerCase();
+    const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : ext === "gif" ? "image/gif" : "image/jpeg";
+    return saveImage(Buffer.from(await res.arrayBuffer()), mime);
+  }
+
   private async announce(a: Approval) {
     const who = getAgent(a.agentId)?.name ?? a.agentId;
     await this.send(`Approval · ${who} · ${a.kind}\n${a.title}\n\n${a.body.slice(0, 1500)}${a.context ? `\n\nContext: ${a.context.slice(0, 800)}` : ""}${a.effect ? `\n\nIf you approve: ${a.effect}` : ""}\n\nTo ask ${who} about it or edit the text, open Approvals in HQ.`, {
@@ -86,9 +98,19 @@ export class TelegramBot {
       return;
     }
     const msg = u.message;
-    if (!msg?.text) return;
+    if (!msg) return;
+    const imageFile = msg.photo?.length ? msg.photo[msg.photo.length - 1]!.file_id : msg.document?.mime_type?.startsWith("image/") ? msg.document.file_id : undefined;
+    if (!msg.text && !imageFile) return;
     if (String(msg.chat.id) !== this.opts.chatId) { await this.api("sendMessage", { chat_id: msg.chat.id, text: "This is Phil's Jarvis. Not for you." }).catch(() => undefined); return; }
-    const text = msg.text.trim();
+    if (imageFile) {
+      // A photo (with or without a caption) goes to Jarvis with the picture attached.
+      try {
+        const id = await this.downloadImage(imageFile);
+        await this.jarvis.submit(msg.caption ?? "", { channel: "telegram", images: [id] });
+      } catch (e) { await this.send(`I couldn't take that image: ${(e as Error).message}`); }
+      return;
+    }
+    const text = msg.text!.trim();
     if (text === "/start") { await this.send("Jarvis here. Talk to me, @ an agent, or /help."); return; }
     // Replies (ack, late reports, final) are forwarded as they land by the chat.message listener in start().
     await this.jarvis.submit(text, { channel: "telegram" });
@@ -97,6 +119,6 @@ export class TelegramBot {
 
 export interface Update {
   update_id: number;
-  message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string };
+  message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string; caption?: string; photo?: { file_id: string; width: number; height: number; file_size?: number }[]; document?: { file_id: string; mime_type?: string; file_size?: number } };
   callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number } } };
 }
