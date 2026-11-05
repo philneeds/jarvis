@@ -56,7 +56,7 @@ export function claudeAgentSdkProvider(): Provider {
           options: {
             model: req.model.modelId,
             systemPrompt: req.system,
-            maxTurns: req.maxTurns ?? (tools.length ? 8 : 1),
+            maxTurns: req.maxTurns ?? (tools.length ? 8 : 2),
             // Only HQ tools, never the CLI's file/shell tools.
             allowedTools: tools.map((t) => `mcp__jarvis__${t.name}`),
             tools: [],
@@ -90,7 +90,12 @@ export function claudeAgentSdkProvider(): Provider {
           }
         }
       } catch (e) {
-        throw new ProviderError(`Claude Agent SDK failed: ${(e as Error).message}`, "claude:agent-sdk", e);
+        // The SDK throws after the stream ends when the run stopped on an error. A turn-limit stop
+        // after the model already answered is still an answer; keep the text rather than failing the run.
+        const msg = (e as Error).message ?? String(e);
+        if (!/maximum number of turns/i.test(msg) || !(text || resultText)) {
+          throw new ProviderError(`Claude Agent SDK failed: ${msg}`, "claude:agent-sdk", e);
+        }
       }
       if (error && !text && !resultText) {
         throw new ProviderError(`Claude Agent SDK error: ${error}`, "claude:agent-sdk");

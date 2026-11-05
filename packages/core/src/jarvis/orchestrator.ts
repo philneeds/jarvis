@@ -114,7 +114,7 @@ export class Jarvis {
   }
 
   /** How long a delegated agent may take before Jarvis answers without it (its part arrives later). */
-  static DELEGATE_TIMEOUT_MS = Number(process.env.JARVIS_DELEGATE_TIMEOUT_MS ?? 120_000);
+  static DELEGATE_TIMEOUT_MS = Number(process.env.JARVIS_DELEGATE_TIMEOUT_MS ?? 180_000);
 
   private async converse(userText: string, out: ChatMessage[]): Promise<ChatMessage[]> {
     const jarvis = getAgent("jarvis")!;

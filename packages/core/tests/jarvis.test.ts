@@ -240,5 +240,5 @@ test("submit answers at once; the final follows; a slow delegate posts a late re
   await new Promise((r) => setTimeout(r, 400));
   const chat = await store.chat.list();
   assert.ok(chat.some((m) => m.kind === "progress" && m.agentId === "lucas" && /Late report/.test(m.text)));
-  J.DELEGATE_TIMEOUT_MS = 120_000;
+  J.DELEGATE_TIMEOUT_MS = 180_000;
 });
