@@ -201,3 +201,17 @@ test("images: upload, serve, attach to a message; junk and missing ids are refus
   assert.equal((await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "look", images: ["00000000-0000-0000-0000-000000000000.png"] }) })).status, 400);
   assert.equal((await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "" }) })).status, 400);
 });
+
+test("Apple Health ingest: needs the key, not the HQ login; Settings makes the key", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const body = JSON.stringify({ data: { metrics: [{ name: "step_count", units: "count", data: [{ date: "2026-11-04 08:00:00 -0500", qty: 4000 }] }] } });
+  assert.equal((await app.request("http://hq/api/apple-health/ingest", { method: "POST", body, headers: { "content-type": "application/json" } })).status, 401);
+  assert.equal((await call("/api/apple-health/key", { method: "POST" })).status, 401, "making a key needs the HQ login");
+  const { key } = (await (await call("/api/apple-health/key", { method: "POST", cookie, body: "{}" })).json()) as { key: string };
+  const res = await app.request("http://hq/api/apple-health/ingest", { method: "POST", body, headers: { "content-type": "application/json", authorization: `Bearer ${key}` } });
+  assert.equal(res.status, 200);
+  const st = (await (await call("/api/apple-health", { cookie })).json()) as { days: number; summary: string };
+  assert.equal(st.days, 1);
+  assert.match(st.summary, /steps 4,000/);
+});

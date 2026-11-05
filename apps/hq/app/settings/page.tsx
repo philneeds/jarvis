@@ -25,8 +25,18 @@ export default function SettingsPage() {
   ]).catch(() => undefined);
   const [xMsg, setXMsg] = useState<string>();
   const [spMsg, setSpMsg] = useState<string>();
+  const [health, setHealth] = useState<{ keySet: boolean; lastIngest: { at: string; samples: number; workouts: number } | null; days: number; summary: string } | null>(null);
+  const [healthKey, setHealthKey] = useState<string>();
+  const [copied, setCopied] = useState<string>();
+  const loadHealth = () => api<NonNullable<typeof health>>("/api/apple-health").then(setHealth).catch(() => undefined);
+  const makeHealthKey = async (rotate = false) => {
+    if (rotate && !confirm("Make a new key? The iPhone app stops syncing until you paste the new one into it.")) return;
+    const r = await post<{ key: string }>("/api/apple-health/key", { rotate });
+    setHealthKey(r.key); await loadHealth();
+  };
+  const copy = async (label: string, text: string) => { try { await navigator.clipboard.writeText(text); setCopied(label); setTimeout(() => setCopied(undefined), 1500); } catch { /* the text is on screen to copy by hand */ } };
   useEffect(() => {
-    void load();
+    void load(); void loadHealth();
     const q = new URLSearchParams(location.search);
     const g = q.get("google"); if (g) setGoogleMsg(g.startsWith("connected") ? `Google connected${g.includes(":") && g.split(":")[1] ? ` (${decodeURIComponent(g.split(":")[1]!)})` : ""}.` : g);
     const xq = q.get("x"); if (xq) setXMsg(xq.startsWith("connected:") ? `@${xq.slice(10)} connected.` : xq);
@@ -114,6 +124,38 @@ export default function SettingsPage() {
                 : conn?.spotify?.configured ? <button className="btn btn-sm btn-primary ml-auto" onClick={connectSpotify}>Connect Spotify</button> : <span className="ml-auto" style={{ color: "var(--muted)" }}>set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET</span>}
             </div>
             {spMsg && <p className="m-0 pl-6" style={{ color: spMsg.endsWith("connected.") ? "var(--green)" : "var(--red)" }}>{spMsg}</p>}
+          </div>
+          <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Apple Health">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`dot ${health?.lastIngest ? "dot-working" : "dot-idle"}`} />
+              <span><b>Apple Health</b> · Doc reads your sleep, training and more, sent from your iPhone by the Health Auto Export app.</span>
+              {health?.lastIngest
+                ? <span className="ml-auto" style={{ color: "var(--dim)" }}>last sync {fmtTime(health.lastIngest.at)} · {health.days} day(s)</span>
+                : <button className="btn btn-sm btn-primary ml-auto" onClick={() => void makeHealthKey(false)}>Set up Apple Health</button>}
+            </div>
+            {(healthKey || (health?.keySet && !health.lastIngest)) && (
+              <div className="pl-6 flex flex-col gap-2">
+                {healthKey ? (
+                  <>
+                    <span style={{ color: "var(--muted)" }}>In Health Auto Export on your iPhone: Automations → New → REST API. Paste these two, set Format to JSON, pick the metrics (start with Sleep Analysis, Step Count, Active Energy, Exercise Time, Resting Heart Rate, Heart Rate Variability, Weight) and Workouts, and sync every hour.</span>
+                    {[["URL", `${typeof location !== "undefined" ? location.origin : ""}/api/apple-health/ingest`], ["Header", `Authorization: Bearer ${healthKey}`]].map(([k, v]) => (
+                      <div key={k} className="flex flex-wrap items-center gap-2">
+                        <span className="w-14 text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>{k}</span>
+                        <code className="flex-1 min-w-0 break-all px-2 py-1 border" style={{ borderColor: "var(--line)" }}>{v}</code>
+                        <button className="btn btn-sm" onClick={() => void copy(k!, k === "Header" ? healthKey : v!)}>{copied === k ? "Copied" : k === "Header" ? "Copy key" : "Copy"}</button>
+                      </div>
+                    ))}
+                    <span style={{ color: "var(--dim)" }}>In the app, the header name is Authorization and the value is Bearer followed by the key. Keep the key private; it only lets data in.</span>
+                  </>
+                ) : <button className="btn btn-sm self-start" onClick={() => void makeHealthKey(false)}>Show setup again</button>}
+              </div>
+            )}
+            {health?.lastIngest && (
+              <div className="pl-6 flex flex-col gap-1">
+                <pre className="m-0 whitespace-pre-wrap text-[11px]" style={{ color: "var(--ink)" }}>{health.summary}</pre>
+                <div className="flex gap-2"><button className="btn btn-sm" onClick={() => void makeHealthKey(false)}>Show setup</button><button className="btn btn-sm btn-danger" onClick={() => void makeHealthKey(true)}>New key</button></div>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3 text-[12px]"><span className={`dot ${conn?.telegram.configured ? "dot-working" : "dot-idle"}`} /><span><b>Telegram</b> · talk to Jarvis and approve from your phone</span><span className="ml-auto" style={{ color: "var(--muted)" }}>{conn?.telegram.configured ? "bot polling" : "set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"}</span></div>
           <div className="flex items-center gap-3 text-[12px]"><span className={`dot ${conn?.ntfy.configured ? "dot-working" : "dot-idle"}`} /><span><b>ntfy</b> · push alerts</span><span className="ml-auto" style={{ color: "var(--muted)" }}>{conn?.ntfy.configured ? "on" : "set NOTIFY_WEBHOOK_URL"}</span></div>

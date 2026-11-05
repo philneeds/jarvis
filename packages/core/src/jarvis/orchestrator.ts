@@ -12,6 +12,7 @@ import { VENTURES, type VentureId } from "../registry/ventures.js";
 import { VENTURE_DASH, recordKind } from "../ventures/dashboards.js";
 import { TOOLS } from "../tools/index.js";
 import { imageInputs } from "../uploads.js";
+import { HEALTH_TOOLS } from "../health.js";
 
 export interface JarvisOptions {
   store: Store;
@@ -154,7 +155,7 @@ export class Jarvis {
   }
 
   /** Every tool an agent could be given: built-in plus connectors. */
-  allTools() { return [...TOOLS, ...this.connectorTools.values()]; }
+  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...this.connectorTools.values()]; }
 
   // ---- Chat -------------------------------------------------------------
 

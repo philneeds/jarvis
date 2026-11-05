@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, CHARTERS, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -24,6 +24,18 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   app.post("/api/logout", (c) => { logout(c); return c.json({ ok: true }); });
   app.get("/api/me", (c) => c.json({ authed: isAuthed(c), auth: authEnabled }));
   app.route("/api/passkeys", passkeyRoutes(jarvis.store));
+  // Apple Health from Phil's iPhone (Health Auto Export). Its own key, not the HQ login, since the app can't sign in.
+  app.post("/api/apple-health/ingest", async (c) => {
+    const auth = c.req.header("authorization") ?? "";
+    const given = auth.replace(/^Bearer\s+/i, "") || c.req.header("x-api-key") || c.req.query("key");
+    if (!(await healthKeyOk(jarvis.store, given))) return c.json({ error: "bad or missing key" }, 401);
+    const body = await c.req.json().catch(() => null);
+    try {
+      const r = await ingestHealth(jarvis.store, body);
+      await jarvis.router.log("doc", "system", `Apple Health synced: ${r.samples} readings and ${r.workouts} workouts${r.days.length ? ` for ${r.days[0]}${r.days.length > 1 ? ` to ${r.days[r.days.length - 1]}` : ""}` : ""}`);
+      return c.json({ ok: true, ...r });
+    } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
   app.route("/api/tts", ttsRoutes().use("*", requireAuth));
 
   const api = new Hono();
@@ -378,6 +390,14 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     await connectors.spotify?.disconnect();
     await jarvis.router.log("jarvis", "system", "Phil disconnected Spotify");
     return c.json({ ok: true });
+  });
+  api.get("/apple-health", async (c) => c.json({ ...(await healthStatus(jarvis.store)), summary: await healthSummary(jarvis.store, 3) }));
+  // Make the key (or a new one, which stops the old one working) and show how to set up the app.
+  api.post("/apple-health/key", async (c) => {
+    const rotate = (await c.req.json().catch(() => ({})) as { rotate?: boolean }).rotate === true;
+    const key = rotate ? await rotateHealthKey(jarvis.store) : (await healthKey(jarvis.store, true))!;
+    if (rotate) await jarvis.router.log("jarvis", "system", "Phil made a new Apple Health key; the old one no longer works");
+    return c.json({ key });
   });
   api.post("/connectors/x/disconnect", async (c) => {
     const p = z.object({ handle: z.string().min(1) }).safeParse(await c.req.json().catch(() => ({})));

@@ -117,13 +117,14 @@ export const CHARTERS: Record<string, Charter> = {
     good: "Phil can see his goals moving every week.",
   },
   doc: {
-    job: "Health lead: brings sleep, fitness and nutrition together into one plan.",
-    owns: ["Daily health picture from Metro, Sean and Gordon's summaries", "Flagging anything worrying, and suggesting a professional when it matters"],
-    handsOff: [["Booking appointments", "monica"]],
-    rhythm: "Morning health note at 6:40 am Eastern for the brief; on demand.",
-    tools: ["memory_search"],
-    good: "Phil sleeps, trains and eats better, measured, not guessed.",
+    job: "Health lead: turns Phil's Apple Health data into a plain daily read and one thing to focus on, starting with sleep and training.",
+    owns: ["Reading Phil's health data (health_summary) and spotting trends: sleep, training, recovery, then whatever else he adds", "His part of the 7 am brief: last night's sleep, yesterday's training, and the one thing to do today", "Saying when something looks off and suggesting a professional when it matters"],
+    handsOff: [["Booking appointments", "monica"], ["Fitness or health goals themselves", "adam"]],
+    rhythm: "In the 7 am brief every day; on demand.",
+    tools: ["health_summary", "memory_search"],
+    good: "Phil sleeps and trains better, measured from his own data, not guessed.",
   },
+
   metro: { job: "Sleep and circadian rhythm coach (inside ChatGPT Health).", owns: ["Sleep timing, quality and recovery"], rhythm: "Daily inside ChatGPT Health; Doc relays.", good: "Consistent sleep Phil can feel." },
   sean: { job: "Fitness and exercise coach (inside ChatGPT Health).", owns: ["Training plan and progress"], rhythm: "Daily inside ChatGPT Health; Doc relays.", good: "Steady progress without injury." },
   gordon: { job: "Nutrition and hydration coach (inside ChatGPT Health, with MyFitnessPal).", owns: ["Meals, macros and hydration"], rhythm: "Daily inside ChatGPT Health; Doc relays.", good: "Phil eats to his goals without thinking about it." },
@@ -253,12 +254,7 @@ const QUESTIONS: Record<string, string[]> = {
     "Higgsfield: wait for the browser AI's report on API pricing before buying. Suggested: no monthly plan unless you'll use the app yourself; fund the API balance only.",
     "Every generation that spends credits comes to you as an approval first. Suggested: yes (already set).",
   ],
-  doc: [
-    "How Doc gets health data: you paste ChatGPT Health summaries, or an Apple Health export app sends daily data to the server. Suggested: the export app (no daily pasting).",
-    "What to track first: sleep, training, weight, nutrition? Suggested: sleep and training.",
-    "Anything Doc must respect (conditions, medications, a doctor's guidance)? Kept private to Doc.",
-    "Do you use ChatGPT Health today (Metro, Sean and Gordon coach there)?",
-  ],
+
   munger: [
     "Which accounts and wallets should Munger track, read-only (bank, brokerage, exchanges, wallets)?",
     "Net worth inputs: you enter balances monthly on the Money page, or read-only connections later? Suggested: monthly entry now.",
