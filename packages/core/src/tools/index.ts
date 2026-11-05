@@ -50,6 +50,16 @@ export function buildTools(): ToolDef[] {
       },
     }),
     defineTool({
+      name: "goals_list",
+      description: "Phil's goals as they stand: id, name, percent done, deadline, and which one is primary.",
+      schema: {},
+      async handler(_args, { store }) {
+        const goals = await store.settings.get<{ id: string; name: string; pct: number; deadline?: string; primary: boolean; updatedAt: string }[] | null>("goals", null);
+        if (!goals?.length) return "No goals set yet.";
+        return goals.map((g) => `[${g.id}] ${g.primary ? "PRIMARY " : ""}${g.name} · ${g.pct}% done${g.deadline ? ` · due ${g.deadline}` : ""} · updated ${g.updatedAt.slice(0, 10)}`).join("\n");
+      },
+    }),
+    defineTool({
       name: "web_health",
       description: "How the web did over the last N days (default 7): runs, errors and blocked runs per agent, the slowest agents, rejected and stale approvals, plan usage, and open items waiting on Phil. Use it for reviews and improvement proposals.",
       schema: { days: z.number().int().min(1).max(30).optional() },

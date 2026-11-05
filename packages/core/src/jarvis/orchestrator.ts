@@ -82,6 +82,26 @@ export class Jarvis {
       for (const k of keep) await this.store.memory.set({ scope: k.scope, key: k.key, value: k.value, source: a.agentId });
       return `Memory condensed: ${current.length} → ${keep.length} items.`;
     });
+    // Phil's goals for the month, as agreed with Adam: add the new ones, retire the finished or dropped ones.
+    this.executors.set("goals.set", async (a) => {
+      const p = (a.payload ?? {}) as { add?: { name?: unknown; deadline?: unknown; pct?: unknown; primary?: unknown }[]; retire?: unknown[] };
+      const retired: string[] = [];
+      for (const id of (p.retire ?? []).map(String)) { const r = await this.deleteGoal(id); if (r) retired.push(r.goal.name); }
+      const added: string[] = [];
+      for (const g of p.add ?? []) {
+        if (typeof g.name !== "string" || !g.name.trim()) continue;
+        const deadline = typeof g.deadline === "string" && /^\d{4}-\d{2}-\d{2}$/.test(g.deadline) ? g.deadline : undefined;
+        await this.addGoal({ name: g.name, deadline, pct: typeof g.pct === "number" ? g.pct : 0, primary: g.primary === true });
+        added.push(g.name.trim());
+      }
+      if (!added.length && !retired.length) throw new Error("the proposal had no goals to add or retire");
+      return `Goals set${added.length ? `: ${added.join("; ")}` : ""}${retired.length ? `. Retired: ${retired.join("; ")}` : ""}.`;
+    });
+    this.describers.set("goals.set", (p) => {
+      const add = (Array.isArray(p.add) ? p.add : []) as { name?: string; primary?: boolean; deadline?: string }[];
+      const retire = Array.isArray(p.retire) ? p.retire.length : 0;
+      return `Sets your goals on the home screen: ${add.map((g) => `${g.name}${g.primary ? " (primary)" : ""}${g.deadline ? `, by ${g.deadline}` : ""}`).join("; ") || "none new"}${retire ? `, and retires ${retire} old goal(s)` : ""}. Nothing leaves HQ.`;
+    });
     this.describers.set("memory.replace", (p) => `Jarvis's memory is replaced with the ${Array.isArray(p.keep) ? p.keep.length : "listed"} items above${typeof p.before === "number" ? `, dropping ${p.before - (Array.isArray(p.keep) ? p.keep.length : 0)}` : ""}. The old list is gone.`);
   }
 

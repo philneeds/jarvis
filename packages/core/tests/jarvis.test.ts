@@ -419,3 +419,19 @@ test("Oscar's rule: every plan waits for Phil, and approving it carries it out",
   assert.equal(archived, 1);
   assert.match(d!.note!, /Archived 120/);
 });
+
+test("Adam's monthly goals: a monthly schedule fires on its day, and an approved proposal sets the goals", async () => {
+  const { jarvis } = make();
+  const s = new Scheduler(jarvis, [{ id: "m", agentId: "adam", task: "goals", when: "monthly:1@08:00", phase: 0 }]);
+  const at = (day: number, h: number, m: number) => { const d = new Date(2026, 11, day, h, m); return d; };
+  assert.deepEqual(s.due(at(1, 8, 3), 0).map((x) => x.id), ["m"]);
+  assert.deepEqual(s.due(at(2, 8, 3), 0), []);
+  const old = await jarvis.addGoal({ name: "Old goal", primary: true });
+  const a = await jarvis.requestApproval({ agentId: "adam", kind: "record", title: "December goals", body: "", payload: { action: "goals.set", add: [{ name: "Close 6 JD PM jobs", deadline: "2026-12-31", primary: true }, { name: "Ship Range.cool beta" }], retire: [old.id] } });
+  assert.equal(a.status, "pending", "goals wait for Phil");
+  assert.match(a.effect!, /Close 6 JD PM jobs \(primary\), by 2026-12-31/);
+  const d = await jarvis.decide(a.id, "approved");
+  assert.match(d!.note!, /Goals set: Close 6 JD PM jobs; Ship Range.cool beta. Retired: Old goal/);
+  const goals = await jarvis.goals();
+  assert.deepEqual(goals.map((g) => [g.name, g.primary]), [["Close 6 JD PM jobs", true], ["Ship Range.cool beta", false]]);
+});

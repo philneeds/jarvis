@@ -79,11 +79,12 @@ export const CHARTERS: Record<string, Charter> = {
     good: "The inbox and memory stay lean and Phil never loses anything that mattered.",
   },
   adam: {
-    job: "Phil's personal advisor and mentor, especially on business decisions.",
-    owns: ["Thinking through big decisions with Phil: trade-offs, risks, what he'd regret", "Honest pushback when a plan looks weak", "Pulling lessons from how each venture is doing"],
-    handsOff: [["Running a venture's day-to-day", "jarvis"], ["Money numbers and accounts", "munger"]],
-    rhythm: "On demand.",
-    tools: [...BOARD, "activity_recent"],
+    job: "Phil's personal advisor and mentor, especially on business decisions, and the one who sets his goals with him each month.",
+    owns: ["A goals session with Phil on the 1st of every month: how last month went, and this month's goals (one primary, up to two more) proposed as one approval he can question and change", "Thinking through big decisions with Phil: trade-offs, risks, what he'd regret", "Honest pushback when a plan looks weak", "Pulling lessons from how each venture is doing"],
+    handsOff: [["Weekly steps and tracking progress on the goals", "david"], ["Running a venture's day-to-day", "jarvis"], ["Money numbers and accounts", "munger"]],
+    rhythm: "Goals session on the 1st of each month at 8:00 Eastern, to Telegram and HQ; on demand any time.",
+    tools: [...BOARD, "goals_list", "activity_recent"],
+    asksFor: "everything",
     good: "Phil makes fewer decisions he regrets and hears the hard truth early.",
   },
   joi: {
@@ -106,11 +107,11 @@ export const CHARTERS: Record<string, Charter> = {
     good: "Phil's relationships and downtime get the same care as his businesses.",
   },
   david: {
-    job: "Phil's personal goals and growth.",
-    owns: ["The primary objective and the two secondary goals on the home screen", "Breaking goals into weekly steps and tracking progress", "Asking Joi to visualize them"],
-    handsOff: [["Personal life and rewards", "lip"], ["Visuals", "joi"]],
+    job: "Phil's personal growth: turns the goals he sets with Adam into weekly steps and keeps them moving.",
+    owns: ["Breaking each goal into weekly steps and tracking progress", "Keeping the percent-done on the home screen honest", "Asking Joi to visualize the goals"],
+    handsOff: [["Setting or changing the goals themselves", "adam"], ["Personal life and rewards", "lip"], ["Visuals", "joi"]],
     rhythm: "Weekly goals check; on demand.",
-    tools: BOARD,
+    tools: [...BOARD, "goals_list"],
     good: "Phil can see his goals moving every week.",
   },
   doc: {

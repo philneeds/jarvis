@@ -21,6 +21,7 @@ export const SCHEDULES: Schedule[] = [
   { id: "daily-brief", agentId: "jarvis", task: "brief", when: process.env.BRIEF_AT ? `daily@${process.env.BRIEF_AT}` : "daily@07:00", phase: 0 },
   { id: "oscar-condense", agentId: "oscar", task: "condense", when: "daily@03:30", phase: 0 },
   { id: "einstein-weekly", agentId: "einstein", task: "Weekly review for Phil, short enough to read on his phone. Call web_health for the last 7 days. Then: the three changes you'd make this week and why (errors to fix, slow or idle agents, usage, approvals Phil keeps rejecting); where each of Phil's ideas on your list stands; anything to cut, for Oscar. Put each change you want made as an approval (kind config) so Phil can say yes or no.", when: "weekly:sun@19:00", phase: 0, push: true },
+  { id: "adam-monthly", agentId: "adam", task: "Monthly goals session with Phil. Call goals_list for where his current goals stand, and look at each venture's board. Then: one line on how last month went against each goal; then propose this month's goals (one primary, up to two more), each specific and measurable with a deadline, and why each matters now. Put the proposal in one approval with payload {\"action\":\"goals.set\",\"add\":[{\"name\":\"...\",\"deadline\":\"YYYY-MM-DD\",\"primary\":true}],\"retire\":[\"<id of a goal that is done or dropped>\"]}. Phil will question or change it on the card before approving.", when: "monthly:1@08:00", phase: 0, push: true },
   { id: "oscar-inbox", agentId: "oscar", task: "Weekly inbox cleanup with Monica. For each of Phil's personal Google accounts: use gmail_senders on 'in:inbox older_than:14d' and 'category:promotions older_than:30d', then propose ONE archive plan per account as an approval (gmail.archive by query, with the match count in the body). Never trash. Keep anything from a real person or about money, travel, health or a job.", when: "weekly:sun@04:00", phase: 0 },
   { id: "monica-day", agentId: "monica", task: "Lay out Phil's day for him to read on his phone: what's on the calendar across his accounts, conflicts, what's unscheduled, what to protect. Propose any calendar change as an approval; change nothing yourself.", when: "daily@06:45", phase: 0, push: true },
   { id: "stella-leads", agentId: "stella", task: "Review new leads and open jobs for JD PM; flag anything waiting on a customer reply.", when: "daily@06:50", phase: 1 },
@@ -67,9 +68,11 @@ export class Scheduler {
         if (!Number.isFinite(mins) || mins < 1) return false; // every:0 would run on every tick
         return now.getTime() - last >= mins * 60_000;
       }
+      const mo = s.when.match(/^monthly:(\d{1,2})@/);
+      if (mo && now.getDate() !== Number(mo[1])) return false;
       const wk = s.when.match(/^weekly:(sun|mon|tue|wed|thu|fri|sat)@(\d{2}):(\d{2})$/);
       if (wk && ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][now.getDay()] !== wk[1]) return false;
-      const m = s.when.match(/^(?:daily|weekly:[a-z]{3})@(\d{2}):(\d{2})$/);
+      const m = s.when.match(/^(?:daily|weekly:[a-z]{3}|monthly:\d{1,2})@(\d{2}):(\d{2})$/);
       if (!m) return false;
       const target = new Date(now); target.setHours(Number(m[1]), Number(m[2]), 0, 0);
       const within = now.getTime() >= target.getTime() && now.getTime() - target.getTime() < 10 * 60_000;
@@ -103,7 +106,7 @@ export class Scheduler {
           const r = await this.jarvis.runAgent(agent, s.task, { direct: false, from: "Scheduler" });
           if (!r.blocked) {
             await this.jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId });
-            if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: s.id === "monica-day" ? "Your day" : s.id === "einstein-weekly" ? "Einstein's weekly review" : `${agent.name} report`, text: r.text, at: new Date().toISOString() });
+            if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: s.id === "monica-day" ? "Your day" : s.id === "einstein-weekly" ? "Einstein's weekly review" : s.id === "adam-monthly" ? "Adam: this month's goals" : `${agent.name} report`, text: r.text, at: new Date().toISOString() });
             await done(`${agent.name} reported back`, r.runId);
           }
         }
