@@ -6,7 +6,7 @@ import { Shell } from "@/components/Shell";
 import { useLive } from "@/lib/live";
 import { api } from "@/lib/api";
 import { MayneLimits } from "@/components/MayneLimits";
-import type { AgentConfig, ApprovalKind, ModelKey } from "@jarvis/core";
+import type { AgentConfig, ApprovalKind, Charter, ModelKey } from "@jarvis/core";
 
 const FIELDS: { key: keyof AgentConfig["persona"]; label: string; hint: string }[] = [
   { key: "reportsTo", label: "Reports to", hint: "Who this agent answers to, if not the registry default" },
@@ -30,9 +30,11 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
   const [busy, setBusy] = useState(false);
   const agent = state?.agents.find((a) => a.id === id);
   const [registryDefault, setRegistryDefault] = useState<ModelKey | undefined>();
+  const [charter, setCharter] = useState<Charter | null>(null);
+  const [editBrief, setEditBrief] = useState(false);
 
   useEffect(() => {
-    api<{ config: AgentConfig; tools: string[]; defaultModel: ModelKey }>(`/api/agents/${id}/config`).then((r) => { setCfg(r.config); setToolNames(r.tools); setRegistryDefault(r.defaultModel); }).catch((e) => setSaved((e as Error).message));
+    api<{ config: AgentConfig; tools: string[]; defaultModel: ModelKey; charter: Charter | null }>(`/api/agents/${id}/config`).then((r) => { setCfg(r.config); setToolNames(r.tools); setRegistryDefault(r.defaultModel); setCharter(r.charter); setEditBrief(Object.values(r.config.persona).some((v) => v && String(v).trim())); }).catch((e) => setSaved((e as Error).message));
     api<{ google: { accounts: { email: string }[] } }>("/api/connectors").then((r) => setGoogleAccounts(r.google.accounts.map((a) => a.email))).catch(() => undefined);
   }, [id]);
 
@@ -61,12 +63,45 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
 
         {id === "mayne" && <MayneLimits />}
 
+        {charter && (
+          <section className="card flex flex-col gap-3" aria-label="Charter" style={{ borderColor: `color-mix(in srgb, ${color ?? "var(--accent)"} 55%, transparent)` }}>
+            <span className="label">Charter</span>
+            <p className="m-0 text-[15px] leading-snug" style={{ color: "var(--ink-bright)" }}>{charter.job}</p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>Owns</span>
+                <ul className="m-0 pl-4 text-[12px] leading-relaxed">{charter.owns.map((o) => <li key={o}>{o}</li>)}</ul>
+              </div>
+              {charter.handsOff && charter.handsOff.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>Hands off</span>
+                  <ul className="m-0 pl-4 text-[12px] leading-relaxed">{charter.handsOff.map(([w, to]) => <li key={w}>{w} → <Link href={`/agents/${to}`} style={{ color: state?.ventures[state.agents.find((a) => a.id === to)?.venture ?? "root"]?.color }}>{state?.agents.find((a) => a.id === to)?.name ?? to}</Link></li>)}</ul>
+                </div>
+              )}
+            </div>
+            <dl className="m-0 grid gap-x-4 gap-y-1 text-[12px]" style={{ gridTemplateColumns: "max-content 1fr" }}>
+              <dt className="text-[10px] tracking-[0.14em] uppercase self-center" style={{ color: "var(--muted)" }}>Rhythm</dt><dd className="m-0">{charter.rhythm}</dd>
+              <dt className="text-[10px] tracking-[0.14em] uppercase self-center" style={{ color: "var(--muted)" }}>Good looks like</dt><dd className="m-0">{charter.good}</dd>
+            </dl>
+            {charter.open && charter.open.length > 0 && (
+              <div className="border-l-2 pl-3 flex flex-col gap-1" style={{ borderColor: "var(--amber)" }}>
+                <span className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--amber)" }}>Needs your answer</span>
+                <ul className="m-0 pl-4 text-[12px] leading-relaxed">{charter.open.map((q) => <li key={q}>{q}</li>)}</ul>
+              </div>
+            )}
+          </section>
+        )}
+
         <section className="card flex flex-col gap-3" aria-label="Persona">
-          <span className="label">Persona · Phil&apos;s template</span>
-          {FIELDS.map((f) => (
+          <div className="flex items-center gap-3">
+            <span className="label">Your changes to the charter</span>
+            <button type="button" className="ml-auto text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }} aria-expanded={editBrief} onClick={() => setEditBrief(!editBrief)}>{editBrief ? "Hide" : "Edit"}</button>
+          </div>
+          {!editBrief && <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>{Object.values(cfg.persona).some((v) => v && String(v).trim()) ? "You've changed parts of the charter. Edit to see them." : "None. The charter above is what this agent works from."}</p>}
+          {editBrief && FIELDS.map((f) => (
             <label key={f.key} className="flex flex-col gap-1 text-[11px] tracking-[0.12em] uppercase" style={{ color: "var(--muted)" }}>
               {f.label}
-              <textarea className="input py-2 h-16 normal-case tracking-normal text-[13px]" placeholder={f.hint} value={cfg.persona[f.key] ?? ""} onChange={(e) => setCfg({ ...cfg, persona: { ...cfg.persona, [f.key]: e.target.value } })} />
+              <textarea className="input py-2 h-16 normal-case tracking-normal text-[13px]" placeholder={(f.key === "job" ? charter?.job : f.key === "daily" ? charter?.rhythm : f.key === "good" ? charter?.good : undefined) ?? f.hint} value={cfg.persona[f.key] ?? ""} onChange={(e) => setCfg({ ...cfg, persona: { ...cfg.persona, [f.key]: e.target.value } })} />
             </label>
           ))}
         </section>

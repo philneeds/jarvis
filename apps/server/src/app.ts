@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector } from "@jarvis/core";
+import { AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, CHARTERS } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -145,7 +145,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.get("/agents/:id/config", async (c) => {
     const agent = findAgent(c.req.param("id"));
     if (!agent) return c.json({ error: "no such agent" }, 404);
-    return c.json({ config: await getAgentConfig(jarvis.store, agent.id), tools: jarvis.allTools().map((t) => t.name), defaultModel: agent.model });
+    return c.json({ config: await getAgentConfig(jarvis.store, agent.id), tools: jarvis.allTools().map((t) => t.name), defaultModel: agent.model, charter: CHARTERS[agent.id] ?? null });
   });
   api.put("/agents/:id/config", async (c) => {
     const agent = findAgent(c.req.param("id"));

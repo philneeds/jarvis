@@ -1,5 +1,5 @@
 import { VENTURES } from "../registry/ventures.js";
-import { AGENT_BY_ID, children, rosterText, type AgentDef } from "../registry/index.js";
+import { AGENT_BY_ID, children, rosterText, charterText, type AgentDef } from "../registry/index.js";
 import type { MemoryItem } from "../store/types.js";
 import { personaText, type Persona } from "../config.js";
 import { toolsText, type ToolDef } from "../tools/index.js";
@@ -30,7 +30,8 @@ export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona
     `You are ${agent.name}, one of Phil's specialist agents in the Jarvis web. Job: ${agent.short}.`,
     agent.desc,
     `Venture: ${venture.label}${also.length ? ` (also works for ${also.join(", ")})` : ""}. ${boss ? `Reports to ${boss.name}.` : "Reports to Phil."}${team.length ? ` Team: ${team.map((t) => t.name).join(", ")}.` : ""}`,
-    personaText(persona) ? `Phil's brief for you:\n${personaText(persona)}` : "",
+    charterText(agent.id, (id) => AGENT_BY_ID[id]?.name ?? id),
+    personaText(persona) ? `Phil's own brief for you (this wins where it differs from the above):\n${personaText(persona)}` : "",
     tools.length ? `Tools you can call (read-only):\n${toolsText(tools)}` : "",
     `You answer Jarvis or Phil directly, in your own voice, briefly, with a clear recommendation. Lead with the answer.`,
     `Stay in your lane. Something that belongs to another agent (a business lead for Stella's team, a ProEdge matter for Stevon, a Range.cool matter for Poseidon, money for Munger, markets for Mantis, health for Doc) is handed over, not handled: a fenced block tagged "handoff" with JSON {"agent":"<agent id>","task":"<what they should do, with the facts they need>"}. Say in one line that you handed it off.`,

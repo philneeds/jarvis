@@ -309,3 +309,25 @@ test("submit answers at once; the final follows; a slow delegate posts a late re
   assert.ok(chat.some((m) => m.kind === "progress" && m.agentId === "lucas" && /Late report/.test(m.text)));
   J.DELEGATE_TIMEOUT_MS = 180_000;
 });
+
+test("charters: every agent has one, they set default tools and rules, and Phil's saved settings win", async () => {
+  const { CHARTERS, AGENTS, rosterText, getAgentConfig, setAgentConfig, agentSystemPrompt, getAgent } = await import("../src/index.js");
+  const { store } = make();
+  for (const a of AGENTS) assert.ok(CHARTERS[a.id], `charter for ${a.id}`);
+  // Defaults from the charter.
+  const monica = await getAgentConfig(store, "monica");
+  assert.ok(monica.tools.includes("calendar_list_events"));
+  assert.deepEqual(monica.rules.autoApprove, ["record"]);
+  // Phil's settings win.
+  await setAgentConfig(store, "monica", { tools: ["memory_search"], rules: { autoApprove: [], maxAutoDollars: 0 } });
+  const after = await getAgentConfig(store, "monica");
+  assert.deepEqual(after.tools, ["memory_search"]);
+  assert.deepEqual(after.rules.autoApprove, []);
+  // The charter is in the agent's instructions, with hand-offs by name.
+  const sys = agentSystemPrompt(getAgent("monica")!, []);
+  assert.match(sys, /Master scheduler/);
+  assert.match(sys, /Business email and leads for JD PM → Stella \(stella\)/);
+  // Jarvis can route to every layer, not just the leads' direct teams.
+  const roster = rosterText();
+  for (const id of ["boo", "ncrypt", "marcus", "devteam", "jason2"]) assert.match(roster, new RegExp(`@${id}\\]`));
+});

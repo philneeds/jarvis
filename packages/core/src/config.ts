@@ -1,6 +1,7 @@
 import type { ApprovalKind } from "./events.js";
 import type { ModelKey } from "./registry/agents.js";
 import type { Store } from "./store/types.js";
+import { CHARTERS } from "./registry/charters.js";
 
 /** Phil's template for each agent (from the scope doc). Every field is optional; blanks fall back to the registry. */
 export interface Persona {
@@ -45,9 +46,19 @@ export const DEFAULT_CONFIG: AgentConfig = { persona: {}, model: null, schedule:
 
 const key = (id: string) => `agentcfg:${id}`;
 
+/** Defaults from the agent's charter: its tools and approval rules until Phil changes them. */
+export function charterDefaults(id: string): Pick<AgentConfig, "tools" | "rules"> {
+  const ch = CHARTERS[id];
+  return {
+    tools: ch?.tools ?? [],
+    rules: { ...DEFAULT_CONFIG.rules, autoApprove: ch?.autoApprove ?? [], maxAutoDollars: ch?.maxAutoDollars ?? 0 },
+  };
+}
+
 export async function getAgentConfig(store: Store, id: string): Promise<AgentConfig> {
   const c = await store.settings.get<Partial<AgentConfig>>(key(id), {});
-  return { ...DEFAULT_CONFIG, ...c, persona: { ...DEFAULT_CONFIG.persona, ...(c.persona ?? {}) }, rules: { ...DEFAULT_CONFIG.rules, ...(c.rules ?? {}) }, tools: c.tools ?? [] };
+  const d = charterDefaults(id);
+  return { ...DEFAULT_CONFIG, ...c, persona: { ...DEFAULT_CONFIG.persona, ...(c.persona ?? {}) }, rules: { ...d.rules, ...(c.rules ?? {}) }, tools: c.tools ?? d.tools };
 }
 
 export async function setAgentConfig(store: Store, id: string, patch: Partial<AgentConfig>): Promise<AgentConfig> {

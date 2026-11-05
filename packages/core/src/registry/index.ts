@@ -1,8 +1,10 @@
 import { AGENTS, type AgentDef } from "./agents.js";
 import { VENTURES, VENTURE_IDS, type VentureId } from "./ventures.js";
 
+import { CHARTERS } from "./charters.js";
 export * from "./agents.js";
 export * from "./ventures.js";
+export * from "./charters.js";
 
 export const AGENT_BY_ID: Record<string, AgentDef> = Object.fromEntries(AGENTS.map((a) => [a.id, a]));
 
@@ -59,11 +61,16 @@ export function ventureLeads(): { venture: VentureId; lead?: AgentDef }[] {
 }
 
 /** Compact roster text for Jarvis's system prompt. */
+/** Every agent Jarvis can route to, by lead, with each one's job from its charter and every layer under it. */
 export function rosterText(): string {
   const lines: string[] = [];
+  const job = (a: AgentDef) => CHARTERS[a.id]?.job ?? a.short;
+  const walk = (a: AgentDef, depth: number) => {
+    for (const c of children(a.id)) { lines.push(`${"  ".repeat(depth)}- ${c.name} [@${c.id}]: ${job(c)}`); walk(c, depth + 1); }
+  };
   for (const lead of leads()) {
-    const team = children(lead.id).map((c) => `${c.name} (${c.id}: ${c.short})`).join(", ");
-    lines.push(`- ${lead.name} [@${lead.id}] — ${lead.short}. Venture: ${VENTURES[lead.venture].label}. Team: ${team || "none"}.`);
+    lines.push(`- ${lead.name} [@${lead.id}] — ${job(lead)} Venture: ${VENTURES[lead.venture].label}.`);
+    walk(lead, 1);
   }
   return lines.join("\n");
 }
