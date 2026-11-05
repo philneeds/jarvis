@@ -7,7 +7,7 @@ import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 
 interface Passkey { id: string; label: string; createdAt: string }
-interface Connectors { google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
+interface Connectors { google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
 
 export default function SettingsPage() {
   const { state, refresh } = useLive();
@@ -24,13 +24,17 @@ export default function SettingsPage() {
     api<Connectors>("/api/connectors").then(setConn),
   ]).catch(() => undefined);
   const [xMsg, setXMsg] = useState<string>();
+  const [spMsg, setSpMsg] = useState<string>();
   useEffect(() => {
     void load();
     const q = new URLSearchParams(location.search);
     const g = q.get("google"); if (g) setGoogleMsg(g.startsWith("connected") ? `Google connected${g.includes(":") && g.split(":")[1] ? ` (${decodeURIComponent(g.split(":")[1]!)})` : ""}.` : g);
     const xq = q.get("x"); if (xq) setXMsg(xq.startsWith("connected:") ? `@${xq.slice(10)} connected.` : xq);
+    const sq = q.get("spotify"); if (sq) setSpMsg(sq === "connected" ? "Spotify connected." : sq);
   }, []);
   const connectX = async () => { try { const r = await api<{ url: string }>("/api/connectors/x/auth"); location.href = r.url; } catch (e) { setXMsg((e as Error).message); } };
+  const connectSpotify = async () => { try { const r = await api<{ url: string }>("/api/connectors/spotify/auth"); location.href = r.url; } catch (e) { setSpMsg((e as Error).message); } };
+  const disconnectSpotify = async () => { if (!confirm("Disconnect Spotify?")) return; await post("/api/connectors/spotify/disconnect", {}); setSpMsg(undefined); await load(); };
   const disconnectX = async (handle: string) => { if (!confirm(`Disconnect @${handle}?`)) return; await post("/api/connectors/x/disconnect", { handle }); setXMsg(undefined); await load(); };
   const connectGoogle = async () => { try { const r = await api<{ url: string }>("/api/connectors/google/auth"); location.href = r.url; } catch (e) { setGoogleMsg((e as Error).message); } };
   const disconnectGoogle = async (email: string) => { if (!confirm(`Disconnect ${email}? Agents lose that calendar and mailbox until you reconnect.`)) return; await post("/api/connectors/google/disconnect", { email }); setGoogleMsg(undefined); await load(); };
@@ -100,6 +104,16 @@ export default function SettingsPage() {
             </div>
             {conn?.x.accounts.map((a) => <div key={a.handle} className="flex items-center gap-3 pl-6"><span>@{a.handle}{a.name ? ` · ${a.name}` : ""}</span><span style={{ color: "var(--dim)" }}>{fmtTime(a.connectedAt)}</span><button className="btn btn-sm btn-danger ml-auto" onClick={() => disconnectX(a.handle)}>Disconnect</button></div>)}
             {xMsg && <p className="m-0 pl-6" style={{ color: xMsg.endsWith("connected.") ? "var(--green)" : "var(--red)" }}>{xMsg}</p>}
+          </div>
+          <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }}>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`dot ${conn?.spotify?.connected ? "dot-working" : "dot-idle"}`} />
+              <span><b>Spotify</b> · Lip learns your taste from what you play and makes your playlists.</span>
+              {conn?.spotify?.connected
+                ? <><span style={{ color: "var(--dim)" }}>{conn.spotify.name ?? "connected"}{conn.spotify.connectedAt ? ` · ${fmtTime(conn.spotify.connectedAt)}` : ""}</span><button className="btn btn-sm btn-danger ml-auto" onClick={disconnectSpotify}>Disconnect</button></>
+                : conn?.spotify?.configured ? <button className="btn btn-sm btn-primary ml-auto" onClick={connectSpotify}>Connect Spotify</button> : <span className="ml-auto" style={{ color: "var(--muted)" }}>set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET</span>}
+            </div>
+            {spMsg && <p className="m-0 pl-6" style={{ color: spMsg.endsWith("connected.") ? "var(--green)" : "var(--red)" }}>{spMsg}</p>}
           </div>
           <div className="flex items-center gap-3 text-[12px]"><span className={`dot ${conn?.telegram.configured ? "dot-working" : "dot-idle"}`} /><span><b>Telegram</b> · talk to Jarvis and approve from your phone</span><span className="ml-auto" style={{ color: "var(--muted)" }}>{conn?.telegram.configured ? "bot polling" : "set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"}</span></div>
           <div className="flex items-center gap-3 text-[12px]"><span className={`dot ${conn?.ntfy.configured ? "dot-working" : "dot-idle"}`} /><span><b>ntfy</b> · push alerts</span><span className="ml-auto" style={{ color: "var(--muted)" }}>{conn?.ntfy.configured ? "on" : "set NOTIFY_WEBHOOK_URL"}</span></div>

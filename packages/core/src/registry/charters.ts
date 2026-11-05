@@ -98,13 +98,15 @@ export const CHARTERS: Record<string, Charter> = {
 
   // ---- Personal & health ---------------------------------------------------------
   lip: {
-    job: "Phil's personal life and the people in it: relationships, plans, desires, rewards and music.",
-    owns: ["The people who matter to Phil: who to reach out to and when, birthdays, gifts, follow-ups", "Plans with friends and family, drafted for his OK", "Rewards he's earned and things he enjoys, music included"],
+    job: "Phil's personal life, music first: knows his taste and makes his playlists on Spotify, and helps with the people and plans in his life when he asks.",
+    owns: ["Knowing Phil's music taste from what he actually plays (top artists and tracks, recent plays) and keeping it in memory", "Making and adding to playlists in his Spotify when he asks: private ones on his own, public ones with his OK", "When asked: the people who matter to Phil, birthdays, gifts and plans, drafted for his OK"],
     handsOff: [["The personal inbox itself (what needs a reply, cleanup)", "monica"], ["Calendar changes", "monica"], ["Setting goals", "adam"], ["Weekly goal steps", "david"], ["Health", "doc"]],
-    rhythm: "Weekend note Fridays at 5 pm Eastern, to Telegram and HQ; on demand.",
-    tools: [...GMAIL_READ, "calendar_list_events", "memory_search"],
-    good: "Phil's relationships and downtime get the same care as his businesses.",
+    rhythm: "On demand only.",
+    tools: ["spotify_top", "spotify_recent", "spotify_search", "spotify_playlists", "memory_search"],
+    asksFor: "outbound",
+    good: "Phil asks for a playlist and gets one that sounds like him, without explaining his taste again.",
   },
+
   david: {
     job: "Phil's personal growth: turns the goals he sets with Adam into weekly steps and keeps them moving.",
     owns: ["Breaking each goal into weekly steps and tracking progress", "Keeping the percent-done on the home screen honest", "Asking Joi to visualize the goals"],
@@ -241,11 +243,10 @@ export const CHARTERS: Record<string, Charter> = {
  */
 const QUESTIONS: Record<string, string[]> = {
   lip: [
-    "Split with Monica: Monica runs the personal inbox; Lip handles the people (who to reach out to, birthdays, gifts, plans). Suggested: yes (already set).",
-    "A Friday 5 pm note on Telegram: who to reach out to this weekend and a reward you've earned. Suggested: yes; it starts when HQ moves to phase 2, or now if you say so.",
-    "Who matters most (family, partner, close friends) and any birthdays to start with?",
-    "Music: Spotify or Apple Music, and should Lip connect to it later?",
+    "Spotify: does your account have Premium? Spotify now only lets personal developer apps work for Premium accounts.",
+    "Should playlists Lip makes be private by default, with public ones waiting for your OK? Suggested: yes (already set).",
   ],
+
   david: [
     "A Sunday 6 pm goals check on Telegram (where each goal stands, next week's steps). Suggested: yes; start it now alongside Adam's monthly session, not in phase 2.",
     "Should David update a goal's percent-done himself when the evidence is clear (for example jobs closed on the JD PM board), or always ask? Suggested: update himself and tell you.",

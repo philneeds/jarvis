@@ -44,13 +44,14 @@ const OUTBOUND_ACTIONS = new Set(["gmail.send", "x.post", "x.reply", "x.dm"]);
 
 /** Does this approval reach anyone besides Phil: a message, a post, or a calendar change other people will see? */
 export function isOutbound(a: Pick<Approval, "kind" | "payload">): boolean {
-  const p = (a.payload ?? {}) as { action?: unknown; attendees?: unknown; guests?: unknown };
+  const p = (a.payload ?? {}) as { action?: unknown; attendees?: unknown; guests?: unknown; public?: unknown };
   if (a.kind === "send" || a.kind === "post") return true;
+  if (p.public === true) return true;
   if (typeof p.action === "string" && OUTBOUND_ACTIONS.has(p.action)) return true;
   if (Array.isArray(p.attendees) && p.attendees.length) return true;
   if (Array.isArray(p.guests) && p.guests.length) return true;
   // An action no connector recognises is treated as outbound: when unsure, ask.
-  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|memory\.replace|record\.)/.test(p.action);
+  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|spotify\.playlist\.(create|add)|memory\.replace|record\.)/.test(p.action);
 }
 
 /** Something Phil deleted, kept for a while so he can undo it. */

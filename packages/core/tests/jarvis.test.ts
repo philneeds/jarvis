@@ -482,5 +482,6 @@ test("schedules are sound: real agents, valid timing, weekday scouts skip weeken
   assert.deepEqual(sch.due(mon, 0).map((x) => x.id), ["w"]);
   // Questions only attach to real agents' charters.
   assert.ok(CHARTERS.stella!.open!.some((q) => /mailbox/.test(q)));
-  assert.ok(CHARTERS.lip!.open!.length >= 3);
+  assert.ok(CHARTERS.lip!.open!.some((q) => /Premium/.test(q)));
+  assert.ok(!SCHEDULES.some((s) => s.agentId === "lip"), "Lip runs on demand only");
 });

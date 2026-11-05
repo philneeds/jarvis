@@ -2,12 +2,12 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, CHARTERS, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, CHARTERS, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
 
-export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; guard?: TradingGuard } = {}) {
+export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; spotify?: SpotifyConnector; guard?: TradingGuard } = {}) {
   const app = new Hono();
   const origins = (process.env.HQ_ORIGIN ?? "http://localhost:3000").split(",").map((s) => s.trim());
   app.use("/api/*", cors({ origin: origins, credentials: true }));
@@ -311,6 +311,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.get("/connectors", async (c) => c.json({
     google: connectors.google ? { configured: true, ...(await connectors.google.status()) } : { configured: false, connected: false, accounts: [] },
     x: connectors.x ? { configured: true, ...(await connectors.x.status()) } : { configured: false, accounts: [] },
+    spotify: connectors.spotify ? { configured: true, ...(await connectors.spotify.status()) } : { configured: false, connected: false },
     telegram: { configured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) },
     ntfy: { configured: !!process.env.NOTIFY_WEBHOOK_URL },
   }));
@@ -355,6 +356,28 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     } catch (e) {
       return c.redirect(`/settings?x=${encodeURIComponent((e as Error).message)}`);
     }
+  });
+  api.get("/connectors/spotify/auth", (c) => {
+    if (!connectors.spotify) return c.json({ error: "SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET aren't set" }, 400);
+    return c.json({ url: connectors.spotify.authUrl().url });
+  });
+  api.get("/connectors/spotify/callback", async (c) => {
+    const { code, state, error } = c.req.query();
+    if (!connectors.spotify) return c.text("Spotify connector not configured", 400);
+    if (error) return c.redirect(`/settings?spotify=${encodeURIComponent(error)}`);
+    if (!code || !state) return c.text("missing code or state", 400);
+    try {
+      const t = await connectors.spotify.exchangeCode(code, state);
+      await jarvis.router.log("jarvis", "system", `Phil connected Spotify${t.name ? ` (${t.name})` : ""}`);
+      return c.redirect("/settings?spotify=connected");
+    } catch (e) {
+      return c.redirect(`/settings?spotify=${encodeURIComponent((e as Error).message)}`);
+    }
+  });
+  api.post("/connectors/spotify/disconnect", async (c) => {
+    await connectors.spotify?.disconnect();
+    await jarvis.router.log("jarvis", "system", "Phil disconnected Spotify");
+    return c.json({ ok: true });
   });
   api.post("/connectors/x/disconnect", async (c) => {
     const p = z.object({ handle: z.string().min(1) }).safeParse(await c.req.json().catch(() => ({})));
