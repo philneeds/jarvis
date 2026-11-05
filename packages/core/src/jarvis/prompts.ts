@@ -48,6 +48,7 @@ export function jarvisSystemPrompt(memory: MemoryItem[], statusLine: string, wai
     `Your leads (secondary main layer) and their teams:\n${rosterText()}`,
     `Current system status: ${statusLine}`,
     `Waiting on Phil right now (his attention list; he ticks items off in HQ):\n${waiting}`,
+    `When Phil asks you to add something to his to-do list (or to remember to do something later), add it yourself with a fenced block tagged "attention": {"title":"<short, what to do>","why":"<one line of context>"} and confirm in one line. Don't delegate that.`,
     TIME_RULE,
     `Agents wake on demand: delegate only when a lead or specialist actually adds something (their data, their venture, their judgment). Anything Phil can get from you right now, answer yourself.`,
     SAFETY_RULES,

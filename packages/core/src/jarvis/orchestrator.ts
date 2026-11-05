@@ -249,8 +249,10 @@ export class Jarvis {
       .slice(0, 4);
 
     if (!delegations.length) {
-      const { text, approvals, remember } = extractBlocks(plan.reply ?? planRun.text);
+      const { text, approvals, remember, attention } = extractBlocks(plan.reply ?? planRun.text);
       await this.absorb(jarvis, approvals, remember, planRun.runId);
+      // "Add X to my to-do list": Jarvis puts it on Phil's list himself.
+      for (const a of attention) await this.raiseAttention({ ...a, agentId: "jarvis", source: { runId: planRun.runId } });
       out.push(await this.say({ role: "jarvis", text: text || "Done.", runId: planRun.runId, kind: "final" }));
       return out;
     }
@@ -644,7 +646,7 @@ export class Jarvis {
     const arg = rest.join(" ").trim();
     switch ((cmd ?? "").toLowerCase()) {
       case "help":
-        return "Commands: /brief (morning rundown), /status (who's doing what), /pause [agent|trading|all], /resume [agent|trading|all], /approvals, /waiting (what needs you), /usage, /memory, /condense (Oscar tidies memory). Talk to any agent with @name.";
+        return "Commands: /brief (morning rundown), /status (who's doing what), /todo <thing> (add to your to-do list; /todo alone lists it), /pause [agent|trading|all], /resume [agent|trading|all], /approvals, /waiting (what needs you), /usage, /memory, /condense (Oscar tidies memory). Talk to any agent with @name.";
       case "brief":
         return this.brief();
       case "status": {
@@ -669,8 +671,11 @@ export class Jarvis {
         const u = await usageSummary(this.store);
         return u.plans.filter((p) => p.window !== "manual").map((p) => `${p.label}: ${Math.round(p.used * 100)}% of ${p.window}, ${p.runs} runs${p.throttled ? " (scouts paused)" : ""}`).join("\n");
       }
-      case "waiting":
       case "todo":
+        // "/todo <thing>" adds it to Phil's to-do list; "/todo" alone lists what's open.
+        if (arg) { const item = await this.raiseAttention({ title: arg.slice(0, 160), why: "Added by Phil.", agentId: "jarvis" }); return `Added to your to-do list: ${item.title}`; }
+        return this.attentionText(30);
+      case "waiting":
         return this.attentionText(30);
       case "condense":
         return this.condenseMemory();

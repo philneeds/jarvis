@@ -531,3 +531,18 @@ test("X links: Jarvis opens the post first, so the agent sees what it says (and 
     void jarvis;
   } finally { globalThis.fetch = real; }
 });
+
+test("Phil's to-do list: /todo adds, and Jarvis adds what Phil asks him to", async () => {
+  const { jarvis, store } = make();
+  await store.init();
+  assert.match(await jarvis.command("/todo Connect Apple Health (Health Auto Export)"), /Added to your to-do list: Connect Apple Health/);
+  assert.match(await jarvis.command("/todo"), /Connect Apple Health/);
+  // Jarvis's own reply can carry an attention block (no delegation).
+  const { mockProvider: mp, ModelRouter: MR, Jarvis: J } = await import("../src/index.js");
+  const p = mp("c"); const base = p.run.bind(p);
+  p.run = async (req) => { const r = await base(req); if (req.agent.id === "jarvis" && /Phil says:/.test(req.prompt)) r.text = JSON.stringify({ reply: 'Added.\n\n```attention\n{"title":"Decide on Higgsfield for Joi","why":"Parked on Nov 5"}\n```', delegate: [] }); return r; };
+  const j2 = new J({ store, router: new MR({ store, providers: { claude: [p], grok: [mp("g")] } }) });
+  await j2.handle("add Higgsfield for Joi to my to-do list");
+  const titles = (await j2.attention()).map((i) => i.title);
+  assert.ok(titles.includes("Decide on Higgsfield for Joi"), titles.join(" | "));
+});
