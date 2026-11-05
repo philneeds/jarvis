@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLive } from "@/lib/live";
 
 /**
@@ -17,23 +17,29 @@ function plain(md: string): string {
 export function Transcript({ limit = 8, pendingText }: { limit?: number; pendingText?: string }) {
   const { state, messages } = useLive();
   const ref = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState<string | null>(null);   // one message shown in full at a time
   const recent = messages.slice(-limit);
   const acks = messages.filter((m) => m.kind === "ack");
   const lastAck = acks[acks.length - 1];
   const working = !!lastAck && Date.now() - Date.parse(lastAck.at) < 6 * 60_000 && !messages.some((m) => m.kind === "final" && m.replyTo === lastAck.replyTo);
-  useEffect(() => { ref.current?.scrollTo({ top: ref.current.scrollHeight }); }, [messages.length, pendingText, working]);
+  useEffect(() => { ref.current?.scrollTo({ top: ref.current.scrollHeight }); }, [messages.length, pendingText, working, open]);
   const who = (m: (typeof messages)[number]) => (m.role === "phil" ? "You" : m.role === "jarvis" ? "Jarvis" : m.role === "system" ? "HQ" : state?.agents.find((a) => a.id === m.agentId)?.name ?? m.agentId ?? "Agent");
   const tone = (m: (typeof messages)[number]) => (m.role === "phil" ? "var(--accent)" : m.role === "system" ? "var(--muted)" : m.role === "jarvis" ? "var(--ink-strong)" : state?.ventures[state.agents.find((a) => a.id === m.agentId)?.venture ?? "root"]?.color ?? "var(--green)");
   return (
     <section aria-label="Conversation" className="w-full flex flex-col gap-1">
-      <div ref={ref} className="flex flex-col gap-2 overflow-y-auto pr-1" style={{ maxHeight: 220, scrollbarWidth: "thin" }}>
+      <div ref={ref} className="flex flex-col gap-2 overflow-y-auto pr-1" style={{ maxHeight: 300, scrollbarWidth: "thin" }}>
         {recent.length === 0 && !pendingText && <p className="m-0 text-center text-[12px]" style={{ color: "var(--muted)" }}>Say the word. I&apos;m listening.</p>}
-        {recent.map((m) => (
-          <p key={m.id} className={`m-0 text-[12px] leading-relaxed whitespace-pre-line ${m.kind === "ack" || m.kind === "progress" ? "msg-ack" : ""}`} style={{ color: "var(--ink)" }}>
-            <span className="text-[10px] tracking-[0.14em] uppercase mr-2" style={{ color: tone(m) }}>{who(m)}</span>
-            {plain(m.text)}
-          </p>
-        ))}
+        {recent.map((m) => {
+          const text = plain(m.text);
+          const long = text.length > 160 || text.includes("\n");
+          const full = open === m.id;
+          return (
+            <p key={m.id} className={`m-0 text-[12px] leading-relaxed whitespace-pre-line ${m.kind === "ack" || m.kind === "progress" ? "msg-ack" : ""} ${long ? "cursor-pointer" : ""}`} style={{ color: "var(--ink)", ...(long && !full ? { display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" } : {}) }} onClick={() => long && setOpen(full ? null : m.id)} title={long && !full ? "Tap to read all of it" : undefined}>
+              <span className="text-[10px] tracking-[0.14em] uppercase mr-2" style={{ color: tone(m) }}>{who(m)}</span>
+              {text}{long && !full ? " …" : ""}
+            </p>
+          );
+        })}
         {pendingText && <p className="m-0 text-[12px] italic" style={{ color: "var(--amber)" }}><span className="text-[10px] tracking-[0.14em] uppercase mr-2 not-italic" style={{ color: "var(--accent)" }}>You</span>{pendingText}</p>}
         {working && <p className="m-0 text-[11px] tracking-[0.12em] uppercase" style={{ color: "var(--amber)" }}>still working · the answer lands here</p>}
       </div>
