@@ -736,7 +736,7 @@ export class Jarvis {
     const asksFor = CHARTERS[a.agentId]?.asksFor;
     const action = (a.payload as { action?: unknown } | undefined)?.action;
     // Phil's outbound rule: internal work goes through; anything reaching another person waits. Trash and money always wait.
-    const auto = asksFor === "outbound"
+    const auto = asksFor === "everything" ? false : asksFor === "outbound"
       ? !isOutbound(a) && a.kind !== "money" && a.kind !== "strategy" && action !== "gmail.trash" && items <= itemCap
       : a.kind !== "money" && a.kind !== "strategy" && rules.autoApprove.includes(a.kind) && amount <= rules.maxAutoDollars && items <= itemCap;
     if (auto) {

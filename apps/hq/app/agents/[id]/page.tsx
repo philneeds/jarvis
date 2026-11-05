@@ -155,7 +155,9 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
 
         <section className="card flex flex-col gap-3" aria-label="Approval rules">
           <span className="label label-amber">Approval rules</span>
-          {charter?.asksFor === "outbound" ? (
+          {charter?.asksFor === "everything" ? (
+            <p className="m-0 text-[12px]">Your rule: {agent.name} brings you every action as an approval, and carries it out once you approve.</p>
+          ) : charter?.asksFor === "outbound" ? (
             <p className="m-0 text-[12px]">Your rule: {agent.name} does internal work on her own (your own calendar events, archiving, labels, notes). Anything that reaches another person (email, replies, calendar changes with guests) and anything moved to Trash comes to you first.</p>
           ) : <>
           <span className="text-[12px]">Kinds this agent may do without you. Money and strategies always wait, whatever you tick.</span>

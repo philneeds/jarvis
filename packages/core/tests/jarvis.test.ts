@@ -404,3 +404,18 @@ test("when the web is paused, the reply is still marked final so the chat never 
   assert.match(last.text, /can't think right now/);
   assert.equal(last.kind, "final");
 });
+
+test("Oscar's rule: every plan waits for Phil, and approving it carries it out", async () => {
+  const { jarvis, store } = make();
+  const { setAgentConfig } = await import("../src/index.js");
+  // A saved setting that would auto-approve archives can't get around the rule.
+  await setAgentConfig(store, "oscar", { rules: { autoApprove: ["record"], maxAutoDollars: 0, maxAutoItems: 1000 } });
+  let archived = 0;
+  jarvis.onApproved("gmail.archive", async () => { archived++; return "Archived 120 message(s)."; });
+  const plan = await jarvis.requestApproval({ agentId: "oscar", kind: "record", title: "Archive old promotions", body: "", payload: { action: "gmail.archive", query: "category:promotions older_than:30d", max: 120 } });
+  assert.equal(plan.status, "pending");
+  assert.equal(archived, 0);
+  const d = await jarvis.decide(plan.id, "approved");
+  assert.equal(archived, 1);
+  assert.match(d!.note!, /Archived 120/);
+});

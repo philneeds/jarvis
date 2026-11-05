@@ -23,8 +23,9 @@ export interface Charter {
   /**
    * Phil's rule for this agent, enforced whatever its saved settings say. "outbound": internal work goes through on
    * its own; anything that reaches another person (email, posts, DMs, calendar changes with guests) waits for him.
+   * "everything": every action waits for him; once approved, the agent carries it out.
    */
-  asksFor?: "outbound";
+  asksFor?: "outbound" | "everything";
   /** What "good" looks like, in Phil's terms. */
   good: string;
   /** Questions only Phil can answer. */
@@ -70,10 +71,11 @@ export const CHARTERS: Record<string, Charter> = {
   },
   oscar: {
     job: "Addition by subtraction: cleans up inboxes, memory and anything the web no longer needs.",
-    owns: ["Condensing memory into the bullets that matter as the web grows", "Weekly inbox cleanup plans with Monica (archive, label; never permanent delete)", "Proposing agents, schedules or tools to cut"],
+    owns: ["Condensing memory into the bullets that matter as the web grows", "A weekly inbox cleanup plan with Monica, sent to Phil as approvals: what he'll archive or label in each account and how many messages; once Phil approves, he carries it out (never a permanent delete)", "Proposing agents, schedules or tools to cut"],
     handsOff: [["Deciding what to keep on Phil's calendar", "monica"], ["New tools and upgrades", "einstein"]],
-    rhythm: "Memory at 3:30 nightly; inbox plan Sundays at 4:00.",
+    rhythm: "Memory at 3:30 nightly; inbox plan Sundays at 4:00, waiting for Phil's approval.",
     tools: ["google_accounts", "gmail_senders", "gmail_search", "memory_search", "activity_recent", "web_status"],
+    asksFor: "everything",
     good: "The inbox and memory stay lean and Phil never loses anything that mattered.",
   },
   adam: {
