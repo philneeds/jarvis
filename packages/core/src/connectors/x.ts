@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { Store } from "../store/types.js";
 import { defineTool, type ToolDef } from "../tools/index.js";
-import type { Executor } from "../jarvis/orchestrator.js";
+import type { Executor, Describer } from "../jarvis/orchestrator.js";
 
 /**
  * X (Twitter) connector for Boo, ncrypt, Nick and Intern. Several accounts (Philneeds, Range.cool, Acres),
@@ -161,6 +161,15 @@ export class XConnector {
       "x.post": async (a) => { const p = a.payload as { text?: string; account?: string }; const r = await this.post(text(p), p.account); return `Posted from @${r.handle}: ${r.url}`; },
       "x.reply": async (a) => { const p = a.payload as { text?: string; account?: string; replyTo?: string }; if (!p.replyTo) throw new Error("replyTo (the post id) is required"); const r = await this.post(text(p), p.account, p.replyTo); return `Replied from @${r.handle}: ${r.url}`; },
       "x.dm": async (a) => { const p = a.payload as { text?: string; account?: string; to?: string }; if (!p.to) throw new Error("to (the user id) is required"); const r = await this.dm(p.to, text(p), p.account); return `DM sent from @${r.handle} (${r.id}).`; },
+    };
+  }
+
+  describe(): Record<string, Describer> {
+    const h = (p: { account?: unknown }) => (typeof p.account === "string" && p.account ? `@${String(p.account).replace(/^@/, "")}` : "your first X account");
+    return {
+      "x.post": (p) => `Posts this publicly from ${h(p)}. Everyone can see it the moment you approve.`,
+      "x.reply": (p) => `Posts this as a public reply from ${h(p)} to post ${String(p.replyTo ?? "?")}.`,
+      "x.dm": (p) => `Sends this as a private DM from ${h(p)} to user ${String(p.to ?? "?")}.`,
     };
   }
 

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Store } from "../store/types.js";
 import { defineTool, type ToolDef } from "../tools/index.js";
-import type { Executor } from "../jarvis/orchestrator.js";
+import type { Executor, Describer } from "../jarvis/orchestrator.js";
 import { getAgentConfig } from "../config.js";
 import type { ToolContext } from "../tools/index.js";
 
@@ -361,6 +361,21 @@ export class GoogleConnector {
         await this.deleteEvent({ id: p.id, account: p.account });
         return `Event "${p.title ?? p.id}" removed.`;
       },
+    };
+  }
+
+  /** What each action does, in Phil's words, shown on the card before he approves. */
+  describe(): Record<string, Describer> {
+    const acct = (p: { account?: unknown }) => (typeof p.account === "string" && p.account ? p.account : "your first Google account");
+    const scope = (p: { ids?: unknown; query?: unknown; max?: unknown }) => Array.isArray(p.ids) ? `${p.ids.length} chosen message(s)` : `up to ${Number(p.max ?? 500)} messages matching "${String(p.query ?? "")}"`;
+    return {
+      "gmail.send": (p) => `Sends this email from ${acct(p)} to ${String(p.to ?? "?")}${p.cc ? `, cc ${String(p.cc)}` : ""} with the subject "${String(p.subject ?? "")}". It goes out the moment you approve, and only to that address.`,
+      "gmail.archive": (p) => `Archives ${scope(p)} in ${acct(p)}: they leave the inbox but stay in All Mail and search. Nothing is deleted.`,
+      "gmail.label": (p) => `Adds the label "${String(p.label ?? "")}" to ${scope(p)} in ${acct(p)}. Nothing moves or is deleted.`,
+      "gmail.trash": (p) => `Moves ${scope(p)} in ${acct(p)} to Trash. Gmail empties Trash after 30 days; until then you can restore them.`,
+      "calendar.create": (p) => `Adds "${String(p.title ?? "")}" to the calendar on ${acct(p)} from ${String(p.start ?? "?")} to ${String(p.end ?? "?")}${Array.isArray(p.attendees) && p.attendees.length ? ` and invites ${p.attendees.join(", ")}` : ""}.`,
+      "calendar.update": (p) => `Changes the event "${String(p.title ?? p.id ?? "")}" on ${acct(p)}${p.start ? ` to ${String(p.start)}${p.end ? ` – ${String(p.end)}` : ""}` : ""}. Guests, if any, get the update from Google.`,
+      "calendar.delete": (p) => `Removes the event "${String(p.title ?? p.id ?? "")}" from the calendar on ${acct(p)}. Guests, if any, get a cancellation.`,
     };
   }
 

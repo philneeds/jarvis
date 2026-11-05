@@ -166,6 +166,54 @@ test("an approval nothing can act on says so when approved", async () => {
   assert.match(e!.note!, /No connector handles "gmail.send" yet/);
 });
 
+test("editing an approval changes the text that goes out, not just the description", async () => {
+  const { jarvis, store } = make();
+  const sent: string[] = [];
+  jarvis.onApproved("gmail.send", async (a) => { sent.push(String((a.payload as { body?: string }).body)); return "sent"; });
+  const a = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Reply to Dana", body: "Hi Dana, original wording.", payload: { action: "gmail.send", to: "dana@x.com", subject: "Quote", body: "Hi Dana, original wording." } });
+  // Save an edit: still waiting, the original kept, the payload updated.
+  const saved = await jarvis.updateApproval(a.id, { body: "Hi Dana, Phil's wording." });
+  assert.equal(saved?.status, "pending");
+  assert.equal(saved?.original, "Hi Dana, original wording.");
+  assert.equal((saved?.payload as { body: string }).body, "Hi Dana, Phil's wording.");
+  // Approving an edited item records it as edited and sends the edited text.
+  const d = await jarvis.decide(a.id, "approved");
+  assert.equal(d?.status, "edited");
+  assert.deepEqual(sent, ["Hi Dana, Phil's wording."]);
+  // Editing straight from the decide call works the same way.
+  const b = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Reply to Sam", body: "v1", payload: { action: "gmail.send", to: "sam@x.com", subject: "Quote", body: "v1" } });
+  await jarvis.decide(b.id, "edited", undefined, { body: "v2" });
+  assert.deepEqual(sent, ["Hi Dana, Phil's wording.", "v2"]);
+  // Deciding twice does nothing the second time.
+  assert.equal((await jarvis.decide(b.id, "rejected"))?.status, "edited");
+  assert.equal((await store.approvals.list("pending")).length, 0);
+});
+
+test("an approval carries context and a plain 'if you approve' line, and Phil can ask the agent about it", async () => {
+  const { jarvis, store } = make();
+  await store.init();
+  await jarvis.runAgent(getAgent("stephanie")!, "email Dana Smith a follow-up on her kitchen quote", { direct: true });
+  const [a] = await store.approvals.list("pending");
+  assert.ok(a, "approval queued");
+  assert.match(a!.context!, /Dana Smith .* wrote on Tue 3 Nov/);
+  assert.match(a!.effect!, /^Nothing happens on its own|No connector handles "gmail.send"/);
+  const originalBody = a!.body;
+  // A question lands on the card with the agent's answer.
+  const asked = await jarvis.askAboutApproval(a!.id, "what did she last say?");
+  assert.equal(asked?.thread?.length, 2);
+  assert.equal(asked?.thread?.[0]?.from, "phil");
+  assert.match(asked!.thread![1]!.text, /last wrote on Tue 3 Nov/);
+  assert.equal(asked?.status, "pending");
+  assert.equal((await store.approvals.list("pending")).length, 1, "a question never queues a second approval");
+  // A change request revises the proposal in place and keeps the original.
+  const revised = await jarvis.askAboutApproval(a!.id, "make it shorter");
+  assert.match(revised!.body, /revised: make it shorter/);
+  assert.equal(revised?.original, originalBody);
+  assert.match(revised!.thread![3]!.text, /cut it down/);
+  assert.doesNotMatch(revised!.thread![3]!.text, /```revise/);
+  assert.equal((await store.approvals.list("pending")).length, 1);
+});
+
 test("a hand-off runs the right agent and posts its reply", async () => {
   const { jarvis, store } = make();
   const { mockProvider: mp, ModelRouter: MR, Jarvis: J } = await import("../src/index.js");

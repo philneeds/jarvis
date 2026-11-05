@@ -114,6 +114,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             setPendingState((p) => [e.approval, ...p.filter((x) => x.id !== e.approval.id)]);
             setState((s) => s && { ...s, pendingApprovals: s.pendingApprovals + 1 });
             break;
+          case "approval.updated":
+            setPendingState((p) => p.map((x) => (x.id === e.approval.id ? e.approval : x)));
+            break;
           case "approval.decided":
             setPendingState((p) => p.filter((x) => x.id !== e.approval.id));
             setState((s) => s && { ...s, pendingApprovals: Math.max(0, s.pendingApprovals - 1) });

@@ -62,6 +62,22 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const status = c.req.query("status") as "pending" | "approved" | "rejected" | "edited" | undefined;
     return c.json({ approvals: await jarvis.store.approvals.list(status) });
   });
+  // Save a change to the text while the item keeps waiting (nothing is sent).
+  api.put("/approvals/:id", async (c) => {
+    const body = z.object({ body: z.string().min(1).max(20000) }).safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "body required" }, 400);
+    const a = await jarvis.updateApproval(c.req.param("id"), body.data);
+    if (!a) return c.json({ error: "not found" }, 404);
+    return c.json({ approval: a });
+  });
+  // Ask the agent about its proposal; the answer lands on the card and may revise it.
+  api.post("/approvals/:id/ask", async (c) => {
+    const body = z.object({ question: z.string().min(1).max(4000) }).safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "question required" }, 400);
+    const a = await jarvis.askAboutApproval(c.req.param("id"), body.data.question);
+    if (!a) return c.json({ error: "not found" }, 404);
+    return c.json({ approval: a });
+  });
   api.post("/approvals/:id/:decision", async (c) => {
     const decision = c.req.param("decision");
     if (!["approve", "reject", "edit"].includes(decision)) return c.json({ error: "decision must be approve, reject or edit" }, 400);

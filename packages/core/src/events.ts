@@ -8,6 +8,7 @@ export type JarvisEvent =
   | { type: "chat.stream"; runId: string; agentId: string; delta: string }
   | { type: "approval.new"; approval: Approval }
   | { type: "approval.decided"; approval: Approval }
+  | { type: "approval.updated"; approval: Approval }
   | { type: "activity"; entry: ActivityEntry }
   | { type: "usage"; usage: UsageSummary }
   | { type: "system"; status: SystemStatus }
@@ -58,11 +59,21 @@ export interface Approval {
   title: string;
   body: string;
   payload?: Record<string, unknown>;
+  /** What the agent saw: who this is, what they last said (quoted, dated), the numbers behind the ask. */
+  context?: string;
+  /** Plain words for what happens the moment Phil approves. Computed from the payload's action, never by the agent. */
+  effect?: string;
+  /** Phil's questions about the proposal and the agent's answers. */
+  thread?: ApprovalMessage[];
+  /** Set once Phil saved a change to the text; the agent's original is kept here. */
+  original?: string;
   status: ApprovalStatus;
   decidedAt?: string;
   note?: string;
   runId?: string;
 }
+
+export interface ApprovalMessage { at: string; from: "phil" | "agent"; text: string }
 
 export interface ActivityEntry {
   id: string;

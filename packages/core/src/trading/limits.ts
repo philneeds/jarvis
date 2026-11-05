@@ -2,7 +2,7 @@ import { z } from "zod";
 import { bus, type Approval } from "../events.js";
 import type { Store } from "../store/types.js";
 import { defineTool, type ToolDef } from "../tools/index.js";
-import type { Executor, Jarvis } from "../jarvis/orchestrator.js";
+import type { Executor, Describer, Jarvis } from "../jarvis/orchestrator.js";
 
 /**
  * Mayne's hard limits: position size, daily loss and auto-stop apply even after Phil approves a trade.
@@ -158,6 +158,14 @@ export class TradingGuard {
       "trade.execute": this.wrap(async () => undefined),
       "trade.close": async (a) => { const p = a.payload as { positionId?: string; pnlUsd?: number }; if (!p.positionId) throw new Error("positionId is required"); const r = await this.close(p.positionId, Number(p.pnlUsd ?? 0)); return `Closed ${p.positionId} with $${Number(p.pnlUsd ?? 0).toFixed(2)}${r.stopped ? ` — AUTO-STOP: ${r.stopped}` : ""}.`; },
       "strategy.enable": async (a) => { const p = a.payload as { name?: string }; const list = await this.store.settings.get<{ name: string; enabledAt: string; approvalId: string }[]>("strategies", []); await this.store.settings.set("strategies", [...list.filter((s) => s.name !== p.name), { name: String(p.name ?? a.title), enabledAt: new Date(this.now()).toISOString(), approvalId: a.id }]); return `Strategy "${p.name ?? a.title}" enabled for Mayne, inside the hard limits.`; },
+    };
+  }
+
+  describe(): Record<string, Describer> {
+    return {
+      "trade.execute": (p) => `Opens a ${String(p.side ?? "long")} on ${String(p.symbol ?? "?")} for $${Number(p.sizeUsd ?? p.amount ?? 0)} (paper trading until a real exchange is connected). Mayne's hard limits are checked again at execution and can still refuse it.`,
+      "trade.close": (p) => `Closes position ${String(p.positionId ?? "?")} and books ${Number(p.pnlUsd ?? 0) >= 0 ? "a gain" : "a loss"} of $${Math.abs(Number(p.pnlUsd ?? 0)).toFixed(2)} to today's ledger.`,
+      "strategy.enable": (p) => `Lets Mayne trade the "${String(p.name ?? "")}" strategy from now on, inside the hard limits. No trade happens yet; each one is still sized and checked.`,
     };
   }
 

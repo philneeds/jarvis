@@ -1,6 +1,6 @@
 import type { ApprovalKind } from "../events.js";
 
-export interface ApprovalBlock { kind: ApprovalKind; title: string; body: string; payload?: Record<string, unknown> }
+export interface ApprovalBlock { kind: ApprovalKind; title: string; body: string; payload?: Record<string, unknown>; context?: string }
 export interface RememberBlock { scope: string; key: string; value: string }
 export interface MetricBlock { venture: string; key: string; value: number; at?: string }
 export interface RecordBlock { venture: string; kind: string; id?: string; title: string; status?: string; fields?: Record<string, unknown> }
@@ -26,7 +26,7 @@ export function extractBlocks(text: string): { text: string; approvals: Approval
       for (const it of items) {
         const o = it as Partial<ApprovalBlock>;
         if (!o || typeof o !== "object" || !o.title) continue;
-        approvals.push({ kind: KINDS.includes(o.kind as ApprovalKind) ? (o.kind as ApprovalKind) : "other", title: String(o.title), body: String(o.body ?? ""), payload: o.payload && typeof o.payload === "object" ? (o.payload as Record<string, unknown>) : undefined });
+        approvals.push({ kind: KINDS.includes(o.kind as ApprovalKind) ? (o.kind as ApprovalKind) : "other", title: String(o.title), body: String(o.body ?? ""), payload: o.payload && typeof o.payload === "object" ? (o.payload as Record<string, unknown>) : undefined, context: o.context ? String(o.context) : undefined });
       }
       return approvals.length ? `[Approval queued: ${approvals[approvals.length - 1]!.title}]` : _m;
     }

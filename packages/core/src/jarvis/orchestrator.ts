@@ -21,12 +21,17 @@ export interface JarvisOptions {
 
 /** Runs an approved action. Registered by the payload's `action` name; connectors add theirs. */
 export type Executor = (approval: Approval, jarvis: Jarvis) => Promise<string | void>;
+export type Describer = (payload: Record<string, unknown>, approval: Pick<Approval, "agentId" | "payload" | "kind">) => string;
+/** Which payload field holds the text Phil edits on the card, per action. */
+const TEXT_FIELD: Record<string, string> = { "gmail.send": "body", "x.post": "text", "x.reply": "text", "x.dm": "text" };
 
 export class Jarvis {
   readonly store: Store;
   readonly router: ModelRouter;
   private notify?: JarvisOptions["notify"];
   private executors = new Map<string, Executor>();
+  /** Plain words for what an action does with a given payload; shown to Phil before he approves. */
+  private describers = new Map<string, Describer>();
   /** Extra tools from connectors, by name. */
   readonly connectorTools = new Map<string, import("../tools/index.js").ToolDef>();
   private promptHints: string[] = [];
@@ -42,6 +47,7 @@ export class Jarvis {
       for (const k of keep) await this.store.memory.set({ scope: k.scope, key: k.key, value: k.value, source: a.agentId });
       return `Memory condensed: ${current.length} → ${keep.length} items.`;
     });
+    this.describers.set("memory.replace", (p) => `Jarvis's memory is replaced with the ${Array.isArray(p.keep) ? p.keep.length : "listed"} items above${typeof p.before === "number" ? `, dropping ${p.before - (Array.isArray(p.keep) ? p.keep.length : 0)}` : ""}. The old list is gone.`);
   }
 
   /** Checks run when an approval is requested; a failing check refuses it with a reason (used by Mayne's limits). */
@@ -52,10 +58,28 @@ export class Jarvis {
   onApproved(action: string, fn: Executor) { this.executors.set(action, fn); }
 
   /** Plug in a connector: its tools become available in agent settings, its actions run on approval. */
-  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor> }, hint?: string) {
+  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer> }, hint?: string) {
     for (const t of c.tools()) this.connectorTools.set(t.name, t);
     for (const [k, fn] of Object.entries(c.executors())) this.executors.set(k, fn);
+    for (const [k, fn] of Object.entries(c.describe?.() ?? {})) this.describers.set(k, fn);
     if (hint) this.promptHints.push(hint);
+  }
+
+  /** What approving does, in Phil's words, worked out from the payload rather than taken from the agent. */
+  effectOf(a: Pick<Approval, "agentId" | "payload" | "kind">): string {
+    const who = getAgent(a.agentId)?.name ?? a.agentId;
+    const action = (a.payload as { action?: unknown } | undefined)?.action;
+    if (typeof action !== "string") return `Nothing happens on its own: approving only records your decision. ${who} can't act on this one, so if you want it done, do it by hand or ask ${who} for a version HQ can send.`;
+    const d = this.describers.get(action);
+    if (!d) return this.executors.has(action) ? `Runs "${action}" with the details shown.` : `No connector handles "${action}" yet, so approving records your decision and nothing is sent or changed.`;
+    try { return d(a.payload ?? {}, a); } catch { return `Runs "${action}" with the details shown.`; }
+  }
+
+  /** Phil's edit on the card changes the thing that goes out, not just the description. */
+  private applyEdit(a: Pick<Approval, "payload" | "body">, body: string): { body: string; payload?: Record<string, unknown> } {
+    const action = (a.payload as { action?: unknown } | undefined)?.action;
+    const field = typeof action === "string" ? (TEXT_FIELD[action] ?? (action.startsWith("x.") ? "text" : undefined)) : undefined;
+    return { body, payload: field && a.payload ? { ...a.payload, [field]: body } : a.payload };
   }
 
   /** Every tool an agent could be given: built-in plus connectors. */
@@ -166,7 +190,7 @@ export class Jarvis {
   }
 
   /** Run one agent on a task with its persona, memory and safety rules; queue approvals and memories it emits. */
-  async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string; depth?: number } = {}) {
+  async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string; depth?: number; noBlocks?: boolean } = {}) {
     const memory = [...(await this.store.memory.list("phil")), ...(await this.store.memory.list(`venture:${agent.venture}`)), ...(await this.store.memory.list(`agent:${agent.id}`))];
     const cfg = await getAgentConfig(this.store, agent.id);
     const tools = this.allTools().filter((t) => cfg.tools.includes(t.name));
@@ -174,6 +198,7 @@ export class Jarvis {
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
     const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id) });
     if (r.blocked) return r;
+    if (opts.noBlocks) return r; // the caller reads the reply itself (approval Q&A)
     const { text, approvals, remember, metrics, records, handoffs, attention } = extractBlocks(r.text);
     await this.absorb(agent, approvals, remember, r.runId, metrics, records);
     for (const a of attention) await this.raiseAttention({ ...a, agentId: agent.id, source: { runId: r.runId } });
@@ -466,7 +491,7 @@ export class Jarvis {
         return refused;
       }
     }
-    const approval: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "pending", ...a };
+    const approval: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "pending", ...a, effect: a.effect ?? this.effectOf(a) };
     await this.store.approvals.add(approval);
     // Phil's per-agent rules: low-risk kinds under the dollar cap go through on their own, logged.
     const rules = (await getAgentConfig(this.store, a.agentId)).rules;
@@ -488,7 +513,18 @@ export class Jarvis {
   }
 
   async decide(id: string, decision: "approved" | "rejected" | "edited", note?: string, edits?: { body?: string; payload?: Record<string, unknown> }): Promise<Approval | undefined> {
-    const a = await this.store.approvals.update(id, { status: decision, decidedAt: new Date().toISOString(), note, ...(edits ?? {}) });
+    const before = await this.store.approvals.get(id);
+    if (!before) return undefined;
+    if (before.status !== "pending") return before;
+    const patch: Partial<Approval> = { status: decision, decidedAt: new Date().toISOString(), note };
+    if (edits?.payload) patch.payload = edits.payload;
+    if (edits?.body !== undefined && edits.body !== before.body) {
+      Object.assign(patch, this.applyEdit({ body: before.body, payload: patch.payload ?? before.payload }, edits.body));
+      patch.original = before.original ?? before.body;
+    }
+    if (decision === "approved" && (before.original !== undefined || patch.original !== undefined)) decision = "edited";
+    patch.status = decision;
+    const a = await this.store.approvals.update(id, patch);
     if (!a) return undefined;
     const stillWaiting = (await this.store.approvals.list("pending")).some((p) => p.agentId === a.agentId);
     if (!stillWaiting) await this.router.setStatus(a.agentId, "idle");
@@ -516,6 +552,59 @@ export class Jarvis {
     if (outcome) await this.store.approvals.update(a.id, { note: [a.note, outcome].filter(Boolean).join(" · ") });
     await this.say({ role: "system", text: `${decision === "approved" ? "Approved" : decision === "rejected" ? "Rejected" : "Edited and approved"}: ${a.title} (${getAgent(a.agentId)?.name ?? a.agentId})${outcome ? ` — ${outcome}` : ""}` });
     return { ...a, note: outcome ? [a.note, outcome].filter(Boolean).join(" · ") : a.note };
+  }
+
+  /** Save Phil's change to the text while the item keeps waiting; the agent's original is kept. */
+  async updateApproval(id: string, edits: { body: string }): Promise<Approval | undefined> {
+    const a = await this.store.approvals.get(id);
+    if (!a || a.status !== "pending") return a;
+    const applied = this.applyEdit(a, edits.body);
+    const next = await this.store.approvals.update(id, { ...applied, original: a.original ?? a.body, effect: this.effectOf({ ...a, payload: applied.payload }) });
+    if (next) bus.emitEvent({ type: "approval.updated", approval: next });
+    return next;
+  }
+
+  /** Phil asks the agent about a waiting proposal; the agent answers on the card and may revise it. */
+  async askAboutApproval(id: string, question: string): Promise<Approval | undefined> {
+    const a = await this.store.approvals.get(id);
+    if (!a || a.status !== "pending") return a;
+    const agent = getAgent(a.agentId);
+    if (!agent) return a;
+    const thread = [...(a.thread ?? []), { at: new Date().toISOString(), from: "phil" as const, text: question }];
+    await this.store.approvals.update(id, { thread });
+    bus.emitEvent({ type: "approval.updated", approval: { ...a, thread } });
+    const prior = (a.thread ?? []).map((m) => `${m.from === "phil" ? "Phil" : agent.name}: ${m.text}`).join("\n");
+    const task = [
+      `Phil has a question about a proposal of yours that is waiting for his approval. Answer it directly and briefly, in plain words, using your tools if you need to check something.`,
+      `Proposal "${a.title}" (${a.kind}):\n${a.body}`,
+      a.context ? `What you had seen:\n${a.context}` : "",
+      a.payload ? `Payload: ${JSON.stringify(a.payload).slice(0, 3000)}` : "",
+      prior ? `Earlier on this proposal:\n${prior}` : "",
+      `Phil asks: ${question}`,
+      `If his question means the proposal should change, put the full revised version in a fenced block tagged "revise" with JSON {"title":"...","body":"...","payload":{...},"context":"..."} (same shape as an approval block, every field complete) and say in one line what you changed. Do not queue a new approval block; the waiting one is updated in place. Never say it was sent.`,
+    ].filter(Boolean).join("\n\n");
+    const r = await this.runAgent(agent, task, { direct: true, from: "Phil (about a waiting approval)", noBlocks: true });
+    const answerText = r.blocked ? `(${agent.name} did not run: ${r.blocked})` : r.text;
+    const m = answerText.match(/```revise\s*\n([\s\S]*?)```/);
+    const patch: Partial<Approval> = {};
+    let answer = answerText.replace(/```revise\s*\n[\s\S]*?```/g, "").replace(/\n{3,}/g, "\n\n").trim();
+    if (m) {
+      try {
+        const o = JSON.parse(m[1]!) as { title?: unknown; body?: unknown; payload?: unknown; context?: unknown };
+        if (typeof o.body === "string" && o.body.trim()) patch.body = o.body;
+        if (typeof o.title === "string" && o.title.trim()) patch.title = o.title;
+        if (o.payload && typeof o.payload === "object") patch.payload = o.payload as Record<string, unknown>;
+        if (typeof o.context === "string" && o.context.trim()) patch.context = o.context;
+        if (patch.body || patch.payload) { patch.original = a.original ?? a.body; patch.effect = this.effectOf({ ...a, payload: patch.payload ?? a.payload }); }
+        answer = answer || "Revised as above.";
+      } catch { answer += "\n\n(The revision could not be read; the proposal is unchanged.)"; }
+    }
+    const current = await this.store.approvals.get(id);
+    if (!current || current.status !== "pending") return current;
+    const next = await this.store.approvals.update(id, { ...patch, thread: [...(current.thread ?? []), { at: new Date().toISOString(), from: "agent", text: answer || "(no answer)" }] });
+    await this.router.log(agent.id, "approval", `${agent.name} answered Phil on "${a.title}"${m ? " and revised it" : ""}`, r.runId, { approvalId: id, question });
+    if (next) bus.emitEvent({ type: "approval.updated", approval: next });
+    return next;
   }
 
   // ---- Status -------------------------------------------------------------

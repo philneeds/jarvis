@@ -51,7 +51,7 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
     },
     approvals: {
       async add(a) {
-        await db.insert(t.approvals).values({ id: a.id, at: new Date(a.at), agentId: a.agentId, kind: a.kind, title: a.title, body: a.body, payload: a.payload, status: a.status, runId: a.runId });
+        await db.insert(t.approvals).values({ id: a.id, at: new Date(a.at), agentId: a.agentId, kind: a.kind, title: a.title, body: a.body, payload: a.payload, context: a.context, effect: a.effect, thread: a.thread, original: a.original, status: a.status, decidedAt: date(a.decidedAt), note: a.note, runId: a.runId });
       },
       async list(status) {
         const rows = await db.select().from(t.approvals).where(status ? eq(t.approvals.status, status) : undefined).orderBy(desc(t.approvals.at)).limit(500);
@@ -62,7 +62,7 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
         return r ? toApproval(r) : undefined;
       },
       async update(id, p) {
-        const rows = await db.update(t.approvals).set({ status: p.status, decidedAt: date(p.decidedAt), note: p.note, body: p.body, payload: p.payload }).where(eq(t.approvals.id, id)).returning();
+        const rows = await db.update(t.approvals).set({ status: p.status, decidedAt: date(p.decidedAt), note: p.note, body: p.body, payload: p.payload, context: p.context, effect: p.effect, thread: p.thread, original: p.original }).where(eq(t.approvals.id, id)).returning();
         return rows[0] ? toApproval(rows[0]) : undefined;
       },
     },
@@ -143,6 +143,6 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
 const toMetric = (r: typeof t.metrics.$inferSelect): MetricPoint => ({ id: r.id, venture: r.venture, key: r.key, at: r.at.toISOString(), value: r.value, source: r.source ?? undefined });
 const toRecord = (r: typeof t.records.$inferSelect): RecordItem => ({ id: r.id, venture: r.venture, kind: r.kind, title: r.title, status: r.status, fields: r.fields ?? {}, source: r.source ?? undefined, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString() });
 
-const toApproval = (r: typeof t.approvals.$inferSelect): Approval => ({ id: r.id, at: r.at.toISOString(), agentId: r.agentId, kind: r.kind as Approval["kind"], title: r.title, body: r.body, payload: r.payload ?? undefined, status: r.status as Approval["status"], decidedAt: iso(r.decidedAt), note: r.note ?? undefined, runId: r.runId ?? undefined });
+const toApproval = (r: typeof t.approvals.$inferSelect): Approval => ({ id: r.id, at: r.at.toISOString(), agentId: r.agentId, kind: r.kind as Approval["kind"], title: r.title, body: r.body, payload: r.payload ?? undefined, context: r.context ?? undefined, effect: r.effect ?? undefined, thread: r.thread ?? undefined, original: r.original ?? undefined, status: r.status as Approval["status"], decidedAt: iso(r.decidedAt), note: r.note ?? undefined, runId: r.runId ?? undefined });
 const toMemory = (r: typeof t.memory.$inferSelect): MemoryItem => ({ scope: r.scope, key: r.key, value: r.value, source: r.source ?? undefined, updatedAt: r.updatedAt.toISOString() });
 const toState = (r: typeof t.agentState.$inferSelect): AgentStateRow => ({ id: r.id, status: r.status, paused: r.paused, lastRunAt: iso(r.lastRunAt), lastRunId: r.lastRunId ?? undefined, lastError: r.lastError ?? undefined, modelOverride: r.modelOverride ?? undefined, detail: r.detail ?? undefined });

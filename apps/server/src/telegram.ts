@@ -45,7 +45,7 @@ export class TelegramBot {
 
   private async announce(a: Approval) {
     const who = getAgent(a.agentId)?.name ?? a.agentId;
-    await this.send(`Approval · ${who} · ${a.kind}\n${a.title}\n\n${a.body.slice(0, 1500)}`, {
+    await this.send(`Approval · ${who} · ${a.kind}\n${a.title}\n\n${a.body.slice(0, 1500)}${a.context ? `\n\nContext: ${a.context.slice(0, 800)}` : ""}${a.effect ? `\n\nIf you approve: ${a.effect}` : ""}\n\nTo ask ${who} about it or edit the text, open Approvals in HQ.`, {
       reply_markup: { inline_keyboard: [[{ text: "✅ Approve", callback_data: `apr:${a.id}:approved` }, { text: "❌ Reject", callback_data: `apr:${a.id}:rejected` }]] },
     });
   }
