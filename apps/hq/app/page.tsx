@@ -15,6 +15,18 @@ import { api, timeAgo } from "@/lib/api";
 
 const FILLERS = ["One moment.", "Let me look.", "On it.", "Checking."];
 
+/** True from the lg breakpoint up, where the home screen runs three columns. */
+function useWide() {
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const on = () => setWide(mq.matches);
+    on(); mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return wide;
+}
+
 export default function HomePage() {
   const { state, pending, attention, activity, messages, send: submit } = useLive();
   const [on, setOn] = useState(true);
@@ -22,6 +34,7 @@ export default function HomePage() {
   const [busy, setBusy] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
   const [micMenu, setMicMenu] = useState(false);
+  const wide = useWide();
   const [heardText, setHeardText] = useState<string>();
   const voice = useVoice({
     onHeard: async (heard) => {
@@ -86,9 +99,10 @@ export default function HomePage() {
   const coreLabel = coreState === "paused" ? "PAUSED" : coreState === "speaking" ? "SPEAKING" : voice.hearing ? "HEARING YOU" : voice.transcribing ? "GOT IT" : coreState === "thinking" ? "THINKING" : voice.listening ? "LISTENING" : voice.conversation ? "READY" : "STANDING BY";
   const micLabel = voice.mics.find((m) => m.id === voice.micId)?.label ?? (voice.micId ? "saved mic" : "default mic");
 
+  const orb = <Core state={coreState} level={voice.level} label={coreLabel} />;
   const core = (
     <div className="flex flex-col items-center gap-4 w-full max-w-2xl">
-      <Core state={coreState} level={voice.level} label={coreLabel} />
+      {!wide && orb}
       {voice.error && <p className="m-0 text-center text-[11px]" style={{ color: "var(--red)" }}>{voice.error}</p>}
       <Transcript pendingText={heardText ?? (voice.interim || undefined)} />
       <form onSubmit={send} className="flex gap-1.5 w-full">
@@ -124,8 +138,8 @@ export default function HomePage() {
         {on ? (
           <>
             <div className="corner tl" /><div className="corner tr" /><div className="corner bl" /><div className="corner br" />
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex flex-col gap-2 flex-1 md:flex-none md:w-72">
+            <div className="flex items-start justify-between gap-4 lg:grid lg:grid-cols-[300px_1fr_300px] lg:gap-6">
+              <div className="flex flex-col gap-2 flex-1 md:flex-none md:w-72 lg:w-auto">
                 <div className="flex items-baseline gap-3 text-[11px] tracking-[0.14em] whitespace-nowrap">
                   <span className="display font-bold text-lg tracking-[0.08em]" style={{ color: "var(--ink-strong)" }}>LV {Math.max(1, Math.floor((activity.length + messages.length) / 50) + (state?.status.phase ?? 0))}</span>
                   <span style={{ color: "var(--muted)" }}>Phase {state?.status.phase ?? 0}</span>
@@ -134,6 +148,7 @@ export default function HomePage() {
                 <div className="bar"><i style={{ width: `${Math.min(100, ((activity.length + messages.length) % 50) * 2)}%` }} /></div>
                 <span className="text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>{state?.status.text ?? "connecting"}</span>
               </div>
+              {wide && <div className="flex justify-center">{orb}</div>}
               <Clock since={since} />
             </div>
 
