@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Store } from "../store/types.js";
 import { AGENTS, getAgent } from "../registry/index.js";
 import { VENTURE_DASH } from "../ventures/dashboards.js";
+import { usageSummary } from "../usage/caps.js";
 
 /**
  * Tools agents can call. Provider-neutral: the Claude provider exposes them as an in-process MCP server
@@ -46,6 +47,42 @@ export function buildTools(): ToolDef[] {
         const pending = await store.approvals.list("pending");
         const lines = states.filter((s) => s.status !== "idle" || s.paused).map((s) => `${getAgent(s.id)?.name ?? s.id}: ${s.paused ? "paused" : s.status}${s.detail ? ` (${s.detail})` : ""}`);
         return `${lines.length ? lines.join("\n") : "Everyone idle."}\n${pending.length} approval(s) waiting${pending.length ? ": " + pending.map((p) => p.title).join("; ") : ""}.`;
+      },
+    }),
+    defineTool({
+      name: "web_health",
+      description: "How the web did over the last N days (default 7): runs, errors and blocked runs per agent, the slowest agents, rejected and stale approvals, plan usage, and open items waiting on Phil. Use it for reviews and improvement proposals.",
+      schema: { days: z.number().int().min(1).max(30).optional() },
+      async handler({ days }, { store }) {
+        const since = Date.now() - (days ?? 7) * 86_400_000;
+        const rows = (await store.activity.list({ limit: 5000 })).filter((r) => Date.parse(r.at) >= since);
+        const per = new Map<string, { runs: number; secs: number[]; errors: string[]; blocked: string[] }>();
+        const get = (id: string) => per.get(id) ?? (per.set(id, { runs: 0, secs: [], errors: [], blocked: [] }), per.get(id)!);
+        for (const r of rows) {
+          const a = get(r.agentId);
+          if (r.kind === "run") { a.runs++; const m = r.summary.match(/ in ([\d.]+)s$/); if (m) a.secs.push(Number(m[1])); }
+          else if (r.kind === "error") a.errors.push(r.summary.slice(0, 160));
+          else if (r.kind === "system" && / did not run: /.test(r.summary)) a.blocked.push(r.summary.replace(/^.*? did not run: /, "").slice(0, 120));
+        }
+        const name = (id: string) => getAgent(id)?.name ?? id;
+        const avg = (xs: number[]) => (xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : 0);
+        const lines: string[] = [`Last ${days ?? 7} days.`];
+        const active = [...per.entries()].filter(([, v]) => v.runs || v.errors.length || v.blocked.length).sort((x, y) => y[1].runs - x[1].runs);
+        lines.push(`Runs by agent: ${active.map(([id, v]) => `${name(id)} ${v.runs}`).join(", ") || "none"}.`);
+        const slow = active.filter(([, v]) => v.secs.length).map(([id, v]) => [id, avg(v.secs)] as const).sort((x, y) => y[1] - x[1]).slice(0, 5);
+        if (slow.length) lines.push(`Slowest (average): ${slow.map(([id, s]) => `${name(id)} ${s.toFixed(0)}s`).join(", ")}.`);
+        const errs = active.filter(([, v]) => v.errors.length);
+        lines.push(errs.length ? `Errors:\n${errs.map(([id, v]) => `- ${name(id)} (${v.errors.length}): ${v.errors[v.errors.length - 1]}`).join("\n")}` : "Errors: none.");
+        const blocked = active.filter(([, v]) => v.blocked.length);
+        if (blocked.length) lines.push(`Didn't run:\n${blocked.map(([id, v]) => `- ${name(id)} (${v.blocked.length}): ${v.blocked[v.blocked.length - 1]}`).join("\n")}`);
+        const appr = await store.approvals.list();
+        const decided = appr.filter((a) => a.decidedAt && Date.parse(a.decidedAt) >= since);
+        const rejected = decided.filter((a) => a.status === "rejected");
+        const stale = appr.filter((a) => a.status === "pending" && Date.now() - Date.parse(a.at) > 3 * 86_400_000);
+        lines.push(`Approvals decided: ${decided.length}, rejected ${rejected.length}${rejected.length ? ` (${[...new Set(rejected.map((a) => name(a.agentId)))].join(", ")})` : ""}; waiting over 3 days: ${stale.length}${stale.length ? ` (${stale.map((a) => a.title).slice(0, 5).join("; ")})` : ""}.`);
+        const usage = await usageSummary(store);
+        lines.push(`Plan usage this window: ${usage.plans.filter((p) => p.runs).map((p) => `${p.label} ${(p.used * 100).toFixed(0)}% (${p.runs} runs)`).join(", ") || "nothing used"}.`);
+        return lines.join("\n");
       },
     }),
     defineTool({

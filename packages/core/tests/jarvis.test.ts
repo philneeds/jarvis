@@ -351,3 +351,19 @@ test("Monica's rule: internal work goes through on its own, anything outbound wa
   for (const a of [withGuests, invite, email, trash, huge]) assert.equal(a.status, "pending", `${a.title} waits for Phil`);
   assert.deepEqual(done.sort(), ["Archive promos", "Move gym to 7am"]);
 });
+
+test("web_health summarises the week for Einstein: runs, errors, blocked runs, approvals", async () => {
+  const { jarvis, store } = make();
+  await store.init();
+  await jarvis.runAgent(getAgent("stella")!, "status", { direct: true });
+  await jarvis.router.log("stella", "error", "Stella failed: timeout");
+  await jarvis.router.log("lucas", "system", "Lucas did not run: grok CLI missing");
+  const a = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Email Dana", body: "x" });
+  await jarvis.decide(a.id, "rejected");
+  const { TOOLS } = await import("../src/tools/index.js");
+  const out = await TOOLS.find((t) => t.name === "web_health")!.handler({}, { store, agentId: "einstein" });
+  assert.match(out, /Runs by agent: .*Stella 1/);
+  assert.match(out, /Stella \(1\): Stella failed: timeout/);
+  assert.match(out, /Lucas \(1\): grok CLI missing/);
+  assert.match(out, /rejected 1 \(Stephanie\)/);
+});

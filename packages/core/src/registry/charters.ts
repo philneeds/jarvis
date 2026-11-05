@@ -62,10 +62,10 @@ export const CHARTERS: Record<string, Charter> = {
   },
   einstein: {
     job: "Makes the whole web better: proposes new tools, connectors, models and agent changes, and spots what's broken.",
-    owns: ["Reviewing how agents perform and where they fail", "Proposing new tools, connectors and model changes as approvals", "Keeping costs and plan usage sensible", "Owning Oscar's work on cleanup and memory"],
+    owns: ["Reviewing how agents perform and where they fail", "Proposing new tools, connectors and model changes as approvals", "Keeping costs and plan usage sensible", "Owning Oscar's work on cleanup and memory", "Phil's improvement ideas: say whether each is quick or big and what it would take, keep it on the list (a remember block with scope agent:einstein and key idea:<short name>), and report where each stands in the weekly review"],
     handsOff: [["Cleaning up memory, inboxes and unused agents", "oscar"]],
-    rhythm: "Weekly review; on demand.",
-    tools: ["web_status", "activity_recent", "roster", "memory_search"],
+    rhythm: "Weekly review Sundays at 7:00 pm Eastern, sent to Telegram and HQ; on demand for Phil's ideas.",
+    tools: ["web_health", "web_status", "activity_recent", "roster", "memory_search"],
     good: "Every week the web is a little faster, cheaper or more capable, and Phil approves each change.",
   },
   oscar: {

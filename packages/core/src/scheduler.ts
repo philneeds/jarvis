@@ -20,6 +20,7 @@ export interface Schedule {
 export const SCHEDULES: Schedule[] = [
   { id: "daily-brief", agentId: "jarvis", task: "brief", when: process.env.BRIEF_AT ? `daily@${process.env.BRIEF_AT}` : "daily@07:00", phase: 0 },
   { id: "oscar-condense", agentId: "oscar", task: "condense", when: "daily@03:30", phase: 0 },
+  { id: "einstein-weekly", agentId: "einstein", task: "Weekly review for Phil, short enough to read on his phone. Call web_health for the last 7 days. Then: the three changes you'd make this week and why (errors to fix, slow or idle agents, usage, approvals Phil keeps rejecting); where each of Phil's ideas on your list stands; anything to cut, for Oscar. Put each change you want made as an approval (kind config) so Phil can say yes or no.", when: "weekly:sun@19:00", phase: 0, push: true },
   { id: "oscar-inbox", agentId: "oscar", task: "Weekly inbox cleanup with Monica. For each of Phil's personal Google accounts: use gmail_senders on 'in:inbox older_than:14d' and 'category:promotions older_than:30d', then propose ONE archive plan per account as an approval (gmail.archive by query, with the match count in the body). Never trash. Keep anything from a real person or about money, travel, health or a job.", when: "weekly:sun@04:00", phase: 0 },
   { id: "monica-day", agentId: "monica", task: "Lay out Phil's day for him to read on his phone: what's on the calendar across his accounts, conflicts, what's unscheduled, what to protect. Propose any calendar change as an approval; change nothing yourself.", when: "daily@06:45", phase: 0, push: true },
   { id: "stella-leads", agentId: "stella", task: "Review new leads and open jobs for JD PM; flag anything waiting on a customer reply.", when: "daily@06:50", phase: 1 },
@@ -96,7 +97,7 @@ export class Scheduler {
           const r = await this.jarvis.runAgent(agent, s.task, { direct: false, from: "Scheduler" });
           if (!r.blocked) {
             await this.jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId });
-            if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: s.id === "monica-day" ? "Your day" : `${agent.name} report`, text: r.text, at: new Date().toISOString() });
+            if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: s.id === "monica-day" ? "Your day" : s.id === "einstein-weekly" ? "Einstein's weekly review" : `${agent.name} report`, text: r.text, at: new Date().toISOString() });
           }
         }
       } catch (e) {
