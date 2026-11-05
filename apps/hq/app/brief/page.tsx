@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
 import { Md } from "@/components/Md";
 import { api, post, fmtTime } from "@/lib/api";
+import { useLive } from "@/lib/live";
 
 interface Brief { at: string; text: string }
 
@@ -13,6 +14,8 @@ export default function BriefPage() {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [err, setErr] = useState<string>();
+  const { state } = useLive();
+  const at = state?.schedules.find((s) => s.id === "daily-brief")?.when.replace(/^daily@/, "");
 
   const load = () => api<{ brief: Brief | null; history: Brief[] }>("/api/brief").then((r) => { setBrief(r.brief); setHistory(r.history); }).catch((e) => setErr((e as Error).message));
   useEffect(() => { void load(); }, []);
@@ -28,7 +31,7 @@ export default function BriefPage() {
         </div>
         <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>Jarvis&apos;s morning rundown: Monica&apos;s day, Munger&apos;s money, Stella&apos;s leads, Mantis&apos;s markets, Doc&apos;s health. Runs on its own every morning (BRIEF_AT); leads that aren&apos;t live yet say so.</p>
         {err && <p className="m-0 text-[12px]" style={{ color: "var(--red)" }}>{err}</p>}
-        {brief ? <article className="card text-[13px] leading-relaxed whitespace-pre-wrap"><Md text={brief.text} /></article> : <div className="card text-center py-10" style={{ color: "var(--muted)" }}>No brief yet. Run one.</div>}
+        {brief ? <article className="card text-[13px] leading-relaxed whitespace-pre-wrap"><Md text={brief.text} /></article> : <div className="card text-center py-10" style={{ color: "var(--muted)" }}>No brief yet. Jarvis writes one every morning{at ? ` at ${at}` : ""}; press Run now for today&apos;s.</div>}
         {history.length > 1 && (
           <section className="flex flex-col gap-2" aria-label="Earlier briefs">
             <span className="label">Earlier</span>

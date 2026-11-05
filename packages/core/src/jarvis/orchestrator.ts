@@ -546,7 +546,8 @@ export class Jarvis {
     }));
     const records = await Promise.all(dash.records.map(async (k) => ({ ...k, items: await this.store.records.list(venture, k.kind) })));
     const pending = (await this.store.approvals.list("pending")).filter((a) => ids.has(a.agentId));
-    const activity = (await this.store.activity.list({ limit: 300 })).filter((e) => ids.has(e.agentId)).slice(0, 25);
+    // Hand-offs, approvals, errors and changes; the per-run lines would crowd them out.
+    const activity = (await this.store.activity.list({ limit: 300, exclude: ["run"] })).filter((e) => ids.has(e.agentId)).slice(0, 25);
     return { venture: v, blurb: dash.blurb, agents, metrics, records, pending, activity };
   }
 

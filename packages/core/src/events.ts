@@ -92,11 +92,14 @@ export interface Approval {
 
 export interface ApprovalMessage { at: string; from: "phil" | "agent"; text: string }
 
+export const ACTIVITY_KINDS = ["run", "delegate", "approval", "decision", "schedule", "system", "error", "memory"] as const;
+
 export interface ActivityEntry {
   id: string;
   at: string;
   agentId: string;
-  kind: "run" | "delegate" | "approval" | "decision" | "schedule" | "system" | "error" | "memory";
+  /** "run" is one line per model call: useful for tracing, noise for reading. HQ hides it unless asked. */
+  kind: (typeof ACTIVITY_KINDS)[number];
   summary: string;
   detail?: Record<string, unknown>;
   runId?: string;

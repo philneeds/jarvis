@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, notInArray, or, sql } from "drizzle-orm";
 import { createDb, type Db } from "../db/client.js";
 import * as t from "../db/schema.js";
 import type { ActivityEntry, Approval, ChatMessage } from "../events.js";
@@ -41,9 +41,10 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
       async add(e) {
         await db.insert(t.activityLog).values({ id: e.id, at: new Date(e.at), agentId: e.agentId, kind: e.kind, summary: e.summary, detail: e.detail, runId: e.runId });
       },
-      async list({ q, agentId, limit = 200 } = {}) {
+      async list({ q, agentId, limit = 200, exclude } = {}) {
         const conds = [];
         if (agentId) conds.push(eq(t.activityLog.agentId, agentId));
+        if (exclude?.length) conds.push(notInArray(t.activityLog.kind, exclude));
         if (q) conds.push(or(ilike(t.activityLog.summary, `%${q}%`), ilike(t.activityLog.agentId, `%${q}%`), sql`${t.activityLog.detail}::text ilike ${"%" + q + "%"}`));
         const rows = await db.select().from(t.activityLog).where(conds.length ? and(...conds) : undefined).orderBy(desc(t.activityLog.at)).limit(limit);
         return rows.map((r) => ({ id: r.id, at: r.at.toISOString(), agentId: r.agentId, kind: r.kind as ActivityEntry["kind"], summary: r.summary, detail: r.detail ?? undefined, runId: r.runId ?? undefined }));

@@ -150,12 +150,21 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; a
 .tower.lit span { color: #fff; }
 
 .node { cursor: pointer; }
-.node ellipse { fill: #0B1E4D; stroke-width: 2; transition: stroke-width 0.15s; }
+.node .bub { fill: #0B1E4D; stroke-width: 2; transition: stroke-width 0.15s; }
 .node text { font-family: var(--font-display); font-weight: 700; fill: var(--ink-strong); text-anchor: middle; pointer-events: none; }
 .node .sub { font-family: var(--font-mono); font-weight: 500; fill: var(--muted); }
-.node.sel ellipse { stroke-width: 4; }
-.node.off { opacity: 0.35; }
+.node:hover .bub, .node:focus-visible .bub { stroke-width: 3; }
+.node:focus { outline: none; }
+.node:focus-visible .bub { stroke: var(--ink-bright); }
+.node.sel .bub { stroke-width: 4; }
+.node.core-node .bub { fill: color-mix(in srgb, var(--accent) 18%, #0B1E4D); stroke-width: 3; }
+/* Not live in this phase: dashed and dimmed, but the name stays readable. */
+.node.off .bub { fill: #08173D; stroke-dasharray: 4 3; stroke-opacity: 0.6; }
+.node.off text { fill: var(--muted); }
+.node.off .sub { fill: var(--dim); }
+.node.off .st { opacity: 0.6; }
 .link { fill: none; stroke: rgba(124, 196, 255, 0.35); stroke-width: 1.4; }
+.link.inner { stroke: rgba(124, 196, 255, 0.2); stroke-width: 1; }
 .xlink { fill: none; stroke: rgba(124, 196, 255, 0.22); stroke-width: 1.2; stroke-dasharray: 5 5; }
 .hull { stroke-width: 1.2; }
 .hull-label { font-family: var(--font-mono); font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; text-anchor: middle; pointer-events: none; }

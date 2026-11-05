@@ -48,6 +48,8 @@ test("login gates the API", async () => {
 
   const act = await call("/api/activity?q=stella", { cookie });
   assert.ok(((await act.json()) as { entries: unknown[] }).entries.length > 0);
+  const quiet = (await (await call("/api/activity?exclude=run,bogus", { cookie })).json()) as { entries: { kind: string }[] };
+  assert.ok(quiet.entries.length > 0 && quiet.entries.every((e) => e.kind !== "run"));
 });
 
 test("agent settings round-trip and passkey registration needs a session", async () => {

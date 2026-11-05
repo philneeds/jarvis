@@ -67,7 +67,8 @@ export interface Store {
   };
   activity: {
     add(e: ActivityEntry): Promise<void>;
-    list(opts?: { q?: string; agentId?: string; limit?: number }): Promise<ActivityEntry[]>;
+    /** Newest first. `exclude` drops kinds, e.g. ["run"] for only the entries worth reading. */
+    list(opts?: { q?: string; agentId?: string; limit?: number; exclude?: ActivityEntry["kind"][] }): Promise<ActivityEntry[]>;
   };
   approvals: {
     add(a: Approval): Promise<void>;

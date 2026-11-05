@@ -52,10 +52,10 @@ export function memoryStore(file?: string): Store {
     },
     activity: {
       async add(e) { s.activity.push(e); if (s.activity.length > 20000) s.activity.splice(0, s.activity.length - 20000); save(); },
-      async list({ q, agentId, limit = 200 } = {}) {
+      async list({ q, agentId, limit = 200, exclude } = {}) {
         const ql = q?.toLowerCase();
         return s.activity
-          .filter((e) => (!agentId || e.agentId === agentId) && (!ql || e.summary.toLowerCase().includes(ql) || e.agentId.includes(ql) || JSON.stringify(e.detail ?? {}).toLowerCase().includes(ql)))
+          .filter((e) => (!agentId || e.agentId === agentId) && !exclude?.includes(e.kind) && (!ql || e.summary.toLowerCase().includes(ql) || e.agentId.includes(ql) || JSON.stringify(e.detail ?? {}).toLowerCase().includes(ql)))
           .sort(byAtDesc)
           .slice(0, limit);
       },

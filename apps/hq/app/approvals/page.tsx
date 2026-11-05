@@ -104,7 +104,7 @@ export default function ApprovalsPage() {
           </div>
         )}
         {tab === "decided" && decided.length > 0 && filtered.length === 0 && <div className="card text-center py-6" style={{ color: "var(--muted)" }}>No decisions match these filters.</div>}
-        {list.length === 0 && (tab === "pending" || decided.length === 0) && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>{tab === "pending" ? "Nothing waiting for you." : "No decisions yet."}</div>}
+        {list.length === 0 && (tab === "pending" || decided.length === 0) && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>{tab === "pending" ? "Nothing waiting for you. When an agent wants to send, post or spend, the draft lands here first." : "No decisions yet. Drafts you approve, edit or reject are kept here."}</div>}
         {list.map((a) => {
           const v = venture(a.agentId);
           const act = action(a);

@@ -8,6 +8,7 @@ import { MayneLimits } from "@/components/MayneLimits";
 import { useLive } from "@/lib/live";
 import { useUndo } from "@/lib/undo";
 import { api, fmtTime, timeAgo } from "@/lib/api";
+import { meaningful } from "@/lib/activity";
 import type { Venture, AgentLive, MetricDef, RecordKindDef, Approval, ActivityEntry } from "@/lib/types";
 
 interface Dash {
@@ -82,6 +83,8 @@ export default function VenturePage({ params }: { params: Promise<{ id: string }
 
   if (!d) return <Shell><div className="p-6" style={{ color: err ? "var(--red)" : "var(--muted)" }}>{err ?? "Loading…"}</div></Shell>;
   const c = d.venture.color;
+  const lead = d.agents.find((a) => a.id === d.venture.lead) ?? d.agents[0];
+  const recent = d.activity.filter(meaningful);
   const fmtField = (v: unknown, type?: string) => v === undefined || v === "" ? "" : type === "money" ? fmtMetric(Number(v), "$") : String(v);
 
   return (
@@ -149,7 +152,7 @@ export default function VenturePage({ params }: { params: Promise<{ id: string }
                 <div className="flex gap-2 justify-end"><button className="btn btn-sm" onClick={() => setEditing(null)}>Cancel</button><button className="btn btn-sm btn-primary" disabled={busy || !draft.title.trim()} onClick={saveRecord}>Save</button></div>
               </div>
             ) : null}
-            {k.items.length === 0 && editing !== `new:${k.kind}` && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing here yet. {k.label.includes("(") ? k.label.slice(k.label.indexOf("(") + 1, -1) : "An agent"} adds these as they work, or add one.</span>}
+            {k.items.length === 0 && editing !== `new:${k.kind}` && <span className="text-[12px]" style={{ color: "var(--muted)" }}>No {k.label.replace(/\s*\(.*\)$/, "").toLowerCase()} yet. {k.label.includes("(") ? k.label.slice(k.label.indexOf("(") + 1, -1) : "The team"} adds them as they work, or press Add.</span>}
             {k.items.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="tbl"><thead><tr><th>Title</th><th>Status</th>{k.fields.map((f) => <th key={f.key}>{f.label}</th>)}<th>Updated</th><th></th></tr></thead>
@@ -182,11 +185,11 @@ export default function VenturePage({ params }: { params: Promise<{ id: string }
           </section>
           <section className="card flex flex-col gap-2" aria-label="Waiting on you">
             <span className="label label-amber">Waiting on you · {d.pending.length}</span>
-            {d.pending.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing.</span>}
+            {d.pending.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing waiting. When this team wants to send, post or spend, the draft lands here first.</span>}
             {d.pending.map((p) => <Link key={p.id} href="/approvals" className="text-[12px]" style={{ color: "var(--ink-bright)" }}><span style={{ color: "var(--amber)" }}>{p.kind}</span> · {p.title}</Link>)}
             <span className="label mt-3" style={{ color: c }}>Recent</span>
-            {d.activity.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Quiet.</span>}
-            {d.activity.slice(0, 10).map((e) => <div key={e.id} className="text-[12px] flex gap-2"><span className="whitespace-nowrap" style={{ color: "var(--dim)" }}>{fmtTime(e.at)}</span><span>{e.summary}</span></div>)}
+            {recent.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing yet. Hand-offs, approvals and board changes show here{lead ? <>; <Link href={`/command?say=${encodeURIComponent(`@${lead.id} `)}`}>give {lead.name} a task</Link></> : ""}.</span>}
+            {recent.slice(0, 10).map((e) => <div key={e.id} className="text-[12px] flex gap-2"><span className="whitespace-nowrap" style={{ color: "var(--dim)" }}>{fmtTime(e.at)}</span><span>{e.summary}</span></div>)}
             {state && <Link href={`/activity?agent=`} className="text-[11px] tracking-[0.14em] uppercase" style={{ color: c }}>Full log ›</Link>}
           </section>
         </div>

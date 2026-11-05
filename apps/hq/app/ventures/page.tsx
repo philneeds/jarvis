@@ -21,6 +21,7 @@ export default function VenturesPage() {
       <div className="max-w-5xl w-full mx-auto p-4 flex flex-col gap-4">
         <h1 className="display font-bold text-2xl tracking-[0.2em] m-0" style={{ color: "var(--ink-strong)" }}>VENTURES</h1>
         <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>One district per venture. Tap one for its numbers, its board and its team. Agents fill these in as they work; you can edit anything.</p>
+        {list.length === 0 && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>Loading the districts…</div>}
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           {list.map((s) => (
             <Link key={s.venture.id} href={`/ventures/${s.venture.id}`} className="card flex flex-col gap-2 hover:border-[var(--accent)]" style={{ borderColor: `color-mix(in srgb, ${s.venture.color} 55%, transparent)`, color: "var(--ink)" }}>

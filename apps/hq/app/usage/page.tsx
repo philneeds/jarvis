@@ -12,6 +12,7 @@ export default function UsagePage() {
       <div className="max-w-4xl w-full mx-auto p-4 flex flex-col gap-4">
         <h1 className="display font-bold text-2xl tracking-[0.2em] m-0" style={{ color: "var(--ink-strong)" }}>USAGE</h1>
         <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>Each plan against its pool this week, per agent. Scouts back off at 70%, research holds at 90%, Jarvis and Stella&apos;s team always run. Pools are estimates until the plans are confirmed.</p>
+        {!state && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>Loading usage…</div>}
         {state?.usage.plans.map((p) => (
           <section key={p.plan} className="card flex flex-col gap-3" aria-label={p.label}>
             <div className="flex flex-wrap items-baseline gap-3">
@@ -20,9 +21,10 @@ export default function UsagePage() {
               <span className="ml-auto display text-xl" style={{ color: color(p.used) }}>{p.window === "manual" ? "—" : `${Math.round(p.used * 100)}%`}</span>
             </div>
             {p.window !== "manual" && <div className="bar"><i style={{ width: `${Math.round(p.used * 100)}%`, background: p.used >= 0.7 ? `repeating-linear-gradient(90deg, ${color(p.used)} 0 5px, transparent 5px 7px)` : undefined, boxShadow: `0 0 8px ${color(p.used)}` }} /></div>}
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-[12px]" style={{ color: "var(--muted)" }}>
+            {p.runs > 0 && <div className="flex flex-wrap gap-x-6 gap-y-1 text-[12px]" style={{ color: "var(--muted)" }}>
               <span>{p.runs} runs</span><span>{(p.inputTokens + p.outputTokens).toLocaleString()} tokens</span>{p.costUsd > 0 && <span>${p.costUsd.toFixed(2)} API fallback</span>}{p.throttled && <span style={{ color: "var(--amber)" }}>scouts paused</span>}
-            </div>
+            </div>}
+            {p.runs === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>No runs on {p.label} yet. This fills in as agents on it work.</span>}
             {p.perAgent.length > 0 && (
               <div className="overflow-x-auto"><table className="tbl"><thead><tr><th>Agent</th><th>Runs</th><th>Tokens</th></tr></thead>
                 <tbody>{p.perAgent.slice(0, 12).map((a) => <tr key={a.agentId}><td>{name(a.agentId)}</td><td>{a.runs}</td><td>{(a.inputTokens + a.outputTokens).toLocaleString()}</td></tr>)}</tbody></table></div>

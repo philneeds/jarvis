@@ -63,8 +63,8 @@ export default function MemoryPage() {
           <button className="btn btn-sm btn-primary h-9" disabled={!add.key || !add.value}>Remember</button>
         </form>
 
-        {scopes.length === 0 && items.length > 0 && <div className="card text-center py-6" style={{ color: "var(--muted)" }}>Nothing matches &ldquo;{q.trim()}&rdquo;.</div>}
-        {items.length === 0 && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>Nothing on file yet. Agents add to this as they work; so can you.</div>}
+        {scopes.length === 0 && items.length > 0 && <div className="card text-center py-6" style={{ color: "var(--muted)" }}>Nothing matches &ldquo;{q.trim()}&rdquo;. Try a name, a venture or a key.</div>}
+        {items.length === 0 && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>Nothing on file yet. Agents save what they learn as they work; add a fact above and press Remember.</div>}
         {scopes.map((scope) => (
           <section key={scope} className="card flex flex-col gap-2" aria-label={scope}>
             <span className="label">{scope}</span>

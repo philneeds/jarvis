@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, CHARTERS } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, CHARTERS } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -114,7 +114,11 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     return item ? c.json({ item }) : c.json({ error: "not found" }, 404);
   });
 
-  api.get("/activity", async (c) => c.json({ entries: await jarvis.store.activity.list({ q: c.req.query("q") || undefined, agentId: c.req.query("agent") || undefined, limit: Number(c.req.query("limit") ?? 200) }) }));
+  api.get("/activity", async (c) => {
+    // ?exclude=run hides the per-run lines so the log shows what actually happened.
+    const exclude = (c.req.query("exclude") ?? "").split(",").filter((k): k is ActivityEntry["kind"] => (ACTIVITY_KINDS as readonly string[]).includes(k));
+    return c.json({ entries: await jarvis.store.activity.list({ q: c.req.query("q") || undefined, agentId: c.req.query("agent") || undefined, limit: Number(c.req.query("limit") ?? 200), exclude: exclude.length ? exclude : undefined }) });
+  });
   api.get("/runs/:id", async (c) => { const r = await jarvis.store.runs.get(c.req.param("id")); return r ? c.json({ run: r }) : c.json({ error: "not found" }, 404); });
 
   api.get("/usage", async (c) => c.json(await usageSummary(jarvis.store)));

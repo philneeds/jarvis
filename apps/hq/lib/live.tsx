@@ -66,7 +66,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         api<State>("/api/state"),
         api<{ messages: ChatMessage[] }>("/api/chat?limit=200"),
         api<{ approvals: Approval[] }>("/api/approvals?status=pending"),
-        api<{ entries: ActivityEntry[] }>("/api/activity?limit=100"),
+        // The last 100 entries worth reading; per-run lines would crowd them out (the Activity page fetches those itself).
+        api<{ entries: ActivityEntry[] }>("/api/activity?limit=100&exclude=run"),
         api<{ items: AttentionItem[] }>("/api/attention"),
       ]);
       setState(s);

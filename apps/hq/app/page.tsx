@@ -12,6 +12,7 @@ import { Transcript } from "@/components/Transcript";
 import { useLive } from "@/lib/live";
 import { useVoice } from "@/lib/voice";
 import { api, timeAgo } from "@/lib/api";
+import { meaningful } from "@/lib/activity";
 
 const FILLERS = ["One moment.", "Let me look.", "On it.", "Checking."];
 
@@ -73,8 +74,10 @@ export default function HomePage() {
     ...errors.slice(0, 2).map((a) => ({ tag: a.name.toUpperCase(), color: "var(--red)", text: a.lastError?.slice(0, 80) ?? "error", href: `/web?agent=${a.id}` })),
   ];
   const sinceAt = since ? new Date(since).getTime() : 0;
-  const changes = activity.filter((e) => e.kind !== "schedule" && new Date(e.at).getTime() > sinceAt).slice(0, 5);
-  const quiet = activity.filter((e) => new Date(e.at).getTime() > sinceAt).length;
+  // Only what's worth reading counts: hand-offs, approvals, errors, memory, schedules that did something. Not every model run.
+  const fresh = activity.filter((e) => meaningful(e) && new Date(e.at).getTime() > sinceAt);
+  const changes = fresh.slice(0, 5);
+  const quiet = fresh.length;
 
   const send = async (e: FormEvent) => {
     e.preventDefault();
@@ -149,7 +152,7 @@ export default function HomePage() {
               <div className="flex flex-col gap-7 order-2 lg:order-1">
                 <section aria-label="Needs your attention" className="flex flex-col gap-2">
                   <span className="label label-amber">❬ Needs your attention · {openItems.length + pending.length + errors.length}</span>
-                  {needs.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing. Enjoy it.</span>}
+                  {needs.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing needs you. Agents&apos; asks, approvals and errors land here.</span>}
                   {needs.map((n, i) => <Link key={i} href={n.href} className="flex gap-2 text-[12px] leading-snug" style={{ color: "var(--ink-bright)" }}><span className="w-20 flex-none text-[11px]" style={{ color: n.color }}>{n.tag}</span><span>{n.text}</span></Link>)}
                   <Link href="/attention" className="text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--amber)" }}>Open all ›</Link>
                 </section>
@@ -173,9 +176,9 @@ export default function HomePage() {
                 <Towers />
                 <section aria-label="Since you left" className="flex flex-col gap-2 w-full lg:items-end">
                   <span className="label">Since you left · {quiet ? `${quiet} ${quiet === 1 ? "thing" : "things"}` : "quiet"} ❭</span>
-                  {changes.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing moved.</span>}
+                  {changes.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing moved. Hand-offs, approvals and errors show here as agents work.</span>}
                   {changes.map((c) => <div key={c.id} className="flex gap-2 text-[12px] leading-snug lg:flex-row-reverse"><span className="w-20 flex-none text-[11px] lg:text-right" style={{ color: state?.ventures[state.agents.find((a) => a.id === c.agentId)?.venture ?? "root"]?.color }}>{(state?.agents.find((a) => a.id === c.agentId)?.name ?? c.agentId).toUpperCase()}</span><span style={{ color: "var(--ink-bright)" }}>{c.summary.slice(0, 90)}</span><span className="hidden lg:inline" style={{ color: "var(--dim)" }}>{timeAgo(c.at)}</span></div>)}
-                  <Link href="/activity" className="text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>Full log ›</Link>
+                  <Link href="/activity" className="text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>{quiet > changes.length ? `${quiet - changes.length} more · ` : ""}Full log ›</Link>
                 </section>
                 <div className="w-full text-left"><Objective /></div>
               </div>

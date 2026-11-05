@@ -154,6 +154,33 @@ test("custom per-agent schedules merge with the built-in ones", async () => {
   assert.equal(s.due(new Date(), 0, all).length, 1);
 });
 
+test("a scheduled run logs one schedule line after it produced something, none when it was skipped", async () => {
+  const { jarvis, store } = make();
+  await store.init();
+  const s = new Scheduler(jarvis, [
+    { id: "scan", agentId: "einstein", task: "Look for tooling to improve.", when: "every:60", phase: 0 },
+    { id: "tidy", agentId: "oscar", task: "condense", when: "every:60", phase: 0 },
+  ]);
+  await s.tick(new Date());
+  const log = (await store.activity.list({ limit: 50 })).filter((e) => e.kind === "schedule");
+  assert.equal(log.length, 1, "the condense with too little memory leaves no line");
+  assert.equal(log[0]!.summary, "Scheduled: scan · Einstein reported back");
+  assert.ok(log[0]!.runId);
+});
+
+test("the activity log can leave out per-run lines, and venture pages do", async () => {
+  const { jarvis, store } = make();
+  await store.init();
+  await jarvis.handle("Status from @stella please");
+  const all = await store.activity.list({ limit: 50 });
+  assert.ok(all.some((e) => e.kind === "run") && all.some((e) => e.kind === "delegate"));
+  const meaningful = await store.activity.list({ limit: 50, exclude: ["run"] });
+  assert.ok(meaningful.some((e) => e.kind === "delegate") && meaningful.every((e) => e.kind !== "run"));
+  await jarvis.router.log("stella", "memory", "JD PM · Leads: Dana Smith → quoted");
+  const dash = await jarvis.ventureDashboard("jdpm");
+  assert.deepEqual(dash.activity.map((e) => e.kind), ["memory"]);
+});
+
 test("an approval nothing can act on says so when approved", async () => {
   const { jarvis, store } = make();
   const a = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Email Dana", body: "the draft" });

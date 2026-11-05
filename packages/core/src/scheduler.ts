@@ -84,20 +84,27 @@ export class Scheduler {
       this.lastRun.set(s.id, now.getTime());
       const agent = getAgent(s.agentId);
       if (!agent) continue;
-      await this.jarvis.router.log(agent.id, "schedule", `Scheduled: ${s.id}`);
+      // The log gets a schedule line only once the run did something Phil can see; a skipped or blocked timer stays out of it.
+      const done = (what: string, runId?: string) => this.jarvis.router.log(agent.id, "schedule", `Scheduled: ${s.id} · ${what}`, runId);
       try {
         if (s.task === "brief") {
           const text = await this.jarvis.brief();
           await this.jarvis.say({ role: "jarvis", text: `Daily brief\n\n${text}` });
           bus.emitEvent({ type: "brief", text, at: new Date().toISOString() });
           bus.emitEvent({ type: "report", agentId: "jarvis", title: "Daily brief", text, at: new Date().toISOString() });
+          await done("daily brief sent");
         } else if (s.task === "condense") {
-          if ((await this.jarvis.store.memory.list()).length >= 20) await this.jarvis.say({ role: "system", text: await this.jarvis.condenseMemory() });
+          if ((await this.jarvis.store.memory.list()).length >= 20) {
+            const text = await this.jarvis.condenseMemory();
+            await this.jarvis.say({ role: "system", text });
+            await done(text.split("\n")[0]!.slice(0, 120));
+          }
         } else {
           const r = await this.jarvis.runAgent(agent, s.task, { direct: false, from: "Scheduler" });
           if (!r.blocked) {
             await this.jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId });
             if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: s.id === "monica-day" ? "Your day" : s.id === "einstein-weekly" ? "Einstein's weekly review" : `${agent.name} report`, text: r.text, at: new Date().toISOString() });
+            await done(`${agent.name} reported back`, r.runId);
           }
         }
       } catch (e) {

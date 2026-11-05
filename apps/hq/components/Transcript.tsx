@@ -40,7 +40,7 @@ export function Transcript({ limit = 8, pendingText }: { limit?: number; pending
       {!shown && working && <p className="m-0 text-[11px] tracking-[0.12em] uppercase text-center" style={{ color: "var(--amber)" }}>still working · the answer lands here</p>}
       {shown && <>
       <div ref={ref} className="flex flex-col gap-2 overflow-y-auto px-3 py-2 border" style={{ maxHeight: 300, scrollbarWidth: "thin", borderColor: "var(--line)", background: "rgba(5,12,32,0.55)", maskImage: "linear-gradient(to bottom, transparent, black 18px, black calc(100% - 6px), transparent)", WebkitMaskImage: "linear-gradient(to bottom, transparent, black 18px, black calc(100% - 6px), transparent)" }}>
-        {recent.length === 0 && !pendingText && <p className="m-0 text-center text-[12px]" style={{ color: "var(--muted)" }}>Say the word. I&apos;m listening.</p>}
+        {recent.length === 0 && !pendingText && <p className="m-0 text-center text-[12px]" style={{ color: "var(--muted)" }}>Your conversation with Jarvis shows here. Type above or tap the mic.</p>}
         {recent.map((m) => {
           const text = plain(m.text);
           const long = text.length > SHORT || text.includes("\n");
