@@ -75,7 +75,7 @@ export function synthesisPrompt(userText: string, reports: { agent: AgentDef; ta
   return [
     `Phil asked: ${userText}`,
     `Reports back from the agents you delegated to:\n\n${body}`,
-    `Now answer Phil in your own voice. Credit each agent by name where their report is used, keep their specifics, drop their filler. If an agent asked for approval, say it's waiting in Approvals. If an agent didn't run, say so in one line and what Phil can do about it. Keep it tight.`,
+    `Now answer Phil in your own voice. Credit each agent by name where their report is used, keep their specifics, drop their filler. If an agent asked for approval, say it's waiting in Needs you. If an agent didn't run, say so in one line and what Phil can do about it. Keep it tight.`,
   ].join("\n\n");
 }
 

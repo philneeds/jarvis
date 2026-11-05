@@ -75,11 +75,11 @@ export default function AmbientPage() {
         if (a && Date.now() - a.askedAt < APPROVAL_VOICE_WINDOW_MS) {
           pendingApproval.current = null;
           if (/\b(approve|approved|yes|go ahead|do it)\b/i.test(heard)) {
-            if (a.kind === "money" || a.kind === "strategy") { await speak("That one moves money, so it needs the screen or Telegram. It's waiting in Approvals."); continue; }
+            if (a.kind === "money" || a.kind === "strategy") { await speak("That one moves money, so it needs the screen or Telegram. It's waiting in Needs you."); continue; }
             await post(`/api/approvals/${a.id}/approve`, { note: "by voice" }); await speak(`Approved: ${a.title}.`); continue;
           }
           if (/\b(reject|rejected|no|don't|cancel)\b/i.test(heard)) { await post(`/api/approvals/${a.id}/reject`, { note: "by voice" }); await speak(`Rejected: ${a.title}.`); continue; }
-          if (/\b(later|wait|hold)\b/i.test(heard)) { await speak("It's waiting in Approvals."); continue; }
+          if (/\b(later|wait|hold)\b/i.test(heard)) { await speak("It's waiting in Needs you."); continue; }
         }
         pendingApproval.current = null;
         turns++;

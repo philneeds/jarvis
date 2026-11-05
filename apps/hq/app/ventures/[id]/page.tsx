@@ -186,7 +186,7 @@ export default function VenturePage({ params }: { params: Promise<{ id: string }
           <section className="card flex flex-col gap-2" aria-label="Waiting on you">
             <span className="label label-amber">Waiting on you · {d.pending.length}</span>
             {d.pending.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing waiting. When this team wants to send, post or spend, the draft lands here first.</span>}
-            {d.pending.map((p) => <Link key={p.id} href="/approvals" className="text-[12px]" style={{ color: "var(--ink-bright)" }}><span style={{ color: "var(--amber)" }}>{p.kind}</span> · {p.title}</Link>)}
+            {d.pending.map((p) => <Link key={p.id} href="/attention#approve" className="text-[12px]" style={{ color: "var(--ink-bright)" }}><span style={{ color: "var(--amber)" }}>{p.kind}</span> · {p.title}</Link>)}
             <span className="label mt-3" style={{ color: c }}>Recent</span>
             {recent.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing yet. Hand-offs, approvals and board changes show here{lead ? <>; <Link href={`/command?say=${encodeURIComponent(`@${lead.id} `)}`}>give {lead.name} a task</Link></> : ""}.</span>}
             {recent.slice(0, 10).map((e) => <div key={e.id} className="text-[12px] flex gap-2"><span className="whitespace-nowrap" style={{ color: "var(--dim)" }}>{fmtTime(e.at)}</span><span>{e.summary}</span></div>)}

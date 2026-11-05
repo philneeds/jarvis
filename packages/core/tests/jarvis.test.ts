@@ -136,7 +136,7 @@ test("Oscar condenses memory through an approval that executes on approve", asyn
   const { jarvis, store } = make();
   for (let i = 0; i < 6; i++) await store.memory.set({ scope: "phil", key: `k${i}`, value: `v${i}` });
   const msg = await jarvis.condenseMemory();
-  assert.match(msg, /waiting in Approvals/);
+  assert.match(msg, /waiting in Needs you/);
   const pending = await store.approvals.list("pending");
   assert.equal(pending.length, 1);
   assert.equal(pending[0]!.payload?.action, "memory.replace");

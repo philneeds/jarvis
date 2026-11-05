@@ -25,7 +25,7 @@ export function mockProvider(label = "mock"): Provider {
         text = JSON.stringify({ keep, dropped: items.length - keep.length, why: `(${label}) merged duplicates, kept the facts` });
       } else if (req.agent.id === "jarvis" && /Reports back from the agents/.test(req.prompt)) {
         const reports = [...req.prompt.matchAll(/^### (.+?) \(@[\w.-]+\) — task: .*\n([\s\S]*?)(?=\n### |\n\nNow answer Phil)/gm)];
-        text = `(${label}) Here's the rundown.\n\n${reports.map((m) => `**${m[1]}** — ${m[2]!.trim().split("\n")[0]!.slice(0, 160)}`).join("\n")}\n\nAnything an agent flagged for approval is waiting in Approvals.`;
+        text = `(${label}) Here's the rundown.\n\n${reports.map((m) => `**${m[1]}** — ${m[2]!.trim().split("\n")[0]!.slice(0, 160)}`).join("\n")}\n\nAnything an agent flagged for approval is waiting in Needs you.`;
       } else if (req.agent.id === "jarvis") {
         text = `(${label}) Here's the rundown.\n\n${req.prompt.slice(0, 600)}`;
       } else if (/Phil has a question about a proposal of yours/.test(req.prompt)) {

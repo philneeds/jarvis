@@ -6,12 +6,12 @@ import { useEffect, useRef, useState } from "react";
 import { useLive } from "@/lib/live";
 import { post } from "@/lib/api";
 
-/** Six primary screens; the rest live under More on every size. Badges on Approvals and Needs you roll up into More on the phone. */
+/** Five primary screens; the rest live under More on every size. The phone's bottom bar shows the first four; Ventures joins More there.
+ *  Needs you holds both approvals and to-dos, so its one badge counts everything waiting on Phil. */
 const PRIMARY = [
   { href: "/", label: "Home" },
   { href: "/command", label: "Command" },
   { href: "/attention", label: "Needs you" },
-  { href: "/approvals", label: "Approvals" },
   { href: "/web", label: "Agent Web" },
   { href: "/ventures", label: "Ventures" },
 ];
@@ -29,6 +29,7 @@ const LEVEL: Record<string, string> = { green: "var(--green)", yellow: "var(--ye
 function isCurrent(path: string, href: string) {
   if (href === "/") return path === "/";
   if (href === "/web") return path === "/web" || path.startsWith("/agents");
+  if (href === "/attention") return path === "/attention" || path === "/approvals"; // /approvals forwards to Needs you
   return path === href || path.startsWith(href + "/");
 }
 
@@ -62,7 +63,8 @@ export function Shell({ children, bare, fill }: { children: React.ReactNode; bar
     try { await post("/api/kill", { scope: "all", paused }); await refresh(); } finally { setBusy(false); }
   };
 
-  const badge = (href: string) => (href === "/approvals" && pending.length > 0 ? pending.length : href === "/attention" && openCount > 0 ? openCount : 0);
+  const waiting = pending.length + openCount;
+  const badge = (href: string) => (href === "/attention" ? waiting : 0);
   const tab = (t: { href: string; label: string }, short = false) => (
     <Link key={t.href} href={t.href} aria-current={isCurrent(path, t.href) ? "page" : undefined}>
       {short ? t.label.replace("Agent ", "").replace("Daily brief", "Brief") : t.label}
@@ -102,12 +104,12 @@ export function Shell({ children, bare, fill }: { children: React.ReactNode; bar
         <div className="fixed bottom-0 left-0 right-0 md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)", background: "rgba(5,12,32,0.92)", zIndex: 20 }}>
           {sheet && (
             <div className="tabs flex-wrap border-b" style={{ borderColor: "var(--line)" }} role="menu">
-              {[PRIMARY[4]!, PRIMARY[5]!, ...MORE].map((t) => <Link key={t.href} href={t.href} role="menuitem" aria-current={isCurrent(path, t.href) ? "page" : undefined} style={{ flexBasis: "33%" }}>{t.label.replace("Daily brief", "Brief")}</Link>)}
+              {[...PRIMARY.slice(4), ...MORE].map((t) => <Link key={t.href} href={t.href} role="menuitem" aria-current={isCurrent(path, t.href) ? "page" : undefined} style={{ flexBasis: "33%" }}>{t.label.replace("Daily brief", "Brief")}</Link>)}
             </div>
           )}
           <nav className="tabs" aria-label="HQ screens">
             {PRIMARY.slice(0, 4).map((t) => tab(t, true))}
-            <button onClick={() => setSheet(!sheet)} aria-expanded={sheet} aria-label="More screens" style={sheet || inMore || isCurrent(path, "/web") || isCurrent(path, "/ventures") ? { borderColor: "var(--accent)" } : undefined}>More</button>
+            <button onClick={() => setSheet(!sheet)} aria-expanded={sheet} aria-label="More screens" style={sheet || inMore || PRIMARY.slice(4).some((t) => isCurrent(path, t.href)) ? { borderColor: "var(--accent)" } : undefined}>More</button>
           </nav>
         </div>
       )}

@@ -730,7 +730,7 @@ export class Jarvis {
     return text;
   }
 
-  /** Oscar condenses memory; the result waits in Approvals as a record change and is applied on approval. */
+  /** Oscar condenses memory; the result waits in Needs you as a record change and is applied on approval. */
   async condenseMemory(): Promise<string> {
     const oscar = getAgent("oscar")!;
     const items = await this.store.memory.list();
@@ -744,7 +744,7 @@ export class Jarvis {
     const keep = (plan.keep ?? []).filter((k) => k && k.key && k.value !== undefined).map((k) => ({ scope: String(k.scope || "phil"), key: String(k.key), value: String(k.value) }));
     if (!keep.length) return "Oscar wanted to drop everything; ignored.";
     const a = await this.requestApproval({ agentId: oscar.id, kind: "record", title: `Oscar: condense memory ${items.length} → ${keep.length} items`, body: `${plan.why ?? "Merged duplicates and dropped the stale."}\n\nKeeps:\n${keep.map((k) => `- [${k.scope}] ${k.key}: ${k.value}`).join("\n")}`, payload: { action: "memory.replace", keep, before: items.length, after: keep.length }, runId: r.runId });
-    return a.status === "approved" ? "Memory condensed." : `Oscar's condensed memory (${items.length} → ${keep.length}) is waiting in Approvals.`;
+    return a.status === "approved" ? "Memory condensed." : `Oscar's condensed memory (${items.length} → ${keep.length}) is waiting in Needs you.`;
   }
 
   // ---- Approvals ----------------------------------------------------------
