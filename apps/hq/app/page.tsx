@@ -8,9 +8,12 @@ import { Towers } from "@/components/Towers";
 import { Objective } from "@/components/Objective";
 import { Skyline } from "@/components/Skyline";
 import { Core, type CoreState } from "@/components/Core";
+import { Transcript } from "@/components/Transcript";
 import { useLive } from "@/lib/live";
 import { useVoice } from "@/lib/voice";
 import { api, timeAgo } from "@/lib/api";
+
+const FILLERS = ["One moment.", "Let me look.", "On it.", "Checking."];
 
 export default function HomePage() {
   const { state, pending, attention, activity, messages, send: submit } = useLive();
@@ -18,15 +21,21 @@ export default function HomePage() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
+  const [micMenu, setMicMenu] = useState(false);
+  const [heardText, setHeardText] = useState<string>();
   const voice = useVoice({
     onHeard: async (heard) => {
-      setBusy(true);
+      setBusy(true); setHeardText(heard);
       try {
         const { ack, final } = await submit(heard, "voice");
-        const first = await ack;
-        if (first) await voice.speak(first.text, { bargeIn: true });
-        if (first?.kind !== "final") { const answer = await final; if (answer) await voice.speak(answer.text, { bargeIn: true }); }
-      } finally { setBusy(false); }
+        setHeardText(undefined);
+        // If the real acknowledgement takes more than a beat, say something small so the room isn't silent.
+        const first = await Promise.race([ack, new Promise<null>((r) => setTimeout(() => r(null), 1400))]);
+        let spoken = first;
+        if (!first) { await voice.speak(FILLERS[Math.floor(Math.random() * FILLERS.length)]!); spoken = await ack; }
+        if (spoken) await voice.speak(spoken.text, { bargeIn: true });
+        if (spoken?.kind !== "final") { const answer = await final; if (answer) await voice.speak(answer.text, { bargeIn: true }); }
+      } finally { setBusy(false); setHeardText(undefined); }
     },
   });
   const [money, setMoney] = useState<{ key: string; value: string }[]>([]);
@@ -43,8 +52,7 @@ export default function HomePage() {
   }, []);
   const toggle = () => { setOn(!on); try { localStorage.setItem("hq.display", on ? "off" : "on"); } catch { /* ignore */ } };
 
-  const lastJarvis = [...messages].reverse().find((m) => m.role === "jarvis");
-  const recommendation = lastJarvis?.text.split("\n").find((l) => l.trim())?.slice(0, 220) ?? "Say the word. I'm listening.";
+  const lastJarvis = [...messages].reverse().find((m) => m.role === "jarvis" && m.kind !== "ack");
   const errors = state?.agents.filter((a) => a.status === "error") ?? [];
   const openItems = attention.filter((i) => i.status === "open");
   const needs = [
@@ -71,18 +79,18 @@ export default function HomePage() {
 
   const toggleVoice = () => {
     if (voice.conversation) { voice.endConversation(); setVoiceOn(false); return; }
-    setVoiceOn(true);
-    void voice.speak("Listening.").then(() => voice.startConversation());
+    setVoiceOn(true); setMicMenu(false);
+    void voice.startConversation();
   };
-  const coreState: CoreState = state?.status.killSwitch.all ? "paused" : voice.speaking ? "speaking" : voice.listening ? "listening" : busy || state?.agents.some((a) => a.status === "working") ? "thinking" : "idle";
-  const coreLabel = coreState === "paused" ? "PAUSED" : coreState === "speaking" ? "SPEAKING" : coreState === "listening" ? "LISTENING" : coreState === "thinking" ? "THINKING" : voice.conversation ? "READY" : "STANDING BY";
+  const coreState: CoreState = state?.status.killSwitch.all ? "paused" : voice.speaking ? "speaking" : voice.hearing ? "listening" : busy || voice.transcribing || state?.agents.some((a) => a.status === "working") ? "thinking" : voice.listening ? "listening" : "idle";
+  const coreLabel = coreState === "paused" ? "PAUSED" : coreState === "speaking" ? "SPEAKING" : voice.hearing ? "HEARING YOU" : voice.transcribing ? "GOT IT" : coreState === "thinking" ? "THINKING" : voice.listening ? "LISTENING" : voice.conversation ? "READY" : "STANDING BY";
+  const micLabel = voice.mics.find((m) => m.id === voice.micId)?.label ?? (voice.micId ? "saved mic" : "default mic");
 
   const core = (
     <div className="flex flex-col items-center gap-4 w-full max-w-md">
       <Core state={coreState} level={voice.level} label={coreLabel} />
-      {voice.conversation && voice.interim && <p className="m-0 text-center text-[12px] italic" style={{ color: "var(--amber)" }}>{voice.interim}</p>}
       {voice.error && <p className="m-0 text-center text-[11px]" style={{ color: "var(--red)" }}>{voice.error}</p>}
-      <p className="text-center text-[12px] leading-relaxed" style={{ color: "var(--ink-strong)" }}><span className="label">Jarvis ▸ </span>{recommendation}</p>
+      <Transcript pendingText={heardText ?? (voice.interim || undefined)} />
       <form onSubmit={send} className="flex gap-1.5 w-full">
         <label htmlFor="home-cmd" className="sr-only">Command Jarvis</label>
         <div className="input flex items-center gap-2 flex-1"><span style={{ color: "var(--accent)" }}>&gt;_</span><input id="home-cmd" className="flex-1 min-w-0 bg-transparent border-0 outline-none h-full" placeholder="Talk to Jarvis, @ an agent, / for commands" value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" /></div>
@@ -94,7 +102,18 @@ export default function HomePage() {
         </button>
         <button className="btn btn-primary w-11 px-0 flex-none" disabled={busy || !text.trim()} aria-label="Send"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
       </form>
-      <span className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--dim)" }}>{voice.conversation ? "say \"stop\" to end" : voice.serverTts ? "voice: ElevenLabs" : "voice: this device"}</span>
+      <div className="relative flex items-center gap-3 text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--dim)" }}>
+        <span>{voice.conversation ? "say \"stop\" to end · \"stop\" also cuts him off" : voice.serverTts ? "voice: ElevenLabs" : "voice: this device"}</span>
+        <button type="button" className="uppercase tracking-[0.14em] underline-offset-2 hover:underline" style={{ color: "var(--accent)" }} aria-haspopup="listbox" aria-expanded={micMenu} onClick={async () => { if (!micMenu) await voice.refreshMics(); setMicMenu(!micMenu); }}>mic: {micLabel} ▾</button>
+        {micMenu && (
+          <div role="listbox" aria-label="Microphone" className="absolute left-0 right-0 top-full mt-1 flex flex-col border normal-case tracking-normal text-[12px]" style={{ borderColor: "var(--accent-soft)", background: "rgba(5,12,32,0.97)", zIndex: 30 }}>
+            {voice.mics.length === 0 && <span className="px-3 py-2" style={{ color: "var(--muted)" }}>Allow the mic once (press the mic button) and the list fills in.</span>}
+            {[{ id: "", label: "System default" }, ...voice.mics].map((m) => (
+              <button key={m.id || "default"} role="option" aria-selected={(voice.micId ?? "") === m.id} className="text-left px-3 py-2 hover:bg-[rgba(60,130,255,0.2)]" style={{ color: (voice.micId ?? "") === m.id ? "var(--ink-bright)" : "var(--ink)" }} onClick={() => { voice.setMic(m.id || undefined); setMicMenu(false); if (voice.conversation) { voice.endConversation(); void voice.startConversation(); } }}>{m.label}</button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -118,8 +137,8 @@ export default function HomePage() {
               <Clock since={since} />
             </div>
 
-            <div className="grid gap-6 md:grid-cols-[300px_1fr_300px] md:items-start">
-              <div className="flex flex-col gap-7 order-2 md:order-1">
+            <div className="grid gap-6 lg:grid-cols-[280px_1fr_280px] lg:items-start">
+              <div className="flex flex-col gap-7 order-2 lg:order-1">
                 <section aria-label="Needs your attention" className="flex flex-col gap-2">
                   <span className="label label-amber">❬ Needs your attention · {openItems.length + pending.length + errors.length}</span>
                   {needs.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing. Enjoy it.</span>}
@@ -140,26 +159,26 @@ export default function HomePage() {
                 </section>
               </div>
 
-              <div className="flex flex-col items-center order-1 md:order-2 md:pt-4">{core}</div>
+              <div className="flex flex-col items-center order-1 lg:order-2 lg:pt-4">{core}</div>
 
-              <div className="flex flex-col gap-7 order-3 md:items-end md:text-right">
+              <div className="flex flex-col gap-7 order-3 lg:items-end lg:text-right">
                 <Towers />
-                <section aria-label="Since you left" className="flex flex-col gap-2 w-full md:items-end">
+                <section aria-label="Since you left" className="flex flex-col gap-2 w-full lg:items-end">
                   <span className="label">Since you left · {quiet ? `${quiet} ${quiet === 1 ? "thing" : "things"}` : "quiet"} ❭</span>
                   {changes.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing moved.</span>}
-                  {changes.map((c) => <div key={c.id} className="flex gap-2 text-[12px] leading-snug md:flex-row-reverse"><span className="w-20 flex-none text-[11px] md:text-right" style={{ color: state?.ventures[state.agents.find((a) => a.id === c.agentId)?.venture ?? "root"]?.color }}>{(state?.agents.find((a) => a.id === c.agentId)?.name ?? c.agentId).toUpperCase()}</span><span style={{ color: "var(--ink-bright)" }}>{c.summary.slice(0, 90)}</span><span className="hidden md:inline" style={{ color: "var(--dim)" }}>{timeAgo(c.at)}</span></div>)}
+                  {changes.map((c) => <div key={c.id} className="flex gap-2 text-[12px] leading-snug lg:flex-row-reverse"><span className="w-20 flex-none text-[11px] lg:text-right" style={{ color: state?.ventures[state.agents.find((a) => a.id === c.agentId)?.venture ?? "root"]?.color }}>{(state?.agents.find((a) => a.id === c.agentId)?.name ?? c.agentId).toUpperCase()}</span><span style={{ color: "var(--ink-bright)" }}>{c.summary.slice(0, 90)}</span><span className="hidden lg:inline" style={{ color: "var(--dim)" }}>{timeAgo(c.at)}</span></div>)}
                   <Link href="/activity" className="text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>Full log ›</Link>
                 </section>
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-[300px_1fr_300px] md:items-end mt-auto">
-              <div className="flex items-center gap-3 order-2 md:order-1">
+            <div className="grid gap-4 lg:grid-cols-[280px_1fr_280px] lg:items-end mt-auto">
+              <div className="flex items-center gap-3 order-2 lg:order-1">
                 <div className="w-11 h-11 rounded-full border-2 flex items-center justify-center" style={{ borderColor: "var(--accent)", boxShadow: "0 0 12px rgba(124,196,255,0.6)" }}><span className="display font-bold text-lg" style={{ color: "var(--ink-strong)" }}>P</span></div>
                 <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.12em]"><span style={{ color: "var(--ink-strong)" }}>PHIL</span><span style={{ color: "var(--muted)" }}>RECOVERY — · DOC (PHASE 3)</span></div>
               </div>
-              <div className="order-1 md:order-2 md:max-w-md md:w-full md:justify-self-center"><Objective /></div>
-              <div className="order-3 flex md:justify-end"><button className="btn btn-sm" onClick={toggle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" /></svg>Display off</button></div>
+              <div className="order-1 lg:order-2 lg:max-w-md lg:w-full lg:justify-self-center"><Objective /></div>
+              <div className="order-3 flex lg:justify-end"><button className="btn btn-sm" onClick={toggle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" /></svg>Display off</button></div>
             </div>
           </>
         ) : (

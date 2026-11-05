@@ -23,6 +23,21 @@ export interface JarvisOptions {
 export type Executor = (approval: Approval, jarvis: Jarvis) => Promise<string | void>;
 export type Describer = (payload: Record<string, unknown>, approval: Pick<Approval, "agentId" | "payload" | "kind">) => string;
 export type Normalizer = (payload: Record<string, unknown>, agentId: string) => Promise<Record<string, unknown> | void>;
+/**
+ * Spoken addressing: "ask Stella what's open", "tell Monica to move my 3pm", "Stella, status?" or "hey Jarvis, get
+ * Oscar to..." go straight to that agent, like an @mention typed. Only a name that is an agent counts, so
+ * "tell me about..." or "ask around" still go to Jarvis.
+ */
+export function spokenAddress(text: string): RegExpMatchArray | null {
+  const t = text.replace(/^(?:hey|ok|okay|yo)?[,\s]*jarvis[,:\s]+/i, "");
+  const m = t.match(/^(?:(?:can|could|would) you )?(?:please )?(?:ask|tell|get|have|ping|let)\s+([A-Za-z][\w.'-]*)(?:\s+to)?[,:\s]+(.+)$/is) ?? t.match(/^([A-Za-z][\w.'-]*)[,:]\s+(.+)$/s);
+  if (!m) return null;
+  const agent = findAgent(m[1]!);
+  if (!agent || agent.id === "jarvis") return null;
+  // Looks like a typed @mention so the same path handles it.
+  return [m[0]!, agent.id, m[2]!] as unknown as RegExpMatchArray;
+}
+
 /** Which payload field holds the text Phil edits on the card, per action. */
 const TEXT_FIELD: Record<string, string> = { "gmail.send": "body", "x.post": "text", "x.reply": "text", "x.dm": "text" };
 
@@ -124,7 +139,7 @@ export class Jarvis {
       return out;
     }
 
-    const mention = trimmed.match(/^@([\w.-]+)\s*(.*)$/s);
+    const mention = trimmed.match(/^@([\w.-]+)\s*(.*)$/s) ?? spokenAddress(trimmed);
     if (mention) {
       const agent = findAgent(mention[1]!);
       if (!agent) {

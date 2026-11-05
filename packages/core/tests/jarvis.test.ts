@@ -216,6 +216,23 @@ test("an approval carries context and a plain 'if you approve' line, and Phil ca
   assert.equal((await store.approvals.list("pending")).length, 1);
 });
 
+test("spoken addressing routes to the named agent, and only to a real one", async () => {
+  const { spokenAddress } = await import("../src/jarvis/orchestrator.js");
+  assert.equal(spokenAddress("ask Stella what's open this week")?.[1], "stella");
+  assert.equal(spokenAddress("Hey Jarvis, tell Monica to move my 3pm to 4")?.[2], "move my 3pm to 4");
+  assert.equal(spokenAddress("Stella, status?")?.[1], "stella");
+  assert.equal(spokenAddress("could you get Oscar to clean up promotions")?.[1], "oscar");
+  assert.equal(spokenAddress("tell me about the markets"), null);
+  assert.equal(spokenAddress("ask around for a plumber"), null);
+  assert.equal(spokenAddress("Jarvis, what's the plan today"), null);
+  assert.equal(spokenAddress("what's the status from Stella"), null);
+  const { jarvis, store } = make();
+  await store.init();
+  await jarvis.handle("ask Stella for a status update");
+  const chat = await store.chat.list();
+  assert.ok(chat.some((m) => m.role === "agent" && m.agentId === "stella"), "Stella answered directly");
+});
+
 test("a hand-off runs the right agent and posts its reply", async () => {
   const { jarvis, store } = make();
   const { mockProvider: mp, ModelRouter: MR, Jarvis: J } = await import("../src/index.js");
