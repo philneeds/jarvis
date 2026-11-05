@@ -14,7 +14,7 @@ const SHORT = 190;
 /** Markdown stripped for the compact view; the full rendering lives on Command. */
 function plain(md: string): string {
   const t = md.replace(/```[\s\S]*?```/g, " ").replace(/\*\*|__|`/g, "").replace(/^#{1,6}\s+/gm, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/^\s*[-*•]\s+/gm, "· ").replace(/\n{2,}/g, "\n").trim();
-  return t.length > 1200 ? t.slice(0, 1200) + "…" : t;
+  return t;
 }
 
 export function Transcript({ limit = 8, pendingText }: { limit?: number; pendingText?: string }) {
