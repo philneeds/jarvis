@@ -8,10 +8,13 @@ import { useLive } from "@/lib/live";
  * The last few turns of the conversation, compact, for the home screen. Acks and progress lines are dimmed,
  * a "still working" line shows while an answer is on its way, and the full log is one tap away.
  */
+/** Characters of a long turn shown before "…" (about three lines at the home screen's width). */
+const SHORT = 190;
+
 /** Markdown stripped for the compact view; the full rendering lives on Command. */
 function plain(md: string): string {
   const t = md.replace(/```[\s\S]*?```/g, " ").replace(/\*\*|__|`/g, "").replace(/^#{1,6}\s+/gm, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/^\s*[-*•]\s+/gm, "· ").replace(/\n{2,}/g, "\n").trim();
-  return t.length > 420 ? t.slice(0, 420) + "…" : t;
+  return t.length > 1200 ? t.slice(0, 1200) + "…" : t;
 }
 
 export function Transcript({ limit = 8, pendingText }: { limit?: number; pendingText?: string }) {
@@ -31,12 +34,14 @@ export function Transcript({ limit = 8, pendingText }: { limit?: number; pending
         {recent.length === 0 && !pendingText && <p className="m-0 text-center text-[12px]" style={{ color: "var(--muted)" }}>Say the word. I&apos;m listening.</p>}
         {recent.map((m) => {
           const text = plain(m.text);
-          const long = text.length > 160 || text.includes("\n");
+          const long = text.length > SHORT || text.includes("\n");
           const full = open === m.id;
+          // Cut in code, not CSS: browsers disagree on the legacy line-clamp and some collapse it to nothing.
+          const shown = long && !full ? text.replace(/\s*\n+\s*/g, " · ").slice(0, SHORT).replace(/\s+\S*$/, "") + " …" : text;
           return (
-            <p key={m.id} className={`m-0 text-[12px] leading-relaxed whitespace-pre-line ${m.kind === "ack" || m.kind === "progress" ? "msg-ack" : ""} ${long ? "cursor-pointer" : ""}`} style={{ color: "var(--ink)", ...(long && !full ? { display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" } : {}) }} onClick={() => long && setOpen(full ? null : m.id)} title={long && !full ? "Tap to read all of it" : undefined}>
+            <p key={m.id} className={`m-0 text-[12px] leading-relaxed whitespace-pre-line ${m.kind === "ack" || m.kind === "progress" ? "msg-ack" : ""} ${long ? "cursor-pointer" : ""}`} style={{ color: "var(--ink)" }} onClick={() => long && setOpen(full ? null : m.id)} title={long ? (full ? "Tap to shorten" : "Tap to read all of it") : undefined}>
               <span className="text-[10px] tracking-[0.14em] uppercase mr-2" style={{ color: tone(m) }}>{who(m)}</span>
-              {text}{long && !full ? " …" : ""}
+              {shown}
             </p>
           );
         })}
