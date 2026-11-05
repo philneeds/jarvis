@@ -22,18 +22,27 @@ export const SCHEDULES: Schedule[] = [
   { id: "oscar-condense", agentId: "oscar", task: "condense", when: "daily@03:30", phase: 0 },
   { id: "einstein-weekly", agentId: "einstein", task: "Weekly review for Phil, short enough to read on his phone. Call web_health for the last 7 days. Then: the three changes you'd make this week and why (errors to fix, slow or idle agents, usage, approvals Phil keeps rejecting); where each of Phil's ideas on your list stands; anything to cut, for Oscar. Put each change you want made as an approval (kind config) so Phil can say yes or no.", when: "weekly:sun@19:00", phase: 0, push: true },
   { id: "adam-monthly", agentId: "adam", task: "Monthly goals session with Phil. Call goals_list for where his current goals stand, and look at each venture's board. Then: one line on how last month went against each goal; then propose this month's goals (one primary, up to two more), each specific and measurable with a deadline, and why each matters now. Put the proposal in one approval with payload {\"action\":\"goals.set\",\"add\":[{\"name\":\"...\",\"deadline\":\"YYYY-MM-DD\",\"primary\":true}],\"retire\":[\"<id of a goal that is done or dropped>\"]}. Phil will question or change it on the card before approving.", when: "monthly:1@08:00", phase: 0, push: true },
+  { id: "buffett-weekly", agentId: "buffett", task: "Weekly holdings review after Friday's close: how each holding did this week, what the scouts flagged, and at most three suggested changes, each as an approval with the reason. Short enough to read on a phone.", when: "weekly:fri@16:45", phase: 2, push: true },
+  { id: "david-weekly", agentId: "david", task: "Weekly goals check: call goals_list; for each goal say where it stands, what moved this week, and the one or two steps that matter next week. Flag any goal that's slipping.", when: "weekly:sun@18:00", phase: 2, push: true },
+  { id: "lip-weekly", agentId: "lip", task: "Friday note for Phil's weekend: who he should reach out to (birthdays, people he hasn't talked to in a while, plans to make), and one reward he's earned this week. Draft any messages for his approval; send nothing.", when: "weekly:fri@17:00", phase: 2, push: true },
+  { id: "karol-leads", agentId: "karol", task: "Morning lead check for JD PM: new leads since yesterday, each logged on the board, and a first reply drafted for every one that hasn't had one.", when: "daily@07:15", phase: 1 },
+  { id: "bill-installs", agentId: "bill", task: "Today's installs and materials for JD PM: what's scheduled, what's missing, what needs ordering. Flag anything that would delay a job.", when: "weekdays@06:30", phase: 1 },
+  { id: "brian-weekly", agentId: "brian", task: "JD PM weekly numbers: revenue booked, invoices out and unpaid, costs, and margin by job. Flag any invoice over 14 days.", when: "weekly:mon@07:45", phase: 1, push: true },
+  { id: "nick-weekly", agentId: "nick", task: "Philneeds weekly analytics: what posts worked and why (x_own_posts, x_mentions), what to post more of, and next week's plan for Boo and ncrypt.", when: "weekly:mon@09:00", phase: 2, push: true },
+  { id: "doc-morning", agentId: "doc", task: "Morning health note for the brief: sleep, recovery, training and nutrition from the latest summaries, and the one thing to focus on today.", when: "daily@06:40", phase: 3 },
+  { id: "poseidon-weekly", agentId: "poseidon", task: "Range.cool weekly metrics: the key numbers, what moved and why, runway, and the decisions that need Phil.", when: "weekly:mon@08:15", phase: 3, push: true },
   { id: "oscar-inbox", agentId: "oscar", task: "Weekly inbox cleanup with Monica. For each of Phil's personal Google accounts: use gmail_senders on 'in:inbox older_than:14d' and 'category:promotions older_than:30d', then propose ONE archive plan per account as an approval (gmail.archive by query, with the match count in the body). Never trash. Keep anything from a real person or about money, travel, health or a job.", when: "weekly:sun@04:00", phase: 0 },
   { id: "monica-day", agentId: "monica", task: "Lay out Phil's day for him to read on his phone: what's on the calendar across his accounts, conflicts, what's unscheduled, what to protect. Propose any calendar change as an approval; change nothing yourself.", when: "daily@06:45", phase: 0, push: true },
   { id: "stella-leads", agentId: "stella", task: "Review new leads and open jobs for JD PM; flag anything waiting on a customer reply.", when: "daily@06:50", phase: 1 },
   { id: "mantis-markets", agentId: "mantis", task: "Market read for the day: what moved on-chain overnight and what the team should watch.", when: "daily@06:55", phase: 1 },
   { id: "ansem-scan", agentId: "ansem", task: "Hourly scan: new memecoins and low caps worth a look, with the reason each is on the list.", when: "every:60", phase: 2 },
   { id: "pentoshi-scan", agentId: "pentoshi", task: "Hourly scan: funding rates, perps positioning, prop-firm news.", when: "every:60", phase: 2 },
-  { id: "marcus-open", agentId: "marcus", task: "Pre-market: tech and infra holdings, catalysts today, suggested changes for Buffett.", when: "daily@08:30", phase: 2 },
-  { id: "house-open", agentId: "house", task: "Pre-market: biotech holdings, catalysts and approvals today, suggested changes for Buffett.", when: "daily@08:30", phase: 2 },
-  { id: "exxon-open", agentId: "exxon", task: "Pre-market: energy holdings and catalysts today, suggested changes for Buffett.", when: "daily@08:30", phase: 2 },
-  { id: "altman-open", agentId: "altman", task: "Pre-market: AI-era holdings and catalysts today, suggested changes for Buffett.", when: "daily@08:30", phase: 2 },
-  { id: "armstrong-open", agentId: "armstrong", task: "Pre-market: crypto-niche stocks and catalysts today, suggested changes for Buffett.", when: "daily@08:30", phase: 2 },
-  { id: "munger-weekly", agentId: "munger", task: "Weekly money summary: net worth, cash flow, deposits and withdrawals, and the holdings review from Buffett.", when: "daily@07:30", phase: 2 },
+  { id: "marcus-open", agentId: "marcus", task: "Pre-market: tech and infra holdings, catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
+  { id: "house-open", agentId: "house", task: "Pre-market: biotech holdings, catalysts and approvals today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
+  { id: "exxon-open", agentId: "exxon", task: "Pre-market: energy holdings and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
+  { id: "altman-open", agentId: "altman", task: "Pre-market: AI-era holdings and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
+  { id: "armstrong-open", agentId: "armstrong", task: "Pre-market: crypto-niche stocks and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
+  { id: "munger-weekly", agentId: "munger", task: "Weekly money summary: net worth, cash flow, deposits and withdrawals, and the holdings review from Buffett.", when: "weekly:mon@07:30", phase: 2, push: true },
 ];
 
 export class Scheduler {
@@ -68,11 +77,12 @@ export class Scheduler {
         if (!Number.isFinite(mins) || mins < 1) return false; // every:0 would run on every tick
         return now.getTime() - last >= mins * 60_000;
       }
+      if (s.when.startsWith("weekdays@") && (now.getDay() === 0 || now.getDay() === 6)) return false;
       const mo = s.when.match(/^monthly:(\d{1,2})@/);
       if (mo && now.getDate() !== Number(mo[1])) return false;
       const wk = s.when.match(/^weekly:(sun|mon|tue|wed|thu|fri|sat)@(\d{2}):(\d{2})$/);
       if (wk && ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][now.getDay()] !== wk[1]) return false;
-      const m = s.when.match(/^(?:daily|weekly:[a-z]{3}|monthly:\d{1,2})@(\d{2}):(\d{2})$/);
+      const m = s.when.match(/^(?:daily|weekdays|weekly:[a-z]{3}|monthly:\d{1,2})@(\d{2}):(\d{2})$/);
       if (!m) return false;
       const target = new Date(now); target.setHours(Number(m[1]), Number(m[2]), 0, 0);
       const within = now.getTime() >= target.getTime() && now.getTime() - target.getTime() < 10 * 60_000;
@@ -106,7 +116,7 @@ export class Scheduler {
           const r = await this.jarvis.runAgent(agent, s.task, { direct: false, from: "Scheduler" });
           if (!r.blocked) {
             await this.jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId });
-            if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: s.id === "monica-day" ? "Your day" : s.id === "einstein-weekly" ? "Einstein's weekly review" : s.id === "adam-monthly" ? "Adam: this month's goals" : `${agent.name} report`, text: r.text, at: new Date().toISOString() });
+            if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: s.id === "monica-day" ? "Your day" : s.id === "lip-weekly" ? "Lip: your weekend" : s.id === "david-weekly" ? "David: goals this week" : s.id === "einstein-weekly" ? "Einstein's weekly review" : s.id === "adam-monthly" ? "Adam: this month's goals" : `${agent.name} report`, text: r.text, at: new Date().toISOString() });
             await done(`${agent.name} reported back`, r.runId);
           }
         }

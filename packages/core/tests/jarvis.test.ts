@@ -465,3 +465,22 @@ test("images: Phil's picture reaches the agents that can see, and Grok agents ar
   assert.ok(out.length > 0);
   void jarvis;
 });
+
+test("schedules are sound: real agents, valid timing, weekday scouts skip weekends, Munger is weekly", async () => {
+  const { SCHEDULES, AGENT_BY_ID, CHARTERS } = await import("../src/index.js");
+  const valid = /^(daily@([01]\d|2[0-3]):[0-5]\d|weekdays@([01]\d|2[0-3]):[0-5]\d|weekly:(sun|mon|tue|wed|thu|fri|sat)@([01]\d|2[0-3]):[0-5]\d|monthly:([1-9]|1\d|2[0-8])@([01]\d|2[0-3]):[0-5]\d|every:(?!0+$)\d{1,4})$/;
+  for (const s of SCHEDULES) {
+    assert.ok(AGENT_BY_ID[s.agentId], `${s.id} names a real agent`);
+    assert.match(s.when, valid, `${s.id} timing`);
+    assert.ok(s.phase <= 3 && s.phase >= 0);
+  }
+  assert.equal(SCHEDULES.find((s) => s.id === "munger-weekly")!.when, "weekly:mon@07:30");
+  const { jarvis } = make();
+  const sch = new Scheduler(jarvis, [{ id: "w", agentId: "marcus", task: "x", when: "weekdays@08:30", phase: 0 }]);
+  const sat = new Date(2026, 10, 7, 8, 32), mon = new Date(2026, 10, 9, 8, 32);
+  assert.deepEqual(sch.due(sat, 0), []);
+  assert.deepEqual(sch.due(mon, 0).map((x) => x.id), ["w"]);
+  // Questions only attach to real agents' charters.
+  assert.ok(CHARTERS.stella!.open!.some((q) => /mailbox/.test(q)));
+  assert.ok(CHARTERS.lip!.open!.length >= 3);
+});

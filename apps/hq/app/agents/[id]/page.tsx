@@ -147,7 +147,7 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
             <label className="btn btn-sm cursor-pointer" style={sched.enabled ? { borderColor: "var(--accent)", background: "rgba(60,130,255,0.25)" } : undefined}>
               <input type="checkbox" className="sr-only" checked={sched.enabled} onChange={(e) => setCfg({ ...cfg, schedule: { ...sched, enabled: e.target.checked } })} />{sched.enabled ? "On" : "Off"}
             </label>
-            <input className="input h-9 w-40" placeholder="daily@07:00, weekly:sun@04:00, monthly:1@08:00 or every:60" aria-label="When" value={sched.when} onChange={(e) => setCfg({ ...cfg, schedule: { ...sched, when: e.target.value } })} />
+            <input className="input h-9 w-40" placeholder="daily@07:00, weekdays@08:30, weekly:sun@04:00, monthly:1@08:00" aria-label="When" value={sched.when} onChange={(e) => setCfg({ ...cfg, schedule: { ...sched, when: e.target.value } })} />
           </div>
           <textarea className="input py-2 h-16" placeholder="What it does on that timer" aria-label="Scheduled task" value={sched.task} onChange={(e) => setCfg({ ...cfg, schedule: { ...sched, task: e.target.value } })} />
           <span className="text-[11px]" style={{ color: "var(--muted)" }}>Runs when there is room in the plan; scouts back off at 70%. Built-in schedules are on the Usage screen.</span>

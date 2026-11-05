@@ -214,7 +214,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const p = z.object({
       persona: z.object({ reportsTo: str, job: str, daily: str, tools: str, alone: str, approval: str, preferredAI: str, good: str }).partial().optional(),
       model: z.enum(Object.keys(MODELS) as [string, ...string[]]).nullable().optional(),
-      schedule: z.object({ enabled: z.boolean(), when: z.string().regex(/^(daily@([01]\d|2[0-3]):[0-5]\d|weekly:(sun|mon|tue|wed|thu|fri|sat)@([01]\d|2[0-3]):[0-5]\d|monthly:([1-9]|1\d|2[0-8])@([01]\d|2[0-3]):[0-5]\d|every:(?!0+$)\d{1,4}|)$/, "use daily@HH:MM, weekly:<day>@HH:MM, monthly:<1-28>@HH:MM or every:<minutes> (at least 1)"), task: z.string().max(2000) }).nullable().optional(),
+      schedule: z.object({ enabled: z.boolean(), when: z.string().regex(/^(daily@([01]\d|2[0-3]):[0-5]\d|weekdays@([01]\d|2[0-3]):[0-5]\d|weekly:(sun|mon|tue|wed|thu|fri|sat)@([01]\d|2[0-3]):[0-5]\d|monthly:([1-9]|1\d|2[0-8])@([01]\d|2[0-3]):[0-5]\d|every:(?!0+$)\d{1,4}|)$/, "use daily@HH:MM, weekdays@HH:MM, weekly:<day>@HH:MM, monthly:<1-28>@HH:MM or every:<minutes> (at least 1)"), task: z.string().max(2000) }).nullable().optional(),
       rules: z.object({ autoApprove: z.array(z.enum(["send", "post", "money", "strategy", "config", "record", "other"])), maxAutoDollars: z.number().min(0).max(1_000_000), maxAutoItems: z.number().int().min(0).max(100_000) }).partial().optional(),
       tools: z.array(z.string()).optional(),
       accounts: z.array(z.string().email()).optional(),

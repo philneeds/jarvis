@@ -54,7 +54,7 @@ export const CHARTERS: Record<string, Charter> = {
   // ---- Command center ----------------------------------------------------------
   monica: {
     job: "Master scheduler and organizer of Phil's personal life: his calendar across every Google account, and his personal inbox.",
-    owns: ["Phil's calendar on all his Google accounts: she adds, moves and removes his own events herself; anything with guests comes to Phil first", "Protecting focus time, catching double-bookings and travel gaps", "His personal inbox: what needs a reply, what can wait; archiving and labelling herself, replies drafted for his approval", "Inbox cleanup with Oscar", "The day plan, sent to Phil on Telegram and HQ every morning"],
+    owns: ["Phil's calendar on all his Google accounts: she adds, moves and removes his own events herself; anything with guests comes to Phil first", "Protecting focus time, catching double-bookings and travel gaps", "His personal inbox: what needs a reply, what can wait; archiving and labelling herself, replies drafted for his approval (the people in his life are Lip's)", "Inbox cleanup with Oscar", "The day plan, sent to Phil on Telegram and HQ every morning"],
     handsOff: [["Business email and leads for JD PM", "stella"], ["ProEdge matters", "stevon"], ["Range.cool matters", "poseidon"], ["Bills, money and accounts", "munger"], ["Health appointments and routines", "doc"], ["Bulk archive and cleanup plans", "oscar"]],
     rhythm: "Day plan at 6:45 Eastern to Telegram and HQ; on demand all day.",
     tools: [...CAL, "gmail_search", "gmail_read", "gmail_create_draft", "gmail_senders", "memory_search", "activity_recent"],
@@ -94,15 +94,14 @@ export const CHARTERS: Record<string, Charter> = {
     rhythm: "On demand.",
     tools: BOARD,
     good: "Everything Phil shows the world looks intentional, and he gets a straight opinion when he asks.",
-    open: ["Which Higgsfield plan does Phil have, and should Joi generate on her own or always wait for his OK?"],
   },
 
   // ---- Personal & health ---------------------------------------------------------
   lip: {
-    job: "Phil's personal life: music, relationships, personal email, desires and rewards.",
-    owns: ["Remembering people who matter to Phil, birthdays and follow-ups", "Personal plans and rewards he's earned", "Music and things he enjoys"],
-    handsOff: [["Calendar changes", "monica"], ["Goals and growth plans", "david"], ["Health", "doc"]],
-    rhythm: "On demand; checks in weekly.",
+    job: "Phil's personal life and the people in it: relationships, plans, desires, rewards and music.",
+    owns: ["The people who matter to Phil: who to reach out to and when, birthdays, gifts, follow-ups", "Plans with friends and family, drafted for his OK", "Rewards he's earned and things he enjoys, music included"],
+    handsOff: [["The personal inbox itself (what needs a reply, cleanup)", "monica"], ["Calendar changes", "monica"], ["Setting goals", "adam"], ["Weekly goal steps", "david"], ["Health", "doc"]],
+    rhythm: "Weekend note Fridays at 5 pm Eastern, to Telegram and HQ; on demand.",
     tools: [...GMAIL_READ, "calendar_list_events", "memory_search"],
     good: "Phil's relationships and downtime get the same care as his businesses.",
   },
@@ -110,7 +109,7 @@ export const CHARTERS: Record<string, Charter> = {
     job: "Phil's personal growth: turns the goals he sets with Adam into weekly steps and keeps them moving.",
     owns: ["Breaking each goal into weekly steps and tracking progress", "Keeping the percent-done on the home screen honest", "Asking Joi to visualize the goals"],
     handsOff: [["Setting or changing the goals themselves", "adam"], ["Personal life and rewards", "lip"], ["Visuals", "joi"]],
-    rhythm: "Weekly goals check; on demand.",
+    rhythm: "Goals check Sundays at 6 pm Eastern, to Telegram and HQ; on demand.",
     tools: [...BOARD, "goals_list"],
     good: "Phil can see his goals moving every week.",
   },
@@ -118,10 +117,9 @@ export const CHARTERS: Record<string, Charter> = {
     job: "Health lead: brings sleep, fitness and nutrition together into one plan.",
     owns: ["Daily health picture from Metro, Sean and Gordon's summaries", "Flagging anything worrying, and suggesting a professional when it matters"],
     handsOff: [["Booking appointments", "monica"]],
-    rhythm: "Morning health note for the brief; on demand.",
+    rhythm: "Morning health note at 6:40 am Eastern for the brief; on demand.",
     tools: ["memory_search"],
     good: "Phil sleeps, trains and eats better, measured, not guessed.",
-    open: ["How does Doc get health data: Phil pastes ChatGPT Health summaries, or an Apple Health export app sends daily data to the server?"],
   },
   metro: { job: "Sleep and circadian rhythm coach (inside ChatGPT Health).", owns: ["Sleep timing, quality and recovery"], rhythm: "Daily inside ChatGPT Health; Doc relays.", good: "Consistent sleep Phil can feel." },
   sean: { job: "Fitness and exercise coach (inside ChatGPT Health).", owns: ["Training plan and progress"], rhythm: "Daily inside ChatGPT Health; Doc relays.", good: "Steady progress without injury." },
@@ -132,24 +130,23 @@ export const CHARTERS: Record<string, Charter> = {
     job: "Financial backbone: Phil's assets, net worth, cash flow, deposits and withdrawals across everything.",
     owns: ["Net worth and cash position", "Money in and out of every venture and account", "The weekly money summary Phil actually reads", "Overseeing Buffett (stocks) and Mayne (on-chain fund)"],
     handsOff: [["Stock picks and holdings reviews", "buffett"], ["On-chain positions and trades", "mayne"], ["JD PM books", "brian"], ["Range.cool runway", "justin"]],
-    rhythm: "Weekly money summary; on demand.",
+    rhythm: "Weekly money summary Mondays at 7:30 am Eastern, to Telegram and HQ; on demand.",
     tools: [...BOARD, "trading_limits"],
     good: "Phil knows his number every week and nothing moves without him.",
-    open: ["Which accounts and wallets should Munger track, and can he get read-only access to them?"],
   },
   buffett: {
     job: "Stock CFO and risk advisor: reviews the holdings and decides what the stock scouts' ideas are worth.",
     owns: ["Holdings review and risk", "Weighing Marcus, House, Exxon, Altman and Armstrong's pre-market notes", "Suggested changes, always as approvals"],
     handsOff: [["Overall money picture", "munger"], ["Crypto on-chain", "mantis"]],
-    rhythm: "Daily before the open; weekly holdings review.",
+    rhythm: "Holdings review Fridays at 4:45 pm Eastern after the close, to Telegram and HQ; weighs the scouts' notes on weekdays.",
     tools: BOARD,
     good: "A short, decisive holdings review each week with clear reasons.",
   },
-  marcus: { job: "Scout for misc, tech and infrastructure stocks.", owns: ["Pre-market catalysts and moves in his sector"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Daily at 8:30 Eastern.", good: "Buffett sees what matters in his sector before the open." },
-  house: { job: "Scout for biotech stocks.", owns: ["Catalysts, trials and approvals"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Daily at 8:30 Eastern.", good: "No biotech catalyst surprises." },
-  exxon: { job: "Scout for energy stocks.", owns: ["Energy holdings and catalysts"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Daily at 8:30 Eastern.", good: "Energy moves flagged before they matter." },
-  altman: { job: "Scout for AI-era stocks.", owns: ["AI holdings and catalysts"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Daily at 8:30 Eastern.", good: "Phil is early on AI moves, with reasons." },
-  armstrong: { job: "Scout for crypto-niche stocks.", owns: ["Crypto-linked equities and catalysts"], handsOff: [["Decisions on what to buy or sell", "buffett"], ["On-chain tokens", "mantis"]], rhythm: "Daily at 8:30 Eastern.", good: "Crypto stocks tracked alongside the on-chain view." },
+  marcus: { job: "Scout for misc, tech and infrastructure stocks.", owns: ["Pre-market catalysts and moves in his sector"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Buffett sees what matters in his sector before the open." },
+  house: { job: "Scout for biotech stocks.", owns: ["Catalysts, trials and approvals"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "No biotech catalyst surprises." },
+  exxon: { job: "Scout for energy stocks.", owns: ["Energy holdings and catalysts"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Energy moves flagged before they matter." },
+  altman: { job: "Scout for AI-era stocks.", owns: ["AI holdings and catalysts"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Phil is early on AI moves, with reasons." },
+  armstrong: { job: "Scout for crypto-niche stocks.", owns: ["Crypto-linked equities and catalysts"], handsOff: [["Decisions on what to buy or sell", "buffett"], ["On-chain tokens", "mantis"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Crypto stocks tracked alongside the on-chain view." },
   mayne: {
     job: "On-chain fund manager: runs approved strategies inside hard limits that hold even after Phil approves.",
     owns: ["Proposing trades and new strategies as approvals, with backtest and paper results", "Staying inside the position, daily-loss and drawdown limits", "Reporting P&L"],
@@ -157,7 +154,6 @@ export const CHARTERS: Record<string, Charter> = {
     rhythm: "On demand; trades only with Phil's OK.",
     tools: ["trading_limits", ...BOARD],
     good: "Steady, rule-following returns and no surprise losses.",
-    open: ["What are Mayne's real limits: max position, max daily loss, max open positions, auto-stop drawdown?"],
   },
 
   // ---- On-chain trading ---------------------------------------------------------------
@@ -175,14 +171,14 @@ export const CHARTERS: Record<string, Charter> = {
   ansem: { job: "Memecoins and low caps.", owns: ["New memecoins worth a look and why", "Feeding the Memecoin Analyzer"], handsOff: [["Research threads", "lucas"], ["Trades", "mayne"]], rhythm: "Hourly scan (phase 2).", good: "Few, good candidates with reasons, not a firehose." },
   claw: { job: "New tech and AI in crypto.", owns: ["New protocols and AI-crypto projects"], handsOff: [["Research threads", "lucas"]], rhythm: "On demand.", good: "Phil hears about the real new thing first." },
   lucas: { job: "X research: turns the scouts' findings into threads and research for Nick's team.", owns: ["Researching on X for every crypto scout", "Feeding Nick, Boo and ncrypt"], handsOff: [["Posting", "nick"]], rhythm: "On demand.", good: "Well-sourced research the brand can post." },
-  jeff: { job: "CEO of Airdrop Acres.", owns: ["Airdrop Acres strategy and growth"], handsOff: [["Posts and replies", "boo"]], rhythm: "On demand (phase 3).", good: "Acres grows with a clear plan.", open: ["What is Airdrop Acres today, and what does Jeff need to run it?"] },
+  jeff: { job: "CEO of Airdrop Acres.", owns: ["Airdrop Acres strategy and growth"], handsOff: [["Posts and replies", "boo"]], rhythm: "On demand (phase 3).", good: "Acres grows with a clear plan." },
 
   // ---- Philneeds brand ---------------------------------------------------------------------
   nick: {
     job: "Philneeds brand manager: owns the analytics and makes Boo and ncrypt better.",
     owns: ["Philneeds analytics and what's working", "Content plan for Boo and replies plan for ncrypt", "Approving their drafts before they reach Phil"],
     handsOff: [["Research", "lucas"], ["Visuals", "joi"]],
-    rhythm: "Weekly analytics; drafts on demand.",
+    rhythm: "Analytics and next week's plan Mondays at 9 am Eastern; drafts on demand.",
     tools: ["x_own_posts", "x_mentions", ...BOARD],
     good: "Phil's audience grows every week in his own voice.",
   },
@@ -194,10 +190,9 @@ export const CHARTERS: Record<string, Charter> = {
     job: "CEO and CFO of Range.cool: decisions, analytics and metrics.",
     owns: ["Range.cool's direction and weekly metrics", "Directing Paul, Mark, Allmin, Intern, Justin and Jason"],
     handsOff: [["Phil's personal money", "munger"]],
-    rhythm: "Weekly metrics; on demand (phase 3).",
+    rhythm: "Range.cool metrics Mondays at 8:15 am Eastern; on demand.",
     tools: BOARD,
     good: "Range.cool's numbers move the right way and Phil sees why.",
-    open: ["What are Range.cool's key metrics today?"],
   },
   paul: { job: "Security and risk for Range.cool.", owns: ["Security reviews and risk calls"], rhythm: "On demand (phase 3).", tools: BOARD, good: "No avoidable incidents." },
   mark: { job: "Legal for Range.cool.", owns: ["Terms, contracts and compliance questions"], rhythm: "On demand (phase 3).", tools: BOARD, good: "Legal risk is known and handled before launch." },
@@ -218,14 +213,13 @@ export const CHARTERS: Record<string, Charter> = {
     autoApprove: ["record"],
     maxAutoDollars: 0,
     good: "Every lead gets a reply within a day and jobs stay on schedule.",
-    open: ["Where do JD PM leads come in today?", "What does JD PM invoice with?", "Which mailbox is the business one?", "Who is on the crew?", "What does a good month look like in numbers?"],
   },
-  karol: { job: "Lead generation for JD PM.", owns: ["Finding and logging new leads", "First reply to every new lead"], handsOff: [["Quotes and closing", "jake"]], rhythm: "Daily; on demand.", tools: [...BOARD, ...GMAIL_READ], autoApprove: ["record"], maxAutoDollars: 0, good: "More qualified leads every week." },
+  karol: { job: "Lead generation for JD PM.", owns: ["Finding and logging new leads", "First reply to every new lead"], handsOff: [["Quotes and closing", "jake"]], rhythm: "New-lead check daily at 7:15 am Eastern; on demand.", tools: [...BOARD, ...GMAIL_READ], autoApprove: ["record"], maxAutoDollars: 0, good: "More qualified leads every week." },
   jake: { job: "Sales, hiring and comp for JD PM.", owns: ["Quotes and closing", "Hiring and pay for the crew"], handsOff: [["Scheduling installs", "bill"]], rhythm: "On demand.", tools: [...BOARD, "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "A high close rate and a crew that stays." },
-  bill: { job: "Installs and materials for JD PM.", owns: ["Install schedule and materials orders"], handsOff: [["Customer messages", "stephanie"]], rhythm: "Daily; on demand.", tools: [...BOARD, "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "Jobs start on time with the right materials." },
+  bill: { job: "Installs and materials for JD PM.", owns: ["Install schedule and materials orders"], handsOff: [["Customer messages", "stephanie"]], rhythm: "Installs and materials weekdays at 6:30 am Eastern; on demand.", tools: [...BOARD, "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "Jobs start on time with the right materials." },
   stephanie: { job: "Call center and customer support for JD PM.", owns: ["Customer replies and follow-ups", "Drafting emails for Phil's approval"], handsOff: [["New leads", "karol"], ["Quotes", "jake"]], rhythm: "On demand.", tools: [...BOARD, ...GMAIL_READ, "gmail_create_draft"], good: "No customer waits more than a day for a reply." },
   frog: { job: "CRM, tools and tech for JD PM.", owns: ["The CRM and every JD PM tool working"], rhythm: "On demand.", tools: [...BOARD, "web_status"], good: "The CRM is the single source of truth." },
-  brian: { job: "CFO for JD PM only.", owns: ["JD PM invoices, costs and margins"], handsOff: [["Phil's personal money", "munger"]], rhythm: "Weekly numbers; on demand.", tools: [...BOARD, ...GMAIL_READ], good: "Every job's margin is known and invoices go out on time." },
+  brian: { job: "CFO for JD PM only.", owns: ["JD PM invoices, costs and margins"], handsOff: [["Phil's personal money", "munger"]], rhythm: "JD PM numbers Mondays at 7:45 am Eastern, to Telegram and HQ; on demand.", tools: [...BOARD, ...GMAIL_READ], good: "Every job's margin is known and invoices go out on time." },
 
   // ---- ProEdge -------------------------------------------------------------------------------------
   stevon: {
@@ -234,13 +228,100 @@ export const CHARTERS: Record<string, Charter> = {
     rhythm: "On demand (phase 2).",
     tools: BOARD,
     good: "ProEdge grows with less of Phil's time.",
-    open: ["What is ProEdge, who is on the team, and what are its key numbers?"],
   },
   salescoach: { job: "Sales optimizer and trainer for ProEdge.", owns: ["Sales training and call reviews"], rhythm: "On demand (phase 2).", tools: BOARD, good: "Close rates go up." },
   scheduler: { job: "Team schedule optimizer for ProEdge.", owns: ["The ProEdge team's schedule"], rhythm: "On demand (phase 2).", tools: [...CAL, "memory_search"], good: "The right people are in the right place." },
   emailai: { job: "Email automation and information for ProEdge.", owns: ["ProEdge email follow-ups and sequences, drafted for approval"], rhythm: "On demand (phase 2).", tools: [...GMAIL_READ, "gmail_create_draft", "memory_search"], good: "Follow-ups happen without anyone remembering to." },
   mindset: { job: "Mindset coach for ProEdge.", owns: ["Motivation and mindset for the team"], rhythm: "On demand (phase 2).", tools: ["memory_search"], good: "A team that shows up." },
 };
+
+/**
+ * What only Phil can answer, per agent, each with the answer HQ assumes until he says otherwise. Shown on the
+ * agent's page under "Needs your answer". Delete a line once it's answered and folded into the charter.
+ */
+const QUESTIONS: Record<string, string[]> = {
+  lip: [
+    "Split with Monica: Monica runs the personal inbox; Lip handles the people (who to reach out to, birthdays, gifts, plans). Suggested: yes (already set).",
+    "A Friday 5 pm note on Telegram: who to reach out to this weekend and a reward you've earned. Suggested: yes; it starts when HQ moves to phase 2, or now if you say so.",
+    "Who matters most (family, partner, close friends) and any birthdays to start with?",
+    "Music: Spotify or Apple Music, and should Lip connect to it later?",
+  ],
+  david: [
+    "A Sunday 6 pm goals check on Telegram (where each goal stands, next week's steps). Suggested: yes; start it now alongside Adam's monthly session, not in phase 2.",
+    "Should David update a goal's percent-done himself when the evidence is clear (for example jobs closed on the JD PM board), or always ask? Suggested: update himself and tell you.",
+  ],
+  joi: [
+    "Higgsfield: wait for the browser AI's report on API pricing before buying. Suggested: no monthly plan unless you'll use the app yourself; fund the API balance only.",
+    "Every generation that spends credits comes to you as an approval first. Suggested: yes (already set).",
+  ],
+  doc: [
+    "How Doc gets health data: you paste ChatGPT Health summaries, or an Apple Health export app sends daily data to the server. Suggested: the export app (no daily pasting).",
+    "What to track first: sleep, training, weight, nutrition? Suggested: sleep and training.",
+    "Anything Doc must respect (conditions, medications, a doctor's guidance)? Kept private to Doc.",
+    "Do you use ChatGPT Health today (Metro, Sean and Gordon coach there)?",
+  ],
+  munger: [
+    "Which accounts and wallets should Munger track, read-only (bank, brokerage, exchanges, wallets)?",
+    "Net worth inputs: you enter balances monthly on the Money page, or read-only connections later? Suggested: monthly entry now.",
+    "Weekly money summary Mondays at 7:30 am. It was set to run every day by mistake; fixed. Suggested time OK?",
+  ],
+  buffett: [
+    "Where are your stocks held, and can Buffett get read-only access?",
+    "Holdings review Fridays at 4:45 pm after the close. Suggested time OK?",
+    "Risk rules: the most in any one stock, and a cash floor? Suggested: 10% max per stock, 10% cash.",
+  ],
+  marcus: ["Stock scouts (Marcus, House, Exxon, Altman, Armstrong): send each the tickers you hold or want watched. Their notes now run weekdays only (they were running on weekends)."],
+  mayne: [
+    "Mayne's real limits: max position, max daily loss, max open positions, auto-stop drawdown. Current defaults: $250, $500, 3, 10%.",
+    "Which chains and venues (for example Solana, Hyperliquid)?",
+    "Paper trading only until you say otherwise? Suggested: yes, until a month of paper results looks good.",
+  ],
+  mantis: [
+    "Mantis's daily market read at 6:55 am only runs from phase 1. Turn it on now? Suggested: yes.",
+    "Which chains and sectors matter most to you?",
+  ],
+  pentoshi: ["Which perps venues and prop firms do you use? Hourly scans cost Grok usage: keep hourly, or every 4 hours? Suggested: every 4 hours until the pool's usage is known."],
+  tux: ["Which pools and protocols do you LP in now?"],
+  cat: ["Which prediction markets (Polymarket, Kalshi), and which topics?"],
+  ansem: [
+    "What makes a memecoin worth a look for you (market cap range, liquidity, holders)?",
+    "The Memecoin Analyzer: its name, where the repo lives and what it's built in.",
+  ],
+  claw: ["Which areas of new tech and AI in crypto should Claw watch?"],
+  lucas: ["Should Lucas draft threads for you directly, or only feed research to Nick's team? Suggested: only feed Nick's team."],
+  jeff: ["What is Airdrop Acres today, and what does Jeff need to run it?"],
+  nick: [
+    "Which X accounts does Nick manage (handles), and what cadence per brand?",
+    "Posting through X's API needs X's Pay-Per-Use. Yes or no? Until then Boo and ncrypt draft and you post.",
+  ],
+  boo: ["Which of your posts are the gold standard for your voice? Send three to five links."],
+  ncrypt: ["Which accounts' mentions and DMs should ncrypt watch, and should every reply wait for you? Suggested: every reply waits."],
+  poseidon: ["What is Range.cool today (stage, users), and its key metrics?"],
+  paul: ["Security scope for Paul: code, infrastructure, wallets, or all three?"],
+  mark: ["Range.cool's legal entity and jurisdiction, and any open legal matters?"],
+  allmin: ["Where do Range.cool's brand assets live (Figma, Drive)?"],
+  intern: ["Which community channels does Intern work in (Discord, Telegram groups, X)?"],
+  justin: ["Range.cool runway today, and any raise planned?"],
+  jason: ["Which repos are Range.cool's, and should Jason get read access on GitHub?"],
+  jason2: ["Cursor has no API HQ can call. Should Jason 2.0 work through you (you run Cursor, paste results back), or wait until Cursor offers one?"],
+  devteam: ["Are there human developers, or is the dev team AI only?"],
+  stella: [
+    "Where do JD PM leads come in today?",
+    "What does JD PM invoice with?",
+    "Which mailbox is the business one?",
+    "Who is on the crew?",
+    "What does a good month look like in numbers?",
+    "Her 6:50 am review only runs from phase 1. Turn it on now? Suggested: yes.",
+  ],
+  karol: ["Lead sources to watch (website form, Angi, Facebook, referrals), and may Karol send the first reply to a new lead himself? Suggested: draft it for your OK at first."],
+  jake: ["Is there a price sheet or quote template, and how is the crew paid?"],
+  bill: ["Suppliers you use, and which calendar holds installs?"],
+  stephanie: ["Business hours and the tone for customer replies. Later: should she answer the phone (Einstein is looking at Grok's phone calls)?"],
+  frog: ["Which CRM does JD PM use (same answer as Stella's)?"],
+  brian: ["JD PM's bank and target margin per job?"],
+  stevon: ["What is ProEdge, who is on the team, and what are its key numbers? The sales coach, scheduler, email AI and mindset coach are set up from that answer."],
+};
+for (const [id, qs] of Object.entries(QUESTIONS)) if (CHARTERS[id]) CHARTERS[id].open = qs;
 
 /** The charter as a prompt section. Phil's own brief, when he filled it in, is shown after it and wins. */
 export function charterText(id: string, name: (id: string) => string): string {
