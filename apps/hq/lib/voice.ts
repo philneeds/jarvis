@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Vad } from "./vad";
 
 /**
  * Voice for Jarvis, built to feel like a conversation rather than a walkie-talkie.
@@ -67,8 +68,6 @@ function chime(ctx: AudioContext, up = true) {
   }
 }
 
-// Voice-activity tuning (RMS of the time-domain signal, 0..1).
-const VAD = { minFloor: 0.012, startRatio: 3, endSilenceMs: 700, minSpeechMs: 250, maxUtteranceMs: 25_000, preRollMs: 150 };
 
 export function useVoice(opts: { onHeard: (text: string) => void | Promise<void> }) {
   const [speaking, setSpeaking] = useState(false);
@@ -88,6 +87,7 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
   const ctxRef = useRef<AudioContext | null>(null);
   const levelRaf = useRef(0);
   const abortListen = useRef<(() => void) | null>(null);
+  const forceEnd = useRef<(() => void) | null>(null);
   const onHeardRef = useRef(opts.onHeard);
   onHeardRef.current = opts.onHeard;
 
@@ -113,7 +113,7 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
   const openMic = useCallback(async (): Promise<MediaStream> => {
     if (micStream.current?.active) return micStream.current;
     const want = savedMic();
-    const constraints = (id?: string): MediaStreamConstraints => ({ audio: { ...(id ? { deviceId: { exact: id } } : {}), echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    const constraints = (id?: string): MediaStreamConstraints => ({ audio: { ...(id ? { deviceId: { exact: id } } : {}), echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
     let stream: MediaStream;
     try { stream = await navigator.mediaDevices.getUserMedia(constraints(want)); }
     catch (e) {
@@ -269,22 +269,27 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
     }
 
     return new Promise<string>((resolve) => {
-      let floor = 0.02, speaking = false, speechStart = 0, lastLoud = 0, done = false, chunks: Blob[] = [];
+      const vad = new Vad();
+      let done = false, chunks: Blob[] = [];
       let recorder: MediaRecorder | null = null;
       const t0 = performance.now();
+      // A timer rather than animation frames: frames stop when the tab is hidden, and a turn must still end.
+      let timer: ReturnType<typeof setInterval> | undefined;
+      const stopLoop = () => { if (timer) clearInterval(timer); timer = undefined; source.disconnect(); an.disconnect(); };
       const finish = async (text: string) => {
         if (done) return; done = true;
-        cancelAnimationFrame(raf); source.disconnect(); an.disconnect();
+        stopLoop(); forceEnd.current = null;
         if (rec) { try { rec.abort(); } catch { /* fine */ } recRef.current = null; }
         setListening(false); setHearing(false); setLevel(0); setInterim("");
         resolve(text.trim());
       };
-      abortListen.current = () => { try { recorder?.state !== "inactive" && recorder?.stop(); } catch { /* fine */ } void finish(""); };
+      abortListen.current = () => { try { if (recorder && recorder.state !== "inactive") recorder.stop(); } catch { /* fine */ } void finish(""); };
       const endUtterance = async () => {
-        setHearing(false);
+        if (done) return;
+        stopLoop(); forceEnd.current = null; setHearing(false); setLevel(0);
         if (useServer) {
           const blob = await new Promise<Blob>((res) => { if (!recorder || recorder.state === "inactive") return res(new Blob(chunks, { type: mime })); recorder.onstop = () => res(new Blob(chunks, { type: mime })); recorder.stop(); });
-          cancelAnimationFrame(raf); source.disconnect(); an.disconnect(); setListening(false); setLevel(0);
+          setListening(false);
           const text = await transcribe(blob);
           done = true; resolve(text.trim());
         } else {
@@ -295,7 +300,8 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
           void finish(recText);
         }
       };
-      let raf = 0;
+      // "Send now": end the turn on Phil's say-so.
+      forceEnd.current = () => { if (vad.force() === "end") void endUtterance(); };
       const tick = () => {
         if (done) return;
         an.getByteTimeDomainData(buf);
@@ -303,30 +309,34 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
         const rms = Math.sqrt(sum / buf.length);
         setLevel(Math.min(1, rms * 4));
         const now = performance.now();
-        if (!speaking) floor = Math.max(VAD.minFloor, floor * 0.98 + rms * 0.02); // the room's noise, slowly tracked
-        const loud = rms > floor * VAD.startRatio;
-        if (loud) lastLoud = now;
-        if (!speaking && loud) {
-          speaking = true; speechStart = now; setHearing(true);
-          if (useServer && mime) { chunks = []; recorder = new MediaRecorder(stream, { mimeType: mime }); recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); }; recorder.start(250); }
-        } else if (speaking && now - lastLoud > VAD.endSilenceMs) {
-          if (now - speechStart - VAD.endSilenceMs < VAD.minSpeechMs) { speaking = false; try { recorder?.stop(); } catch { /* fine */ } chunks = []; setHearing(false); } // a cough, not words
-          else { void endUtterance(); return; }
-        } else if (speaking && now - speechStart > VAD.maxUtteranceMs) { void endUtterance(); return; }
-        if (!speaking && opts.timeoutMs && now - t0 > opts.timeoutMs) { void finish(""); return; }
-        raf = requestAnimationFrame(tick);
+        const e = vad.push(rms, now);
+        if (e === "start") {
+          setHearing(true);
+          if (useServer && mime) { chunks = []; recorder = new MediaRecorder(stream, { mimeType: mime }); recorder.ondataavailable = (ev) => { if (ev.data.size) chunks.push(ev.data); }; recorder.start(250); }
+        } else if (e === "cancel") {
+          setHearing(false); try { recorder?.stop(); } catch { /* fine */ } recorder = null; chunks = []; // a cough, not words
+        } else if (e === "end") { void endUtterance(); return; }
+        if (!vad.speaking && opts.timeoutMs && now - t0 > opts.timeoutMs) void finish("");
       };
-      tick();
+      timer = setInterval(tick, 30);
     });
   }, [openMic, serverStt, stopSpeaking, transcribe]);
 
   const [conversation, setConversation] = useState(false);
   const convRef = useRef(false);
   const loop = useCallback(async () => {
+    let empty = 0;
     while (convRef.current) {
+      const t = performance.now();
       const heard = await listen();
       if (!convRef.current) break;
-      if (!heard) continue;
+      if (!heard) {
+        // Returning at once with nothing means it can't hear at all (mic refused, no recognizer); stop rather than spin.
+        empty = performance.now() - t < 300 ? empty + 1 : 0;
+        if (empty >= 3) { convRef.current = false; setConversation(false); closeMic(); break; }
+        continue;
+      }
+      empty = 0;
       if (/^(stop|that's all|that is all|goodbye|exit|thanks,? that's all)\b/i.test(heard)) { convRef.current = false; setConversation(false); chime(ctx(), false); closeMic(); break; }
       await onHeardRef.current(heard);
     }
@@ -338,9 +348,11 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
     try { await openMic(); chime(ctx(), true); } catch { setError("Microphone not available. Allow the mic for this site, or pick another one under the mic menu."); convRef.current = false; setConversation(false); return; }
     void loop();
   }, [loop, openMic]);
+  /** End the current turn now and send what was said. */
+  const finishTurn = useCallback(() => { forceEnd.current?.(); }, []);
   const endConversation = useCallback(() => { convRef.current = false; setConversation(false); stopListening(); stopSpeaking(); closeMic(); }, [stopListening, stopSpeaking, closeMic]);
 
   useEffect(() => () => { convRef.current = false; stopListening(); stopSpeaking(); closeMic(); }, [stopListening, stopSpeaking, closeMic]);
 
-  return { speak, stopSpeaking, listen, stopListening, speaking, listening, hearing, transcribing, level, interim, serverTts, serverStt, error, conversation, startConversation, endConversation, mics, micId, setMic, refreshMics };
+  return { speak, stopSpeaking, listen, stopListening, speaking, listening, hearing, transcribing, level, interim, serverTts, serverStt, error, conversation, startConversation, endConversation, finishTurn, mics, micId, setMic, refreshMics };
 }

@@ -104,7 +104,6 @@ export default function HomePage() {
     <div className="flex flex-col items-center gap-4 w-full max-w-2xl">
       {!wide && orb}
       {voice.error && <p className="m-0 text-center text-[11px]" style={{ color: "var(--red)" }}>{voice.error}</p>}
-      <Transcript pendingText={heardText ?? (voice.interim || undefined)} />
       <form onSubmit={send} className="flex gap-1.5 w-full">
         <label htmlFor="home-cmd" className="sr-only">Command Jarvis</label>
         <div className="input flex items-center gap-2 flex-1"><span style={{ color: "var(--accent)" }}>&gt;_</span><input id="home-cmd" className="flex-1 min-w-0 bg-transparent border-0 outline-none h-full" placeholder="Talk to Jarvis, @ an agent, / for commands" value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" /></div>
@@ -117,7 +116,11 @@ export default function HomePage() {
         <button className="btn btn-primary w-11 px-0 flex-none" disabled={busy || !text.trim()} aria-label="Send"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
       </form>
       <div className="relative flex items-center gap-3 text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--dim)" }}>
-        <span>{voice.conversation ? "say \"stop\" to end · \"stop\" also cuts him off" : voice.serverTts ? "voice: ElevenLabs" : "voice: this device"}</span>
+        {voice.hearing ? (
+          <button type="button" className="btn btn-sm btn-primary" onClick={voice.finishTurn} aria-label="Send what I said now">Send now</button>
+        ) : (
+          <span>{voice.conversation ? (voice.transcribing ? "got it" : "listening · pause to send · say \"stop\" to end") : voice.serverTts ? "voice: ElevenLabs" : "voice: this device"}</span>
+        )}
         <button type="button" className="uppercase tracking-[0.14em] underline-offset-2 hover:underline" style={{ color: "var(--accent)" }} aria-haspopup="listbox" aria-expanded={micMenu} onClick={async () => { if (!micMenu) await voice.refreshMics(); setMicMenu(!micMenu); }}>mic: {micLabel} ▾</button>
         {micMenu && (
           <div role="listbox" aria-label="Microphone" className="absolute left-0 right-0 top-full mt-1 flex flex-col border normal-case tracking-normal text-[12px]" style={{ borderColor: "var(--accent-soft)", background: "rgba(5,12,32,0.97)", zIndex: 30 }}>
@@ -128,6 +131,7 @@ export default function HomePage() {
           </div>
         )}
       </div>
+      <Transcript pendingText={heardText ?? (voice.interim || undefined)} />
     </div>
   );
 
