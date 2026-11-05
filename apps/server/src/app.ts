@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -157,7 +157,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const p = z.object({ scope: z.string().min(1), key: z.string().min(1), value: z.string() }).safeParse(await c.req.json().catch(() => ({})));
     if (!p.success) return c.json({ error: "scope, key, value required" }, 400);
     await jarvis.store.memory.set({ ...p.data, source: "phil" });
-    await jarvis.router.log("jarvis", "memory", `Phil set [${p.data.scope}] ${p.data.key}`);
+    await jarvis.router.log("jarvis", "memory", memoryLine("Phil", p.data.scope, p.data.key), undefined, { scope: p.data.scope, key: p.data.key });
     return c.json({ ok: true });
   });
   api.post("/memory/condense", async (c) => c.json({ message: await jarvis.condenseMemory() }));

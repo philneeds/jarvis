@@ -123,6 +123,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             setState((s) => s && { ...s, pendingApprovals: Math.max(0, s.pendingApprovals - 1) });
             break;
           case "activity":
+            // A run line also bumps that agent's runs-today count (the towers' height) until the next full refresh.
+            if (e.entry.kind === "run") { const id = e.entry.agentId; setState((s) => s && { ...s, agents: s.agents.map((a) => (a.id === id ? { ...a, runsToday: (a.runsToday ?? 0) + 1 } : a)) }); }
             setActivity((a) => [e.entry, ...a].slice(0, 300));
             break;
           case "usage":

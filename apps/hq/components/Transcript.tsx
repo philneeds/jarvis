@@ -34,7 +34,7 @@ export function Transcript({ limit = 8, pendingText }: { limit?: number; pending
   const tone = (m: (typeof messages)[number]) => (m.role === "phil" ? "var(--accent)" : m.role === "system" ? "var(--muted)" : m.role === "jarvis" ? "var(--ink-strong)" : state?.ventures[state.agents.find((a) => a.id === m.agentId)?.venture ?? "root"]?.color ?? "var(--green)");
   return (
     <section aria-label="Conversation" className="w-full flex flex-col items-center gap-1">
-      <button type="button" onClick={toggle} aria-expanded={shown} className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>{shown ? "Hide conversation ▴" : `Show conversation ▾`}</button>
+      <button type="button" onClick={toggle} aria-expanded={shown} className="min-h-8 px-2 text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>{shown ? "Hide conversation ▴" : `Show conversation ▾`}</button>
       {/* Collapsed, only what's in flight shows: what he just said and that an answer is coming. */}
       {!shown && pendingText && <p className="m-0 text-[12px] italic text-center" style={{ color: "var(--amber)" }}>{pendingText}</p>}
       {!shown && working && <p className="m-0 text-[11px] tracking-[0.12em] uppercase text-center" style={{ color: "var(--amber)" }}>still working · the answer lands here</p>}

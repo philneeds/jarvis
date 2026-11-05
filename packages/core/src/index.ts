@@ -6,6 +6,7 @@ export * from "./store/index.js";
 export * from "./usage/caps.js";
 export * from "./jarvis/prompts.js";
 export * from "./jarvis/blocks.js";
+export * from "./jarvis/readable.js";
 export { Jarvis, type JarvisOptions } from "./jarvis/orchestrator.js";
 export { Scheduler, SCHEDULES, type Schedule } from "./scheduler.js";
 export * from "./config.js";

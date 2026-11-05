@@ -9,6 +9,8 @@ export type AgentLive = AgentDef & {
   lastRunAt?: string;
   lastError?: string;
   detail?: string;
+  /** The agent's own successful runs since midnight, Phil's time. */
+  runsToday?: number;
 };
 
 export interface State {

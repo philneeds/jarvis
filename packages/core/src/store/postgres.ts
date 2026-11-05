@@ -49,6 +49,12 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
         const rows = await db.select().from(t.activityLog).where(conds.length ? and(...conds) : undefined).orderBy(desc(t.activityLog.at)).limit(limit);
         return rows.map((r) => ({ id: r.id, at: r.at.toISOString(), agentId: r.agentId, kind: r.kind as ActivityEntry["kind"], summary: r.summary, detail: r.detail ?? undefined, runId: r.runId ?? undefined }));
       },
+      async countSince(kind, since) {
+        // One grouped count over the at-index, instead of loading the day's rows.
+        const rows = await db.select({ agentId: t.activityLog.agentId, n: sql<number>`count(*)::int` }).from(t.activityLog)
+          .where(and(eq(t.activityLog.kind, kind), gte(t.activityLog.at, since))).groupBy(t.activityLog.agentId);
+        return Object.fromEntries(rows.map((r) => [r.agentId, Number(r.n)]));
+      },
     },
     approvals: {
       async add(a) {

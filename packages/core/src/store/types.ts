@@ -69,6 +69,8 @@ export interface Store {
     add(e: ActivityEntry): Promise<void>;
     /** Newest first. `exclude` drops kinds, e.g. ["run"] for only the entries worth reading. */
     list(opts?: { q?: string; agentId?: string; limit?: number; exclude?: ActivityEntry["kind"][] }): Promise<ActivityEntry[]>;
+    /** Entries of one kind at or after `since`, counted per agent: { stella: 4, lucas: 1 }. */
+    countSince(kind: ActivityEntry["kind"], since: Date): Promise<Record<string, number>>;
   };
   approvals: {
     add(a: Approval): Promise<void>;

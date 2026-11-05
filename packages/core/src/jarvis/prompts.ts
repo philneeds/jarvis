@@ -80,6 +80,20 @@ export function synthesisPrompt(userText: string, reports: { agent: AgentDef; ta
 }
 
 export const PHIL_TZ = process.env.PHIL_TZ || "America/New_York";
+
+/** Wall-clock offset of `tz` from UTC at instant `t`, in ms (e.g. -5h for New York in winter). */
+function tzOffset(t: number, tz: string): number {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(t)).map((x) => [x.type, Number(x.value)]));
+  return Date.UTC(p.year!, p.month! - 1, p.day!, p.hour!, p.minute!, p.second!) - Math.floor(t / 1000) * 1000;
+}
+
+/** Midnight at the start of `now`'s day in Phil's time zone (DST-safe: midnight is never in a gap in New York). */
+export function dayStart(now = new Date(), tz = PHIL_TZ): Date {
+  const local = new Date(now.getTime() + tzOffset(now.getTime(), tz));
+  const midnightAsUtc = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
+  // The offset at midnight can differ from now's on a DST day, so take it at the first guess.
+  return new Date(midnightAsUtc - tzOffset(midnightAsUtc - tzOffset(now.getTime(), tz), tz));
+}
 export const TIME_RULE = `Phil is in Rochester, NY. Give every time in Eastern time (${PHIL_TZ}), never GMT or UTC; convert if a source uses another zone.`;
 
 export function briefPrompt(status: { pending: number; working: string[]; errors: string[]; recent: string[]; reports: { name: string; text: string }[]; waiting?: string }, now: Date): string {

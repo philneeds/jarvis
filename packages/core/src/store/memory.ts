@@ -59,6 +59,11 @@ export function memoryStore(file?: string): Store {
           .sort(byAtDesc)
           .slice(0, limit);
       },
+      async countSince(kind, since) {
+        const from = since.toISOString(), out: Record<string, number> = {};
+        for (const e of s.activity) if (e.kind === kind && e.at >= from) out[e.agentId] = (out[e.agentId] ?? 0) + 1;
+        return out;
+      },
     },
     approvals: {
       async add(a) { s.approvals.push(a); save(); },

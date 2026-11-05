@@ -6,7 +6,8 @@ import { ModelRouter } from "../router/index.js";
 import type { MemoryItem, MetricPoint, RecordItem, Store } from "../store/types.js";
 import { usageSummary } from "../usage/caps.js";
 import { extractBlocks, parsePlan } from "./blocks.js";
-import { agentSystemPrompt, briefPrompt, condensePrompt, jarvisSystemPrompt, leadBriefTask, planPrompt, synthesisPrompt } from "./prompts.js";
+import { agentSystemPrompt, briefPrompt, condensePrompt, dayStart, jarvisSystemPrompt, leadBriefTask, planPrompt, synthesisPrompt } from "./prompts.js";
+import { memoryLine } from "./readable.js";
 import { getAgentConfig } from "../config.js";
 import { VENTURES, type VentureId } from "../registry/ventures.js";
 import { VENTURE_DASH, recordKind } from "../ventures/dashboards.js";
@@ -297,7 +298,7 @@ export class Jarvis {
     for (const a of approvals) await this.requestApproval({ agentId: agent.id, ...a, runId });
     for (const m of remember) {
       await this.store.memory.set({ scope: m.scope, key: m.key, value: m.value, source: agent.id });
-      await this.router.log(agent.id, "memory", `${agent.name} remembered [${m.scope}] ${m.key}`, runId, { value: m.value });
+      await this.router.log(agent.id, "memory", memoryLine(agent.name, m.scope, m.key, agent.id), runId, { scope: m.scope, key: m.key, value: m.value });
     }
     for (const m of metrics) await this.recordMetric(m.venture as VentureId, m.key, m.value, agent.id, m.at, runId);
     for (const r of records) await this.upsertRecord({ venture: r.venture as VentureId, kind: r.kind, id: r.id, title: r.title, status: r.status, fields: r.fields, source: agent.id }, runId);
@@ -903,14 +904,17 @@ export class Jarvis {
     return { level, text, killSwitch: kill, phase, at: new Date().toISOString() };
   }
 
-  /** Live snapshot for the Agent Web: every agent with its status, phase and model. */
-  async snapshot() {
-    const states = new Map((await this.store.agentState.all()).map((s) => [s.id, s]));
-    const phase = await this.store.settings.get("phase", 0);
+  /**
+   * Live snapshot for the Agent Web: every agent with its status, phase and model, and `runsToday`: the agent's
+   * own successful runs since midnight in Phil's time zone (one grouped count over today's "run" lines).
+   */
+  async snapshot(now = new Date()) {
+    const [rows, phase, runs] = await Promise.all([this.store.agentState.all(), this.store.settings.get("phase", 0), this.store.activity.countSince("run", dayStart(now))]);
+    const states = new Map(rows.map((s) => [s.id, s]));
     return AGENTS.map((a) => {
       const st = states.get(a.id);
       const model = st?.modelOverride || a.model;
-      return { ...a, live: a.phase <= phase, model, status: st?.paused ? "paused" : (st?.status ?? "idle"), lastRunAt: st?.lastRunAt, lastError: st?.lastError, detail: st?.detail };
+      return { ...a, live: a.phase <= phase, model, status: st?.paused ? "paused" : (st?.status ?? "idle"), lastRunAt: st?.lastRunAt, lastError: st?.lastError, detail: st?.detail, runsToday: runs[a.id] ?? 0 };
     });
   }
 }

@@ -104,14 +104,7 @@ export function Core({ state = "idle", level = 0, size = 260, label }: { state?:
         i === 0 ? ctx.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r) : ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
       }
       ctx.closePath(); ctx.lineWidth = 1.5; ctx.strokeStyle = p.b; ctx.shadowBlur = 12; ctx.shadowColor = p.b; ctx.stroke(); ctx.shadowBlur = 0;
-
-      // Four small readouts at the compass points.
-      ctx.font = "9px 'IBM Plex Mono', monospace"; ctx.fillStyle = `${p.b}CC`; ctx.textAlign = "center";
-      const hex = Math.floor((t * 97 * speed) % 65536).toString(16).toUpperCase().padStart(4, "0");
-      ctx.fillText(`0x${hex}`, cx, cy - R + 24);
-      ctx.fillText(`${Math.round(lvl * 100).toString().padStart(3, "0")}%`, cx, cy + R - 18);
-      ctx.save(); ctx.translate(cx - R + 22, cy); ctx.rotate(-Math.PI / 2); ctx.fillText(s.toUpperCase(), 0, 0); ctx.restore();
-      ctx.save(); ctx.translate(cx + R - 22, cy); ctx.rotate(Math.PI / 2); ctx.fillText("J.A.R.V.I.S", 0, 0); ctx.restore();
+      // No made-up readouts on the ring: fake numbers make the real ones elsewhere harder to believe.
 
       raf = requestAnimationFrame(draw);
     };
@@ -121,10 +114,11 @@ export function Core({ state = "idle", level = 0, size = 260, label }: { state?:
     return () => { running = false; cancelAnimationFrame(raf); document.removeEventListener("visibilitychange", vis); };
   }, [size]);
 
+  // The state word sits under the ring, clear of the arcs.
   return (
-    <div className="relative flex-none" style={{ width: size, height: size }} aria-hidden="true">
+    <div className="flex-none flex flex-col items-center gap-2" style={{ width: size }} aria-hidden="true">
       <canvas ref={ref} style={{ width: size, height: size }} />
-      {label && <span className="absolute left-0 right-0 text-center text-[10px] tracking-[0.22em]" style={{ bottom: size * 0.2, color: "var(--ink-strong)", textShadow: "0 0 8px rgba(124,196,255,0.9)" }}>{label}</span>}
+      {label && <span className="text-[11px] leading-none tracking-[0.22em] whitespace-nowrap" style={{ color: "var(--ink-strong)", textShadow: "0 0 8px rgba(124,196,255,0.9)" }}>{label}</span>}
     </div>
   );
 }
