@@ -12,6 +12,7 @@ export { Scheduler, SCHEDULES, type Schedule } from "./scheduler.js";
 export * from "./config.js";
 export * from "./uploads.js";
 export * from "./health.js";
+export * from "./xread.js";
 export * from "./tools/index.js";
 export type { Executor } from "./jarvis/orchestrator.js";
 export * from "./connectors/index.js";

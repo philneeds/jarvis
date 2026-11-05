@@ -14,6 +14,7 @@ import { VENTURE_DASH, recordKind } from "../ventures/dashboards.js";
 import { TOOLS } from "../tools/index.js";
 import { imageInputs } from "../uploads.js";
 import { HEALTH_TOOLS } from "../health.js";
+import { XREAD_TOOLS, expandXLinks, xPostIds } from "../xread.js";
 
 export interface JarvisOptions {
   store: Store;
@@ -156,7 +157,7 @@ export class Jarvis {
   }
 
   /** Every tool an agent could be given: built-in plus connectors. */
-  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...this.connectorTools.values()]; }
+  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...this.connectorTools.values()]; }
 
   // ---- Chat -------------------------------------------------------------
 
@@ -173,7 +174,18 @@ export class Jarvis {
     const trimmed = text.trim() || (images?.length ? "What do you think of this?" : "");
     if (!trimmed) throw new Error("empty message");
     const message = await this.say({ role: "phil", text: trimmed, channel: opts.channel ?? "hq", ...(images?.length ? { images } : {}) });
-    const done = this.convo.run({ channel: opts.channel ?? "hq", replyTo: message.id, images }, () => this.handleStored(trimmed).catch(async (e) => [await this.say({ role: "jarvis", text: `Something broke on my side: ${(e as Error).message}`, kind: "final" })]));
+    const ctx = { channel: opts.channel ?? "hq", replyTo: message.id, images };
+    const done = this.convo.run(ctx, async () => {
+      // X links: open the posts first, so whoever takes this sees what they say (and their photos).
+      let work = trimmed;
+      if (!trimmed.startsWith("/") && xPostIds(trimmed).length) {
+        const x = await expandXLinks(trimmed).catch(() => ({ context: "", imageIds: [] as string[] }));
+        if (x.context) work = `${trimmed}\n\n${x.context}`;
+        if (x.imageIds.length) ctx.images = [...(ctx.images ?? []), ...x.imageIds].slice(0, 4);
+        if (x.context) await this.router.log("jarvis", "system", `Opened ${xPostIds(trimmed).length} X post(s) Phil linked`);
+      }
+      return this.handleStored(work);
+    }).catch(async (e) => [await this.say({ role: "jarvis", text: `Something broke on my side: ${(e as Error).message}`, kind: "final" })]);
     return { message, done };
   }
 
