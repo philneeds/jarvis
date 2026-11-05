@@ -12,7 +12,7 @@ function CommandInner() {
 
 export default function CommandPage() {
   return (
-    <Shell>
+    <Shell fill>
       <div className="flex-1 flex flex-col min-h-0 max-w-4xl w-full mx-auto">
         <Suspense><CommandInner /></Suspense>
       </div>

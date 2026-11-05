@@ -98,6 +98,10 @@ export interface Store {
     add(m: MetricPoint): Promise<void>;
     series(venture: string, key: string, limit?: number): Promise<MetricPoint[]>;
     latest(venture: string): Promise<MetricPoint[]>;
+    get(id: string): Promise<MetricPoint | undefined>;
+    /** Change a reading's value; returns the updated point, or undefined if there is no such reading. */
+    update(id: string, patch: { value: number }): Promise<MetricPoint | undefined>;
+    remove(id: string): Promise<void>;
   };
   records: {
     upsert(r: RecordItem): Promise<void>;

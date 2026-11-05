@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { bus, type Approval, type AttentionItem, type ChatMessage, type SystemStatus } from "../events.js";
+import { bus, type Approval, type AttentionItem, type ChatMessage, type Goal, type SystemStatus } from "../events.js";
 import { AGENTS, CHARTERS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
 import { ModelRouter } from "../router/index.js";
-import type { Store } from "../store/types.js";
+import type { MemoryItem, MetricPoint, RecordItem, Store } from "../store/types.js";
 import { usageSummary } from "../usage/caps.js";
 import { extractBlocks, parsePlan } from "./blocks.js";
 import { agentSystemPrompt, briefPrompt, condensePrompt, jarvisSystemPrompt, leadBriefTask, planPrompt, synthesisPrompt } from "./prompts.js";
@@ -51,6 +51,11 @@ export function isOutbound(a: Pick<Approval, "kind" | "payload">): boolean {
   // An action no connector recognises is treated as outbound: when unsure, ask.
   return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|memory\.replace|record\.)/.test(p.action);
 }
+
+/** Something Phil deleted, kept for a while so he can undo it. */
+interface TrashEntry { id: string; at: string; kind: "memory" | "record" | "metric" | "goal"; label: string; data: unknown; index?: number }
+
+const clampPct = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0);
 
 /** Which payload field holds the text Phil edits on the card, per action. */
 const TEXT_FIELD: Record<string, string> = { "gmail.send": "body", "x.post": "text", "x.reply": "text", "x.dm": "text" };
@@ -303,6 +308,24 @@ export class Jarvis {
     return item;
   }
 
+  /** Phil rewrites an item in place: its title, the why, or the due date (null or "" clears it). */
+  async editAttention(id: string, patch: { title?: string; why?: string; due?: string | null }): Promise<AttentionItem | undefined> {
+    const list = await this.attentionList();
+    const item = list.find((i) => i.id === id);
+    if (!item) return undefined;
+    if (patch.title !== undefined) {
+      const title = patch.title.trim();
+      if (!title) throw new Error("title can't be empty");
+      item.title = title;
+    }
+    if (patch.why !== undefined) item.why = patch.why.trim();
+    if (patch.due !== undefined) item.due = patch.due?.trim() || undefined;
+    await this.saveAttention(list);
+    await this.router.log("jarvis", "decision", `Phil edited "${item.title}"`, undefined, { attentionId: id, changed: Object.keys(patch) });
+    bus.emitEvent({ type: "attention", item, change: "edited" });
+    return item;
+  }
+
   /** Short text of what's waiting, for prompts and the brief. */
   async attentionText(limit = 15): Promise<string> {
     const open = (await this.attention()).filter((i) => i.status === "open");
@@ -336,6 +359,179 @@ export class Jarvis {
     return item;
   }
 
+  /** Phil removes a record from a venture board. Returns it with an id that undoes the removal for a while. */
+  async removeRecord(venture: VentureId, id: string): Promise<{ record: RecordItem; undoId: string } | undefined> {
+    const r = await this.store.records.get(id);
+    if (!r || r.venture !== venture) return undefined;
+    await this.store.records.remove(id);
+    await this.router.log("jarvis", "memory", `${VENTURES[venture]?.short ?? venture} · removed ${r.kind}: ${r.title} (Phil)`, undefined, { venture, kind: r.kind, id });
+    const undoId = await this.toTrash({ kind: "record", label: `${r.title}`, data: r });
+    bus.emitEvent({ type: "venture", venture });
+    return { record: r, undoId };
+  }
+
+  /** Fix a wrong reading: Phil sets a metric point's value. */
+  async editMetric(venture: VentureId, pointId: string, value: number): Promise<MetricPoint | undefined> {
+    if (!Number.isFinite(value)) throw new Error("value must be a number");
+    const p = await this.store.metrics.get(pointId);
+    if (!p || p.venture !== venture) return undefined;
+    const next = await this.store.metrics.update(pointId, { value });
+    if (!next) return undefined;
+    await this.router.log("jarvis", "memory", `${VENTURES[venture]?.short ?? venture} · ${p.key} corrected ${p.value} → ${value} (Phil)`, undefined, { venture, key: p.key, from: p.value, value });
+    bus.emitEvent({ type: "venture", venture });
+    return next;
+  }
+
+  /** Drop a wrong reading altogether; the one before becomes the latest again. Undoable for a while. */
+  async deleteMetric(venture: VentureId, pointId: string): Promise<{ point: MetricPoint; undoId: string } | undefined> {
+    const p = await this.store.metrics.get(pointId);
+    if (!p || p.venture !== venture) return undefined;
+    await this.store.metrics.remove(pointId);
+    await this.router.log("jarvis", "memory", `${VENTURES[venture]?.short ?? venture} · ${p.key} reading ${p.value} removed (Phil)`, undefined, { venture, key: p.key, value: p.value });
+    const undoId = await this.toTrash({ kind: "metric", label: `${p.key} reading ${p.value}`, data: p });
+    bus.emitEvent({ type: "venture", venture });
+    return { point: p, undoId };
+  }
+
+  /** Phil forgets a memory item. Undoable for a while. */
+  async forgetMemory(scope: string, key: string): Promise<{ item: MemoryItem; undoId: string } | undefined> {
+    const item = await this.store.memory.get(scope, key);
+    if (!item) return undefined;
+    await this.store.memory.remove(scope, key);
+    await this.router.log("jarvis", "memory", `Phil forgot [${scope}] ${key}`);
+    const undoId = await this.toTrash({ kind: "memory", label: `[${scope}] ${key}`, data: item });
+    return { item, undoId };
+  }
+
+  // ---- Goals --------------------------------------------------------------------
+
+  static MAX_GOALS = 12;
+
+  private async goalList(): Promise<Goal[]> {
+    const saved = await this.store.settings.get<Goal[] | null>("goals", null);
+    if (saved) return saved;
+    // Before goals had a home of their own, HQ kept them as JSON in memory [phil] goals: carry them over once.
+    const legacy = await this.store.memory.get("phil", "goals");
+    if (!legacy) return [];
+    type Old = { name?: unknown; pct?: unknown; deadline?: unknown };
+    let old: { primary?: Old; secondary?: Old[] };
+    try { old = JSON.parse(legacy.value) as typeof old; } catch { return []; }
+    if (!old || typeof old !== "object") return [];
+    const rows = [old.primary ? { ...old.primary, primary: true } : undefined, ...(Array.isArray(old.secondary) ? old.secondary : []).map((g) => ({ ...g, primary: false }))];
+    const list: Goal[] = rows.filter((g): g is Old & { primary: boolean } => !!g && typeof g.name === "string" && !!g.name.trim()).map((g) => ({
+      id: randomUUID(), name: String(g.name).trim(), pct: clampPct(Number(g.pct)), deadline: typeof g.deadline === "string" && g.deadline ? g.deadline : undefined, primary: g.primary, updatedAt: legacy.updatedAt,
+    }));
+    await this.saveGoals(list, false);
+    return list;
+  }
+
+  /** Keeps exactly one primary (the first marked, else the first goal), stores the list, and tells agents and screens. */
+  private async saveGoals(list: Goal[], announce = true): Promise<Goal[]> {
+    let seen = false;
+    for (const g of list) { if (g.primary && !seen) seen = true; else g.primary = false; }
+    if (!seen && list[0]) list[0].primary = true;
+    const sorted = [...list.filter((g) => g.primary), ...list.filter((g) => !g.primary)];
+    await this.store.settings.set("goals", sorted);
+    // Agents read memory, not settings: keep a plain-words copy of the goals there.
+    if (sorted.length) {
+      const fmt = (g: Goal) => `${g.name} (${g.pct}% done${g.deadline ? `, deadline ${g.deadline}` : ""})`;
+      const [first, ...rest] = sorted;
+      await this.store.memory.set({ scope: "phil", key: "goals", value: `Primary: ${fmt(first!)}.${rest.length ? ` Also: ${rest.map(fmt).join("; ")}.` : ""}`, source: "phil" });
+    } else await this.store.memory.remove("phil", "goals");
+    if (announce) bus.emitEvent({ type: "goals", goals: sorted });
+    return sorted;
+  }
+
+  /** Phil's goals, primary first. */
+  async goals(): Promise<Goal[]> {
+    const list = await this.goalList();
+    return [...list.filter((g) => g.primary), ...list.filter((g) => !g.primary)];
+  }
+
+  async addGoal(g: { name: string; pct?: number; deadline?: string; primary?: boolean }): Promise<Goal> {
+    const name = g.name.trim();
+    if (!name) throw new Error("name can't be empty");
+    const list = await this.goalList();
+    if (list.length >= Jarvis.MAX_GOALS) throw new Error(`at most ${Jarvis.MAX_GOALS} goals`);
+    const goal: Goal = { id: randomUUID(), name, pct: clampPct(g.pct ?? 0), deadline: g.deadline || undefined, primary: !!g.primary || list.length === 0, updatedAt: new Date().toISOString() };
+    if (goal.primary) for (const x of list) x.primary = false;
+    await this.saveGoals([...list, goal]);
+    await this.router.log("jarvis", "memory", `Phil set a goal: ${goal.name}${goal.primary ? " (primary)" : ""}`);
+    return goal;
+  }
+
+  /** Rename, move progress, set or clear the deadline, or make it the primary goal. */
+  async updateGoal(id: string, patch: { name?: string; pct?: number; deadline?: string | null; primary?: true }): Promise<Goal | undefined> {
+    const list = await this.goalList();
+    const goal = list.find((g) => g.id === id);
+    if (!goal) return undefined;
+    if (patch.name !== undefined) {
+      const name = patch.name.trim();
+      if (!name) throw new Error("name can't be empty");
+      goal.name = name;
+    }
+    if (patch.pct !== undefined) goal.pct = clampPct(patch.pct);
+    if (patch.deadline !== undefined) goal.deadline = patch.deadline || undefined;
+    if (patch.primary) for (const g of list) g.primary = g.id === id;
+    goal.updatedAt = new Date().toISOString();
+    await this.saveGoals(list);
+    await this.router.log("jarvis", "memory", `Phil updated goal "${goal.name}"${patch.primary ? " and made it primary" : ""}${patch.pct !== undefined ? ` (${goal.pct}%)` : ""}`);
+    return goal;
+  }
+
+  /** Delete a goal; if it was primary, the next one takes over. Undoable for a while. */
+  async deleteGoal(id: string): Promise<{ goal: Goal; undoId: string } | undefined> {
+    const list = await this.goalList();
+    const index = list.findIndex((g) => g.id === id);
+    if (index < 0) return undefined;
+    const [goal] = list.splice(index, 1);
+    await this.saveGoals(list);
+    await this.router.log("jarvis", "memory", `Phil deleted goal "${goal!.name}"`);
+    const undoId = await this.toTrash({ kind: "goal", label: goal!.name, data: goal, index });
+    return { goal: goal!, undoId };
+  }
+
+  // ---- Undo ---------------------------------------------------------------------
+
+  /** How long a delete can be undone. HQ shows the Undo button for a few seconds; the server keeps it longer. */
+  static UNDO_MS = 15 * 60_000;
+
+  private async toTrash(e: Omit<TrashEntry, "id" | "at">): Promise<string> {
+    const now = Date.now();
+    const list = (await this.store.settings.get<TrashEntry[]>("trash", [])).filter((x) => now - Date.parse(x.at) < Jarvis.UNDO_MS);
+    const entry: TrashEntry = { id: randomUUID(), at: new Date(now).toISOString(), ...e };
+    await this.store.settings.set("trash", [...list, entry].slice(-50));
+    return entry.id;
+  }
+
+  /** Put back something Phil deleted: a memory item, a venture record or reading, or a goal. */
+  async undo(undoId: string): Promise<{ kind: TrashEntry["kind"]; label: string } | undefined> {
+    const list = await this.store.settings.get<TrashEntry[]>("trash", []);
+    const e = list.find((x) => x.id === undoId);
+    if (!e || Date.now() - Date.parse(e.at) >= Jarvis.UNDO_MS) return undefined;
+    await this.store.settings.set("trash", list.filter((x) => x.id !== undoId));
+    if (e.kind === "memory") {
+      const m = e.data as MemoryItem;
+      await this.store.memory.set({ scope: m.scope, key: m.key, value: m.value, source: m.source });
+    } else if (e.kind === "record") {
+      const r = e.data as RecordItem;
+      await this.store.records.upsert(r);
+      bus.emitEvent({ type: "venture", venture: r.venture });
+    } else if (e.kind === "metric") {
+      const p = e.data as MetricPoint;
+      if (!(await this.store.metrics.get(p.id))) await this.store.metrics.add(p);
+      bus.emitEvent({ type: "venture", venture: p.venture });
+    } else {
+      const g = e.data as Goal;
+      const goals = (await this.goalList()).filter((x) => x.id !== g.id);
+      if (g.primary) for (const x of goals) x.primary = false;
+      goals.splice(Math.min(e.index ?? goals.length, goals.length), 0, g);
+      await this.saveGoals(goals);
+    }
+    await this.router.log("jarvis", "memory", `Phil undid deleting ${e.kind === "memory" ? "memory" : e.kind} ${e.label}`);
+    return { kind: e.kind, label: e.label };
+  }
+
   /** Everything one venture page needs. */
   async ventureDashboard(venture: VentureId) {
     const v = VENTURES[venture];
@@ -346,7 +542,7 @@ export class Jarvis {
       const series = await this.store.metrics.series(venture, m.key, 60);
       const latest = series[series.length - 1];
       const prev = series.length > 1 ? series[series.length - 2] : undefined;
-      return { ...m, series: series.map((p) => ({ at: p.at, value: p.value })), latest: latest?.value, at: latest?.at, delta: latest && prev ? latest.value - prev.value : undefined };
+      return { ...m, series: series.map((p) => ({ at: p.at, value: p.value })), latest: latest?.value, latestId: latest?.id, at: latest?.at, delta: latest && prev ? latest.value - prev.value : undefined };
     }));
     const records = await Promise.all(dash.records.map(async (k) => ({ ...k, items: await this.store.records.list(venture, k.kind) })));
     const pending = (await this.store.approvals.list("pending")).filter((a) => ids.has(a.agentId));

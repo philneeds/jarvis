@@ -102,3 +102,76 @@ test("venture dashboards over the API", async () => {
   assert.equal((await call(`/api/ventures/jdpm/records/${rec.record.id}`, { method: "DELETE", cookie })).status, 200);
   assert.equal((await call("/api/ventures/root", { cookie })).status, 404);
 });
+
+test("editing and undo over the API: needs-you items, goals, metric readings, memory and records", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const json = async <T,>(r: Response | Promise<Response>) => (await (await r).json()) as T;
+  const send = (path: string, method: string, body?: unknown) => call(path, { method, cookie, body: body === undefined ? undefined : JSON.stringify(body) });
+
+  // Needs you: edit in place.
+  const { item } = await json<{ item: { id: string } }>(send("/api/attention", "POST", { title: "Renew passport", why: "Expires in March" }));
+  const edited = await json<{ item: { title: string; why: string; due?: string } }>(send(`/api/attention/${item.id}`, "PUT", { title: "Renew passport now", due: "2026-12-01" }));
+  assert.equal(edited.item.title, "Renew passport now");
+  assert.equal(edited.item.why, "Expires in March");
+  assert.equal(edited.item.due, "2026-12-01");
+  assert.equal((await json<{ item: { due?: string } }>(send(`/api/attention/${item.id}`, "PUT", { due: null }))).item.due, undefined);
+  assert.equal((await send(`/api/attention/${item.id}`, "PUT", { title: "" })).status, 400);
+  assert.equal((await send(`/api/attention/${item.id}`, "PUT", { due: "next week" })).status, 400);
+  assert.equal((await send(`/api/attention/${item.id}`, "PUT", {})).status, 400);
+  assert.equal((await send(`/api/attention/${item.id}`, "PUT", { bogus: 1 })).status, 400);
+  assert.equal((await call(`/api/attention/${item.id}`, { method: "PUT", cookie, body: "not json" })).status, 400);
+  assert.equal((await send("/api/attention/nope", "PUT", { title: "x" })).status, 404);
+
+  // Goals.
+  assert.deepEqual((await json<{ goals: unknown[] }>(send("/api/goals", "GET"))).goals, []);
+  const g1 = await json<{ goal: { id: string; primary: boolean } }>(send("/api/goals", "POST", { name: "Exit the agency", pct: 10, deadline: "2027-06-01" }));
+  assert.equal(g1.goal.primary, true);
+  const g2 = await json<{ goal: { id: string } }>(send("/api/goals", "POST", { name: "Get fit" }));
+  assert.equal((await send("/api/goals", "POST", { name: " " })).status, 400);
+  assert.equal((await send("/api/goals", "POST", { name: "x", pct: 101 })).status, 400);
+  assert.equal((await send("/api/goals", "POST", { name: "x", deadline: "soon" })).status, 400);
+  const prim = await json<{ goals: { id: string; name: string; primary: boolean; pct: number }[] }>(send(`/api/goals/${g2.goal.id}`, "PUT", { name: "Get properly fit", pct: 35, primary: true }));
+  assert.deepEqual(prim.goals.map((g) => [g.name, g.primary, g.pct]), [["Get properly fit", true, 35], ["Exit the agency", false, 10]]);
+  assert.equal((await send(`/api/goals/${g2.goal.id}`, "PUT", { primary: false })).status, 400);
+  assert.equal((await send(`/api/goals/${g2.goal.id}`, "PUT", {})).status, 400);
+  assert.equal((await send("/api/goals/nope", "PUT", { pct: 5 })).status, 404);
+  const gdel = await json<{ undoId: string; goals: unknown[] }>(send(`/api/goals/${g1.goal.id}`, "DELETE"));
+  assert.equal(gdel.goals.length, 1);
+  assert.equal((await send("/api/goals/nope", "DELETE")).status, 404);
+  assert.equal((await send(`/api/undo/${gdel.undoId}`, "POST")).status, 200);
+  assert.equal((await json<{ goals: unknown[] }>(send("/api/goals", "GET"))).goals.length, 2);
+  assert.equal((await send(`/api/undo/${gdel.undoId}`, "POST")).status, 404);
+
+  // A wrong metric reading: correct it, delete it, undo.
+  await send("/api/ventures/money/metrics", "POST", { key: "cash", value: 5000, at: "2026-11-01T09:00:00Z" });
+  await send("/api/ventures/money/metrics", "POST", { key: "cash", value: 50000, at: "2026-11-02T09:00:00Z" });
+  const cash = async () => (await json<{ metrics: { key: string; latest?: number; latestId?: string }[] }>(send("/api/ventures/money", "GET"))).metrics.find((m) => m.key === "cash")!;
+  const before = await cash();
+  assert.equal(before.latest, 50000);
+  assert.equal((await send(`/api/ventures/money/metrics/${before.latestId}`, "PUT", { value: 5200 })).status, 200);
+  assert.equal((await cash()).latest, 5200);
+  assert.equal((await send(`/api/ventures/money/metrics/${before.latestId}`, "PUT", { value: "lots" })).status, 400);
+  assert.equal((await send(`/api/ventures/jdpm/metrics/${before.latestId}`, "PUT", { value: 1 })).status, 404);
+  assert.equal((await send(`/api/ventures/nope/metrics/${before.latestId}`, "PUT", { value: 1 })).status, 404);
+  const mdel = await json<{ undoId: string }>(send(`/api/ventures/money/metrics/${before.latestId}`, "DELETE"));
+  assert.equal((await cash()).latest, 5000);
+  assert.equal((await send(`/api/ventures/money/metrics/${before.latestId}`, "DELETE")).status, 404);
+  await send(`/api/undo/${mdel.undoId}`, "POST");
+  assert.equal((await cash()).latest, 5200);
+
+  // Memory and records: delete returns an undo id.
+  await send("/api/memory", "PUT", { scope: "phil", key: "coffee", value: "black" });
+  assert.equal((await send("/api/memory?scope=phil", "DELETE")).status, 400);
+  assert.equal((await send("/api/memory?scope=phil&key=tea", "DELETE")).status, 404);
+  const fm = await json<{ undoId: string }>(send("/api/memory?scope=phil&key=coffee", "DELETE"));
+  assert.ok(!(await json<{ items: { key: string }[] }>(send("/api/memory?scope=phil", "GET"))).items.some((i) => i.key === "coffee"));
+  await send(`/api/undo/${fm.undoId}`, "POST");
+  assert.ok((await json<{ items: { key: string }[] }>(send("/api/memory?scope=phil", "GET"))).items.some((i) => i.key === "coffee"));
+  const rec = await json<{ record: { id: string } }>(send("/api/ventures/jdpm/records", "PUT", { kind: "lead", title: "Pat Lee" }));
+  const rdel = await json<{ undoId: string }>(send(`/api/ventures/jdpm/records/${rec.record.id}`, "DELETE"));
+  assert.equal((await send(`/api/ventures/jdpm/records/${rec.record.id}`, "DELETE")).status, 404);
+  await send(`/api/undo/${rdel.undoId}`, "POST");
+  assert.equal((await send(`/api/ventures/jdpm/records/${rec.record.id}`, "DELETE")).status, 200);
+  assert.equal((await send("/api/undo/nope", "POST")).status, 404);
+});

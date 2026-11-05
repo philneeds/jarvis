@@ -104,6 +104,9 @@ export function memoryStore(file?: string): Store {
         for (const m of s.metrics.filter((x) => x.venture === venture).sort((a, b) => (a.at < b.at ? -1 : 1))) out.set(m.key, m);
         return [...out.values()];
       },
+      async get(id) { return s.metrics.find((m) => m.id === id); },
+      async update(id, patch) { const m = s.metrics.find((x) => x.id === id); if (!m) return undefined; m.value = patch.value; save(); return m; },
+      async remove(id) { const i = s.metrics.findIndex((m) => m.id === id); if (i >= 0) s.metrics.splice(i, 1); save(); },
     },
     records: {
       async upsert(r) { const i = s.records.findIndex((x) => x.id === r.id); if (i >= 0) s.records[i] = r; else s.records.push(r); save(); },

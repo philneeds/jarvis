@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Shell } from "@/components/Shell";
 import { api, post, timeAgo } from "@/lib/api";
+import { useUndo } from "@/lib/undo";
 
 interface Item { scope: string; key: string; value: string; source?: string; updatedAt: string }
 
@@ -14,6 +15,7 @@ export default function MemoryPage() {
   const [add, setAdd] = useState({ scope: "phil", key: "", value: "" });
   const [msg, setMsg] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const showUndo = useUndo();
 
   const load = () => api<{ items: Item[] }>("/api/memory").then((r) => setItems(r.items)).catch((e) => setMsg((e as Error).message));
   useEffect(() => { void load(); }, []);
@@ -23,17 +25,20 @@ export default function MemoryPage() {
     setEdit(null); await load();
   };
   const remove = async (scope: string, key: string) => {
-    if (!confirm(`Forget [${scope}] ${key}?`)) return;
-    await api(`/api/memory?scope=${encodeURIComponent(scope)}&key=${encodeURIComponent(key)}`, { method: "DELETE" });
-    await load();
+    try {
+      const r = await api<{ undoId: string }>(`/api/memory?scope=${encodeURIComponent(scope)}&key=${encodeURIComponent(key)}`, { method: "DELETE" });
+      await load();
+      showUndo(`Forgot [${scope}] ${key}`, r.undoId, () => void load());
+    } catch (e) { setMsg((e as Error).message); }
   };
   const condense = async () => {
     setBusy(true); setMsg(undefined);
     try { setMsg((await post<{ message: string }>("/api/memory/condense")).message); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
   };
 
-  const ql = q.toLowerCase();
-  const shown = items.filter((i) => !ql || `${i.scope} ${i.key} ${i.value}`.toLowerCase().includes(ql));
+  // Every word must appear somewhere in the scope, key or value.
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = items.filter((i) => { const hay = `${i.scope}\n${i.key}\n${i.value}`.toLowerCase(); return words.every((w) => hay.includes(w)); });
   const scopes = [...new Set(shown.map((i) => i.scope))].sort();
 
   return (
@@ -41,8 +46,11 @@ export default function MemoryPage() {
       <div className="max-w-3xl w-full mx-auto p-4 flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="display font-bold text-2xl tracking-[0.2em] m-0" style={{ color: "var(--ink-strong)" }}>MEMORY</h1>
-          <span className="text-[12px]" style={{ color: "var(--muted)" }}>{items.length} items</span>
-          <input className="input h-9 w-56" placeholder="Search" aria-label="Search memory" value={q} onChange={(e) => setQ(e.target.value)} />
+          <span className="text-[12px]" style={{ color: "var(--muted)" }} aria-live="polite">{words.length ? `${shown.length} of ${items.length} items` : `${items.length} items`}</span>
+          <span className="flex gap-1 w-full sm:w-auto order-last sm:order-none">
+            <input type="search" className="input h-9 flex-1 sm:w-64" placeholder="Search key, value or scope" aria-label="Search memory by key, value or scope" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setQ(""); }} />
+            {q && <button className="btn btn-sm h-9" onClick={() => setQ("")}>Clear</button>}
+          </span>
           <button className="btn btn-sm ml-auto" disabled={busy} onClick={condense}>Condense (Oscar)</button>
         </div>
         <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>What the web knows about you, your ventures and contacts. Agents read this before they act. Correct anything here; Oscar&apos;s condensing waits for your approval.</p>
@@ -55,7 +63,8 @@ export default function MemoryPage() {
           <button className="btn btn-sm btn-primary h-9" disabled={!add.key || !add.value}>Remember</button>
         </form>
 
-        {scopes.length === 0 && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>Nothing on file yet. Agents add to this as they work; so can you.</div>}
+        {scopes.length === 0 && items.length > 0 && <div className="card text-center py-6" style={{ color: "var(--muted)" }}>Nothing matches &ldquo;{q.trim()}&rdquo;.</div>}
+        {items.length === 0 && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>Nothing on file yet. Agents add to this as they work; so can you.</div>}
         {scopes.map((scope) => (
           <section key={scope} className="card flex flex-col gap-2" aria-label={scope}>
             <span className="label">{scope}</span>

@@ -103,6 +103,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tabs { display: flex; gap: 2px; }
 .tabs a, .tabs button { flex: 1; height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink); background: rgba(5, 12, 32, 0.6); position: relative; }
 .tabs a[aria-current="page"] { border-color: var(--accent); color: var(--ink-bright); background: rgba(60, 130, 255, 0.25); }
+/* Search boxes bring their own Clear button. */
+input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }
+/* Small quiet buttons on a chat message (copy, ask again). */
+.msg-actions { display: flex; gap: 4px; justify-content: flex-end; margin: 4px -6px -6px 0; white-space: normal; }
+.msg-act { min-height: 24px; padding: 0 6px; border: 1px solid transparent; background: transparent; color: var(--dim); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; }
+.msg-act:hover, .msg-act:focus-visible { color: var(--ink-strong); border-color: var(--accent-soft); }
+.msg-act:disabled { opacity: 0.5; cursor: default; }
+/* Undo toast: above the phone's bottom tabs, bottom-centre on wider screens. */
+.toast-host { position: fixed; left: 0; right: 0; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); display: flex; justify-content: center; pointer-events: none; z-index: 40; padding: 0 16px; }
+@media (min-width: 768px) { .toast-host { bottom: 20px; } }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; max-width: min(480px, 100%); padding: 8px 8px 8px 14px; border: 1px solid var(--accent); background: rgba(5, 12, 32, 0.97); color: var(--ink-bright); font-size: 12px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
+.toast-x { width: 32px; height: 32px; border: 0; background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; }
+.toast-x:hover { color: var(--ink-bright); }
 .badge { position: absolute; top: 4px; right: 6px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--amber); color: #06112B; font-size: 10px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
 
 /* Jarvis core: the holographic orb. */

@@ -124,6 +124,9 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
         for (const r of rows) if (!out.has(r.key)) out.set(r.key, toMetric(r));
         return [...out.values()];
       },
+      async get(id) { const r = (await db.select().from(t.metrics).where(eq(t.metrics.id, id)))[0]; return r ? toMetric(r) : undefined; },
+      async update(id, p) { const rows = await db.update(t.metrics).set({ value: p.value }).where(eq(t.metrics.id, id)).returning(); return rows[0] ? toMetric(rows[0]) : undefined; },
+      async remove(id) { await db.delete(t.metrics).where(eq(t.metrics.id, id)); },
     },
     records: {
       async upsert(r) {

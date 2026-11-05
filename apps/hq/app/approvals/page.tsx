@@ -37,6 +37,8 @@ export default function ApprovalsPage() {
   const [asking, setAsking] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [byAgent, setByAgent] = useState("");                                      // Decided: "" = everyone
+  const [outcome, setOutcome] = useState<"" | "approved" | "edited" | "rejected">(""); // Decided: "" = every outcome
 
   useEffect(() => { if (tab === "decided") api<{ approvals: Approval[] }>("/api/approvals").then((r) => setDecided(r.approvals.filter((a) => a.status !== "pending"))).catch(() => undefined); }, [tab, pending.length]);
 
@@ -70,7 +72,10 @@ export default function ApprovalsPage() {
     } catch (e) { setError((e as Error).message); } finally { setAsking(null); }
   };
 
-  const list = tab === "pending" ? pending : decided;
+  const deciders = [...new Set(decided.map((a) => a.agentId))].sort((x, y) => agentName(x).localeCompare(agentName(y)));
+  const filtered = decided.filter((a) => (!byAgent || a.agentId === byAgent) && (!outcome || a.status === outcome));
+  const list = tab === "pending" ? pending : filtered;
+  const OUTCOMES = [["", "All"], ["approved", "Approved"], ["edited", "Edited"], ["rejected", "Rejected"]] as const;
 
   return (
     <Shell>
@@ -85,7 +90,21 @@ export default function ApprovalsPage() {
         </div>
         <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>Nothing goes out until you press the button that names it. Edit changes the text and keeps it waiting; More shows what the agent saw and lets you ask them about it.</p>
         {error && <div className="card text-[12px]" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{error}</div>}
-        {list.length === 0 && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>{tab === "pending" ? "Nothing waiting for you." : "No decisions yet."}</div>}
+        {tab === "decided" && decided.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter decisions">
+            <select className="input h-9 w-auto min-w-40 flex-1 sm:flex-none" aria-label="Filter by agent" value={byAgent} onChange={(e) => setByAgent(e.target.value)}>
+              <option value="">Every agent</option>
+              {deciders.map((id) => <option key={id} value={id}>{agentName(id)}</option>)}
+            </select>
+            <div className="tabs flex-1 sm:flex-none" style={{ minWidth: 280 }}>
+              {OUTCOMES.map(([v, label]) => <button key={v} aria-pressed={outcome === v} onClick={() => setOutcome(v)} style={outcome === v ? { borderColor: "var(--accent)", color: "var(--ink-bright)", background: "rgba(60,130,255,0.25)" } : undefined}>{label}</button>)}
+            </div>
+            <span className="text-[11px]" style={{ color: "var(--muted)" }} aria-live="polite">{filtered.length} of {decided.length}</span>
+            {(byAgent || outcome) && <button className="btn btn-sm h-9" onClick={() => { setByAgent(""); setOutcome(""); }}>Clear</button>}
+          </div>
+        )}
+        {tab === "decided" && decided.length > 0 && filtered.length === 0 && <div className="card text-center py-6" style={{ color: "var(--muted)" }}>No decisions match these filters.</div>}
+        {list.length === 0 && (tab === "pending" || decided.length === 0) && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>{tab === "pending" ? "Nothing waiting for you." : "No decisions yet."}</div>}
         {list.map((a) => {
           const v = venture(a.agentId);
           const act = action(a);

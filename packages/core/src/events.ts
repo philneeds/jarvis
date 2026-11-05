@@ -16,7 +16,20 @@ export type JarvisEvent =
   | { type: "brief"; text: string; at: string }
   /** A scheduled report meant for Phil's phone as well as HQ (the brief, Monica's day plan). */
   | { type: "report"; agentId: string; title: string; text: string; at: string }
-  | { type: "attention"; item: AttentionItem; change: "raised" | "done" | "snoozed" | "reopened" };
+  | { type: "attention"; item: AttentionItem; change: "raised" | "done" | "snoozed" | "reopened" | "edited" }
+  | { type: "goals"; goals: Goal[] };
+
+/** One of Phil's goals. Exactly one is primary whenever there are any. */
+export interface Goal {
+  id: string;
+  name: string;
+  /** Percent done, 0..100. */
+  pct: number;
+  /** YYYY-MM-DD. */
+  deadline?: string;
+  primary: boolean;
+  updatedAt: string;
+}
 
 /** Something Phil has to act on. Lives until he ticks it off; raised by agents or by Phil. */
 export interface AttentionItem {

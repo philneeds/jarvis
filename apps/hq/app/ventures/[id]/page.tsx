@@ -6,12 +6,13 @@ import { Shell } from "@/components/Shell";
 import { Sparkline, fmtMetric } from "@/components/Sparkline";
 import { MayneLimits } from "@/components/MayneLimits";
 import { useLive } from "@/lib/live";
+import { useUndo } from "@/lib/undo";
 import { api, fmtTime, timeAgo } from "@/lib/api";
 import type { Venture, AgentLive, MetricDef, RecordKindDef, Approval, ActivityEntry } from "@/lib/types";
 
 interface Dash {
   venture: Venture; blurb: string; agents: AgentLive[];
-  metrics: (MetricDef & { series: { at: string; value: number }[]; latest?: number; at?: string; delta?: number })[];
+  metrics: (MetricDef & { series: { at: string; value: number }[]; latest?: number; latestId?: string; at?: string; delta?: number })[];
   records: (RecordKindDef & { items: { id: string; title: string; status: string; fields: Record<string, unknown>; source?: string; updatedAt: string }[] })[];
   pending: Approval[]; activity: ActivityEntry[];
 }
@@ -27,6 +28,8 @@ export default function VenturePage({ params }: { params: Promise<{ id: string }
   const [editing, setEditing] = useState<string | null>(null); // record id or "new:<kind>"
   const [draft, setDraft] = useState<{ kind: string; id?: string; title: string; status: string; fields: Record<string, string> }>({ kind: "", title: "", status: "", fields: {} });
   const [busy, setBusy] = useState(false);
+  const [fixing, setFixing] = useState<{ key: string; value: string } | null>(null); // correcting a metric's latest reading
+  const showUndo = useUndo();
 
   const load = () => api<Dash>(`/api/ventures/${id}`).then((r) => { setD(r); setErr(undefined); }).catch((e) => setErr((e as Error).message));
   useEffect(() => { void load(); }, [id, ventureTick]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -52,7 +55,30 @@ export default function VenturePage({ params }: { params: Promise<{ id: string }
     } catch (e2) { setErr((e2 as Error).message); } finally { setBusy(false); }
   };
   const setStatus = async (r: { id: string; title: string }, kind: string, status: string) => { await api(`/api/ventures/${id}/records`, { method: "PUT", body: JSON.stringify({ kind, id: r.id, title: r.title, status }) }); await load(); };
-  const remove = async (r: { id: string; title: string }) => { if (!confirm(`Remove "${r.title}"?`)) return; await api(`/api/ventures/${id}/records/${r.id}`, { method: "DELETE" }); await load(); };
+  const remove = async (r: { id: string; title: string }) => {
+    try {
+      const res = await api<{ undoId: string }>(`/api/ventures/${id}/records/${r.id}`, { method: "DELETE" });
+      await load();
+      showUndo(`Removed “${r.title}”`, res.undoId, () => void load());
+    } catch (e2) { setErr((e2 as Error).message); }
+  };
+  const fixMetric = async (e: FormEvent, m: Dash["metrics"][number]) => {
+    e.preventDefault();
+    if (!fixing || !m.latestId) return;
+    const v = Number(fixing.value);
+    if (fixing.value.trim() === "" || !Number.isFinite(v)) return;
+    setBusy(true);
+    try { await api(`/api/ventures/${id}/metrics/${m.latestId}`, { method: "PUT", body: JSON.stringify({ value: v }) }); setFixing(null); await load(); } catch (e2) { setErr((e2 as Error).message); } finally { setBusy(false); }
+  };
+  const deleteReading = async (m: Dash["metrics"][number]) => {
+    if (!m.latestId) return;
+    setBusy(true);
+    try {
+      const res = await api<{ undoId: string }>(`/api/ventures/${id}/metrics/${m.latestId}`, { method: "DELETE" });
+      setFixing(null); await load();
+      showUndo(`Deleted ${m.label} reading ${fmtMetric(m.latest, m.unit)}`, res.undoId, () => void load());
+    } catch (e2) { setErr((e2 as Error).message); } finally { setBusy(false); }
+  };
 
   if (!d) return <Shell><div className="p-6" style={{ color: err ? "var(--red)" : "var(--muted)" }}>{err ?? "Loading…"}</div></Shell>;
   const c = d.venture.color;
@@ -79,13 +105,27 @@ export default function VenturePage({ params }: { params: Promise<{ id: string }
                   <span className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>{m.label}</span>
                   <div className="flex items-baseline gap-2"><span className="display text-2xl" style={{ color: "var(--ink-bright)" }}>{fmtMetric(m.latest, m.unit)}</span>{m.delta !== undefined && <span className="text-[11px]" style={{ color: deltaColor }}>{m.delta > 0 ? "▲" : m.delta < 0 ? "▼" : "•"} {fmtMetric(Math.abs(m.delta), m.unit)}</span>}</div>
                   <Sparkline points={m.series} color={c} width={200} height={40} />
-                  <div className="flex items-center justify-between gap-2 text-[10px]" style={{ color: "var(--dim)" }}>
-                    <span>{m.at ? timeAgo(m.at) : "no readings"}</span>
-                    <form className="flex gap-1" onSubmit={(e) => addMetric(e, m.key)}>
-                      <input className="input h-7 w-20 text-[11px]" type="number" step="any" placeholder="add" aria-label={`New ${m.label} reading`} value={metricInput[m.key] ?? ""} onChange={(e) => setMetricInput({ ...metricInput, [m.key]: e.target.value })} />
-                      <button className="btn btn-sm h-7" disabled={busy || !metricInput[m.key]}>+</button>
+                  {fixing?.key === m.key && m.latestId ? (
+                    <form className="flex flex-col gap-1.5" onSubmit={(e) => fixMetric(e, m)} onKeyDown={(e) => { if (e.key === "Escape") setFixing(null); }} aria-label={`Fix the latest ${m.label} reading`}>
+                      <span className="text-[10px]" style={{ color: "var(--muted)" }}>Latest reading{m.at ? `, ${timeAgo(m.at)}` : ""}</span>
+                      <div className="flex gap-1">
+                        <input className="input h-8 flex-1 text-[12px]" type="number" step="any" aria-label={`Corrected ${m.label} value`} value={fixing.value} onChange={(e) => setFixing({ key: m.key, value: e.target.value })} autoFocus />
+                        <button className="btn btn-sm h-8 btn-primary" disabled={busy || fixing.value.trim() === "" || !Number.isFinite(Number(fixing.value))}>Save</button>
+                      </div>
+                      <div className="flex gap-1 justify-between">
+                        <button type="button" className="btn btn-sm h-8 btn-danger" disabled={busy} onClick={() => deleteReading(m)}>Delete reading</button>
+                        <button type="button" className="btn btn-sm h-8" onClick={() => setFixing(null)}>Cancel</button>
+                      </div>
                     </form>
-                  </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2 text-[10px]" style={{ color: "var(--dim)" }}>
+                      <span className="flex items-center gap-1 min-w-0">{m.at ? timeAgo(m.at) : "no readings"}{m.latestId && <button type="button" className="msg-act" onClick={() => setFixing({ key: m.key, value: String(m.latest ?? "") })} aria-label={`Fix the latest ${m.label} reading`}>Fix</button>}</span>
+                      <form className="flex gap-1" onSubmit={(e) => addMetric(e, m.key)}>
+                        <input className="input h-7 w-20 text-[11px]" type="number" step="any" placeholder="add" aria-label={`New ${m.label} reading`} value={metricInput[m.key] ?? ""} onChange={(e) => setMetricInput({ ...metricInput, [m.key]: e.target.value })} />
+                        <button className="btn btn-sm h-7" disabled={busy || !metricInput[m.key]} aria-label={`Add ${m.label} reading`}>+</button>
+                      </form>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -119,7 +159,7 @@ export default function VenturePage({ params }: { params: Promise<{ id: string }
                       <td><select className="input h-8 text-[11px] w-36" aria-label={`Status of ${r.title}`} value={r.status} onChange={(e) => setStatus(r, k.kind, e.target.value)}>{k.statuses.map((s) => <option key={s} value={s}>{s}</option>)}</select></td>
                       {k.fields.map((f) => <td key={f.key} className="whitespace-nowrap">{fmtField(r.fields[f.key], f.type)}</td>)}
                       <td className="whitespace-nowrap" style={{ color: "var(--muted)" }}>{timeAgo(r.updatedAt)}{r.source ? ` · ${r.source}` : ""}</td>
-                      <td><button className="btn btn-sm btn-danger" onClick={() => remove(r)}>×</button></td>
+                      <td><button className="btn btn-sm btn-danger" onClick={() => remove(r)} aria-label={`Remove ${r.title}`}>×</button></td>
                     </tr>
                   ))}</tbody></table>
               </div>

@@ -32,7 +32,8 @@ function isCurrent(path: string, href: string) {
   return path === href || path.startsWith(href + "/");
 }
 
-export function Shell({ children, bare }: { children: React.ReactNode; bare?: boolean }) {
+/** fill: exactly the viewport's height, so a page like Command scrolls its own list and keeps its input on screen. */
+export function Shell({ children, bare, fill }: { children: React.ReactNode; bare?: boolean; fill?: boolean }) {
   const path = usePathname();
   const { state, connected, pending, attention, refresh } = useLive();
   const openCount = attention.filter((i) => i.status === "open").length;
@@ -70,7 +71,7 @@ export function Shell({ children, bare }: { children: React.ReactNode; bare?: bo
   );
 
   return (
-    <div className="grid-bg min-h-dvh flex flex-col relative" style={{ zIndex: 1 }}>
+    <div className={`grid-bg ${fill ? "h-dvh overflow-hidden" : "min-h-dvh"} flex flex-col relative`} style={{ zIndex: 1 }}>
       {!bare && (
         <header className="flex items-center gap-3 px-4 py-2.5 border-b" style={{ borderColor: "var(--line)", background: "rgba(5,12,32,0.7)", backdropFilter: "blur(6px)" }}>
           <Link href="/" className="flex items-center gap-2 min-w-0">

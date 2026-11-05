@@ -30,8 +30,37 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
   const inputRef = useRef<HTMLInputElement>(null);
   const recRef = useRef<Recognition | null>(null);
   const [suggest, setSuggest] = useState<string[]>([]);
+  const [q, setQ] = useState("");
+  const [copied, setCopied] = useState<string | null>(null);
+  const [away, setAway] = useState(false);   // scrolled up, away from the latest
+  const stick = useRef(true);                // follow new messages only while at the bottom
 
-  useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [messages, busy]);
+  const ql = q.trim().toLowerCase();
+  useEffect(() => {
+    if (ql) return;
+    const last = messages[messages.length - 1];
+    if (stick.current || last?.role === "phil") { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); stick.current = true; setAway(false); }
+  }, [messages, busy, ql]);
+  const onScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stick.current = gap < 80;
+    setAway(gap > 160);
+  };
+  const toLatest = () => { const el = listRef.current; if (!el) return; el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }); stick.current = true; setAway(false); };
+  const copy = async (m: ChatMessage) => {
+    try { await navigator.clipboard.writeText(m.text); }
+    catch {
+      // Older browsers or a non-secure origin: fall back to a hidden textarea.
+      const ta = document.createElement("textarea");
+      ta.value = m.text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); } finally { ta.remove(); }
+    }
+    setCopied(m.id);
+    setTimeout(() => setCopied((c) => (c === m.id ? null : c)), 1500);
+  };
   // An ack with no final yet means Jarvis is still working on something.
   const lastIsAck = (() => { const acks = messages.filter((m) => m.kind === "ack"); const last = acks[acks.length - 1]; return !!last && Date.now() - Date.parse(last.at) < 6 * 60_000 && !messages.some((m) => m.kind === "final" && m.replyTo === last.replyTo); })();
 
@@ -83,11 +112,25 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
   const name = (m: ChatMessage) => m.role === "phil" ? "PHIL" : m.role === "jarvis" ? "JARVIS" : m.role === "system" ? "HQ" : (state?.agents.find((a) => a.id === m.agentId)?.name ?? m.agentId ?? "AGENT").toUpperCase();
   const color = (m: ChatMessage) => m.role === "phil" ? "var(--amber)" : m.role === "jarvis" ? "var(--accent)" : m.role === "system" ? "var(--muted)" : (state ? state.ventures[state.agents.find((a) => a.id === m.agentId)?.venture ?? "root"]?.color : "var(--accent)");
 
+  const lastPhil = [...messages].reverse().find((m) => m.role === "phil");
+  const shown = ql ? messages.filter((m) => m.text.toLowerCase().includes(ql) || name(m).toLowerCase().includes(ql)) : messages.slice(compact ? -30 : undefined);
+
   return (
     <div className="flex flex-col min-h-0 flex-1">
-      <div ref={listRef} className="scroll flex-1 min-h-0 p-4 flex flex-col gap-3" aria-live="polite">
+      {!compact && (
+        <div className="px-4 pt-3 pb-1 flex items-center gap-2">
+          <input type="search" className="input h-9 flex-1" placeholder="Search the conversation" aria-label="Search the conversation" value={q}
+            onChange={(e) => { setQ(e.target.value); if (!e.target.value) stick.current = true; }}
+            onKeyDown={(e) => { if (e.key === "Escape") { setQ(""); stick.current = true; } }} />
+          {ql && <span className="text-[11px] whitespace-nowrap" style={{ color: "var(--muted)" }} aria-live="polite">{shown.length} found</span>}
+          {q && <button type="button" className="btn btn-sm flex-none" onClick={() => { setQ(""); stick.current = true; }}>Clear</button>}
+        </div>
+      )}
+      <div className="relative flex-1 min-h-0 flex flex-col">
+      <div ref={listRef} onScroll={onScroll} className="scroll flex-1 min-h-0 p-4 flex flex-col gap-3" aria-live={ql ? "off" : "polite"}>
         {messages.length === 0 && <p className="msg msg-system">Say something to Jarvis. Use @name to talk to an agent, / for commands.</p>}
-        {messages.slice(compact ? -30 : undefined).map((m) => (
+        {ql && shown.length === 0 && <p className="msg msg-system">Nothing in this conversation matches &ldquo;{q.trim()}&rdquo;.</p>}
+        {shown.map((m) => (
           <div key={m.id} className={`msg ${m.role === "phil" ? "msg-phil" : m.role === "system" ? "msg-system" : ""} ${m.kind === "ack" ? "msg-ack" : m.kind === "progress" ? "msg-progress" : ""}`} style={m.role === "agent" || m.role === "jarvis" ? { borderColor: `color-mix(in srgb, ${color(m)} 45%, transparent)` } : undefined}>
             {m.role !== "system" && (
               <span className="who" style={{ color: color(m) }}>
@@ -96,15 +139,23 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
               </span>
             )}
             {m.role === "phil" ? m.text : <Md text={m.text} />}
+            {m.role !== "system" && (
+              <div className="msg-actions">
+                {m.id === lastPhil?.id && <button type="button" className="msg-act" disabled={busy} onClick={() => void send(m.text)} aria-label="Ask that again">Ask again</button>}
+                <button type="button" className="msg-act" onClick={() => void copy(m)} aria-label={`Copy ${m.role === "phil" ? "your" : `${name(m).toLowerCase()}'s`} message`}>{copied === m.id ? "Copied" : "Copy"}</button>
+              </div>
+            )}
           </div>
         ))}
-        {Object.entries(streams).filter(([, v]) => Date.now() - v.at < 120_000).map(([id, v]) => {
+        {!ql && Object.entries(streams).filter(([, v]) => Date.now() - v.at < 120_000).map(([id, v]) => {
           const a = state?.agents.find((x) => x.id === v.agentId);
           const c = v.agentId === "jarvis" ? "var(--accent)" : state?.ventures[a?.venture ?? "root"]?.color ?? "var(--accent)";
           return <div key={id} className="msg" style={{ borderColor: `color-mix(in srgb, ${c} 45%, transparent)`, opacity: 0.85 }}><span className="who" style={{ color: c }}><span>{(a?.name ?? v.agentId).toUpperCase()} · writing</span></span><Md text={v.text} /></div>;
         })}
-        {busy && Object.keys(streams).length === 0 && <div className="msg" style={{ color: "var(--muted)" }}><span className="who" style={{ color: "var(--accent)" }}>JARVIS</span>thinking…</div>}
-        {!busy && Object.keys(streams).length === 0 && lastIsAck && <p className="msg msg-system">still working · the answer will appear here</p>}
+        {!ql && busy && Object.keys(streams).length === 0 && <div className="msg" style={{ color: "var(--muted)" }}><span className="who" style={{ color: "var(--accent)" }}>JARVIS</span>thinking…</div>}
+        {!ql && !busy && Object.keys(streams).length === 0 && lastIsAck && <p className="msg msg-system">still working · the answer will appear here</p>}
+      </div>
+      {away && !ql && <button type="button" className="btn btn-sm btn-primary absolute left-1/2 -translate-x-1/2 bottom-3" style={{ boxShadow: "0 4px 18px rgba(0,0,0,0.5)" }} onClick={toLatest}>Jump to latest ↓</button>}
       </div>
       <form onSubmit={onSubmit} className="p-3 flex flex-col gap-2 border-t" style={{ borderColor: "var(--line)", background: "rgba(5,12,32,0.7)" }}>
         {!compact && (

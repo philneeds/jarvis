@@ -95,6 +95,17 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     if (!p.success) return c.json({ error: "title required" }, 400);
     return c.json({ item: await jarvis.raiseAttention({ ...p.data, agentId: "jarvis" }) });
   });
+  // Phil rewrites an item in place. due: "YYYY-MM-DD", or "" / null to clear it.
+  api.put("/attention/:id", async (c) => {
+    const p = z.object({
+      title: z.string().trim().min(1).max(160).optional(),
+      why: z.string().max(600).optional(),
+      due: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "due must be YYYY-MM-DD"), z.literal(""), z.null()]).optional(),
+    }).strict().refine((v) => Object.keys(v).length > 0, "nothing to change").safeParse(await c.req.json().catch(() => null));
+    if (!p.success) return c.json({ error: p.error.issues[0]?.message ?? "bad body" }, 400);
+    const item = await jarvis.editAttention(c.req.param("id"), p.data);
+    return item ? c.json({ item }) : c.json({ error: "not found" }, 404);
+  });
   api.post("/attention/:id/:change", async (c) => {
     const change = c.req.param("change");
     if (!["done", "snoozed", "reopened"].includes(change)) return c.json({ error: "change must be done, snoozed or reopened" }, 400);
@@ -118,8 +129,36 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   });
   api.post("/memory/condense", async (c) => c.json({ message: await jarvis.condenseMemory() }));
   api.delete("/memory", async (c) => {
-    await jarvis.store.memory.remove(c.req.query("scope") ?? "", c.req.query("key") ?? "");
-    return c.json({ ok: true });
+    const scope = c.req.query("scope"), key = c.req.query("key");
+    if (!scope || !key) return c.json({ error: "scope and key required" }, 400);
+    const r = await jarvis.forgetMemory(scope, key);
+    return r ? c.json({ ok: true, undoId: r.undoId }) : c.json({ error: "not found" }, 404);
+  });
+
+  // ---- Goals -------------------------------------------------------------------
+  const goalDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "deadline must be YYYY-MM-DD");
+  api.get("/goals", async (c) => c.json({ goals: await jarvis.goals() }));
+  api.post("/goals", async (c) => {
+    const p = z.object({ name: z.string().trim().min(1).max(160), pct: z.number().min(0).max(100).optional(), deadline: z.union([goalDate, z.literal("")]).optional(), primary: z.boolean().optional() }).strict().safeParse(await c.req.json().catch(() => null));
+    if (!p.success) return c.json({ error: p.error.issues[0]?.message ?? "name required" }, 400);
+    try { return c.json({ goal: await jarvis.addGoal(p.data), goals: await jarvis.goals() }); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
+  api.put("/goals/:id", async (c) => {
+    const p = z.object({ name: z.string().trim().min(1).max(160).optional(), pct: z.number().min(0).max(100).optional(), deadline: z.union([goalDate, z.literal(""), z.null()]).optional(), primary: z.literal(true).optional() })
+      .strict().refine((v) => Object.keys(v).length > 0, "nothing to change").safeParse(await c.req.json().catch(() => null));
+    if (!p.success) return c.json({ error: p.error.issues[0]?.message ?? "bad body" }, 400);
+    const goal = await jarvis.updateGoal(c.req.param("id"), p.data);
+    return goal ? c.json({ goal, goals: await jarvis.goals() }) : c.json({ error: "not found" }, 404);
+  });
+  api.delete("/goals/:id", async (c) => {
+    const r = await jarvis.deleteGoal(c.req.param("id"));
+    return r ? c.json({ goal: r.goal, undoId: r.undoId, goals: await jarvis.goals() }) : c.json({ error: "not found" }, 404);
+  });
+
+  // Put back something just deleted (memory item, venture record or reading, goal).
+  api.post("/undo/:id", async (c) => {
+    const r = await jarvis.undo(c.req.param("id"));
+    return r ? c.json({ restored: r }) : c.json({ error: "nothing to undo (it may have expired)" }, 404);
   });
 
   api.get("/agents", async (c) => c.json({ agents: await jarvis.snapshot() }));
@@ -221,14 +260,26 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     if (!p.success) return c.json({ error: "kind and title required" }, 400);
     try { return c.json({ record: await jarvis.upsertRecord({ venture: v, ...p.data, source: "phil" }) }); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
   });
+  // Fix a wrong reading, or drop it (undoable).
+  api.put("/ventures/:id/metrics/:pointId", async (c) => {
+    const v = ventureId(c.req.param("id"));
+    if (!v) return c.json({ error: "no such venture" }, 404);
+    const p = z.object({ value: z.number().finite() }).strict().safeParse(await c.req.json().catch(() => null));
+    if (!p.success) return c.json({ error: "numeric value required" }, 400);
+    const point = await jarvis.editMetric(v, c.req.param("pointId"), p.data.value);
+    return point ? c.json({ point }) : c.json({ error: "not found" }, 404);
+  });
+  api.delete("/ventures/:id/metrics/:pointId", async (c) => {
+    const v = ventureId(c.req.param("id"));
+    if (!v) return c.json({ error: "no such venture" }, 404);
+    const r = await jarvis.deleteMetric(v, c.req.param("pointId"));
+    return r ? c.json({ point: r.point, undoId: r.undoId }) : c.json({ error: "not found" }, 404);
+  });
   api.delete("/ventures/:id/records/:rid", async (c) => {
     const v = ventureId(c.req.param("id"));
     if (!v) return c.json({ error: "no such venture" }, 404);
-    const r = await jarvis.store.records.get(c.req.param("rid"));
-    if (!r || r.venture !== v) return c.json({ error: "not found" }, 404);
-    await jarvis.store.records.remove(r.id);
-    await jarvis.router.log("jarvis", "memory", `${VENTURES[v].short} · removed ${r.kind}: ${r.title} (Phil)`);
-    return c.json({ ok: true });
+    const r = await jarvis.removeRecord(v, c.req.param("rid"));
+    return r ? c.json({ ok: true, undoId: r.undoId }) : c.json({ error: "not found" }, 404);
   });
 
   // ---- Connectors -----------------------------------------------------------

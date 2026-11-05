@@ -134,7 +134,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             setVentureTick((n) => n + 1);
             break;
           case "attention":
-            setAttention((list) => { const rest = list.filter((i) => i.id !== e.item.id); return e.item.status === "done" ? rest : [e.item, ...rest]; });
+            setAttention((list) => {
+              if (e.item.status === "done") return list.filter((i) => i.id !== e.item.id);
+              // An edit replaces the item where it is; anything else brings it to the top.
+              return e.change === "edited" && list.some((i) => i.id === e.item.id) ? list.map((i) => (i.id === e.item.id ? e.item : i)) : [e.item, ...list.filter((i) => i.id !== e.item.id)];
+            });
             break;
         }
       };
