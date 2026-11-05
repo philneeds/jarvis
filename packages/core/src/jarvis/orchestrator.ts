@@ -51,7 +51,7 @@ export function isOutbound(a: Pick<Approval, "kind" | "payload">): boolean {
   if (Array.isArray(p.attendees) && p.attendees.length) return true;
   if (Array.isArray(p.guests) && p.guests.length) return true;
   // An action no connector recognises is treated as outbound: when unsure, ask.
-  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|spotify\.playlist\.(create|add)|memory\.replace|record\.)/.test(p.action);
+  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|spotify\.playlist\.(create|add)|goals\.update|memory\.replace|record\.)/.test(p.action);
 }
 
 /** Something Phil deleted, kept for a while so he can undo it. */
@@ -99,6 +99,16 @@ export class Jarvis {
       if (!added.length && !retired.length) throw new Error("the proposal had no goals to add or retire");
       return `Goals set${added.length ? `: ${added.join("; ")}` : ""}${retired.length ? `. Retired: ${retired.join("; ")}` : ""}.`;
     });
+    // David keeps percent-done honest: an internal change, so it goes through and is reported in chat.
+    this.executors.set("goals.update", async (a) => {
+      const p = (a.payload ?? {}) as { id?: unknown; pct?: unknown };
+      const pct = Number(p.pct);
+      if (typeof p.id !== "string" || !Number.isFinite(pct)) throw new Error("goals.update needs the goal id and a pct from 0 to 100");
+      const g = await this.updateGoal(p.id, { pct });
+      if (!g) throw new Error("no goal with that id; check goals_list");
+      return `"${g.name}" is now ${g.pct}% done.`;
+    });
+    this.describers.set("goals.update", (p) => `Sets a goal's progress to ${Number(p.pct)}% on your home screen. Nothing leaves HQ.`);
     this.describers.set("goals.set", (p) => {
       const add = (Array.isArray(p.add) ? p.add : []) as { name?: string; primary?: boolean; deadline?: string }[];
       const retire = Array.isArray(p.retire) ? p.retire.length : 0;

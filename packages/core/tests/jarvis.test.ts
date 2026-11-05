@@ -485,3 +485,15 @@ test("schedules are sound: real agents, valid timing, weekday scouts skip weeken
   assert.ok(CHARTERS.lip!.open!.some((q) => /Premium/.test(q)));
   assert.ok(!SCHEDULES.some((s) => s.agentId === "lip"), "Lip runs on demand only");
 });
+
+test("David updates a goal's progress on his own; Adam's goal changes still wait", async () => {
+  const { jarvis } = make();
+  const g = await jarvis.addGoal({ name: "Close 6 JD PM jobs", primary: true });
+  const up = await jarvis.requestApproval({ agentId: "david", kind: "record", title: "3 of 6 jobs closed", body: "Board shows 3 closed", payload: { action: "goals.update", id: g.id, pct: 50 } });
+  assert.equal(up.status, "approved");
+  assert.equal((await jarvis.goals())[0]!.pct, 50);
+  const set = await jarvis.requestApproval({ agentId: "adam", kind: "record", title: "New goals", body: "", payload: { action: "goals.set", add: [{ name: "x" }] } });
+  assert.equal(set.status, "pending");
+  const { SCHEDULES } = await import("../src/index.js");
+  assert.equal(SCHEDULES.find((s) => s.id === "david-weekly")!.phase, 0, "David's Sunday check runs now");
+});

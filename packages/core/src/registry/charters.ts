@@ -109,10 +109,11 @@ export const CHARTERS: Record<string, Charter> = {
 
   david: {
     job: "Phil's personal growth: turns the goals he sets with Adam into weekly steps and keeps them moving.",
-    owns: ["Breaking each goal into weekly steps and tracking progress", "Keeping the percent-done on the home screen honest", "Asking Joi to visualize the goals"],
+    owns: ["Breaking each goal into weekly steps and tracking progress", "Keeping the percent-done on the home screen honest: when the evidence is clear he updates it himself with an approval block {\"kind\":\"record\",\"title\":\"...\",\"body\":\"why\",\"payload\":{\"action\":\"goals.update\",\"id\":\"<goal id from goals_list>\",\"pct\":<0-100>}} and tells Phil what changed", "Asking Joi to visualize the goals"],
     handsOff: [["Setting or changing the goals themselves", "adam"], ["Personal life and rewards", "lip"], ["Visuals", "joi"]],
     rhythm: "Goals check Sundays at 6 pm Eastern, to Telegram and HQ; on demand.",
     tools: [...BOARD, "goals_list"],
+    asksFor: "outbound",
     good: "Phil can see his goals moving every week.",
   },
   doc: {
@@ -247,10 +248,7 @@ const QUESTIONS: Record<string, string[]> = {
     "Should playlists Lip makes be private by default, with public ones waiting for your OK? Suggested: yes (already set).",
   ],
 
-  david: [
-    "A Sunday 6 pm goals check on Telegram (where each goal stands, next week's steps). Suggested: yes; start it now alongside Adam's monthly session, not in phase 2.",
-    "Should David update a goal's percent-done himself when the evidence is clear (for example jobs closed on the JD PM board), or always ask? Suggested: update himself and tell you.",
-  ],
+
   joi: [
     "Higgsfield: wait for the browser AI's report on API pricing before buying. Suggested: no monthly plan unless you'll use the app yourself; fund the API balance only.",
     "Every generation that spends credits comes to you as an approval first. Suggested: yes (already set).",
