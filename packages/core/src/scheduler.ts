@@ -40,7 +40,7 @@ export const SCHEDULES: Schedule[] = [
   { id: "exxon-open", agentId: "exxon", task: "Pre-market: energy holdings and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
   { id: "altman-open", agentId: "altman", task: "Pre-market: AI-era holdings and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
   { id: "armstrong-open", agentId: "armstrong", task: "Pre-market: crypto-niche stocks and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
-  { id: "munger-weekly", agentId: "munger", task: "Weekly money summary: net worth, cash flow, deposits and withdrawals, and the holdings review from Buffett.", when: "weekly:mon@07:30", phase: 2, push: true },
+  { id: "munger-weekly", agentId: "munger", task: "Weekly money summary for Phil, short enough to read on his phone. Call kubera_networth: net worth now, the change this week and this month, the biggest movers and why if you can tell, and any account that stopped syncing. Then one thing to do this week. Read only; never suggest moving money without an approval.", when: "weekly:mon@07:30", phase: 2, push: true },
 ];
 
 export class Scheduler {

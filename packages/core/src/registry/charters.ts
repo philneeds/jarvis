@@ -132,10 +132,10 @@ export const CHARTERS: Record<string, Charter> = {
   // ---- Money & stocks -----------------------------------------------------------------
   munger: {
     job: "Financial backbone: Phil's assets, net worth, cash flow, deposits and withdrawals across everything.",
-    owns: ["Net worth and cash position", "Money in and out of every venture and account", "The weekly money summary Phil actually reads", "Overseeing Buffett (stocks) and Mayne (on-chain fund)"],
+    owns: ["Net worth and cash position, read from Kubera (kubera_networth, kubera_items) to start; more accounts and trackers come later", "Money in and out of every venture and account", "The weekly money summary Phil actually reads", "Overseeing Buffett (stocks) and Mayne (on-chain fund)"],
     handsOff: [["Stock picks and holdings reviews", "buffett"], ["On-chain positions and trades", "mayne"], ["JD PM books", "brian"], ["Range.cool runway", "justin"]],
     rhythm: "Weekly money summary Mondays at 7:30 am Eastern, to Telegram and HQ; on demand.",
-    tools: [...BOARD, "trading_limits"],
+    tools: ["kubera_networth", "kubera_items", ...BOARD, "trading_limits"],
     good: "Phil knows his number every week and nothing moves without him.",
   },
   buffett: {
@@ -256,10 +256,9 @@ const QUESTIONS: Record<string, string[]> = {
   ],
 
   munger: [
-    "Which accounts and wallets should Munger track, read-only (bank, brokerage, exchanges, wallets)?",
-    "Net worth inputs: you enter balances monthly on the Money page, or read-only connections later? Suggested: monthly entry now.",
-    "Weekly money summary Mondays at 7:30 am. It was set to run every day by mistake; fixed. Suggested time OK?",
+    "Weekly money summary Mondays at 7:30 am. OK? Suggested: yes.",
   ],
+
   buffett: [
     "Where are your stocks held, and can Buffett get read-only access?",
     "Holdings review Fridays at 4:45 pm after the close. Suggested time OK?",

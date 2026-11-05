@@ -2,12 +2,12 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
 
-export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; spotify?: SpotifyConnector; guard?: TradingGuard } = {}) {
+export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; spotify?: SpotifyConnector; kubera?: KuberaConnector; guard?: TradingGuard } = {}) {
   const app = new Hono();
   const origins = (process.env.HQ_ORIGIN ?? "http://localhost:3000").split(",").map((s) => s.trim());
   app.use("/api/*", cors({ origin: origins, credentials: true }));
@@ -324,6 +324,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     google: connectors.google ? { configured: true, ...(await connectors.google.status()) } : { configured: false, connected: false, accounts: [] },
     x: connectors.x ? { configured: true, ...(await connectors.x.status()) } : { configured: false, accounts: [] },
     spotify: connectors.spotify ? { configured: true, ...(await connectors.spotify.status()) } : { configured: false, connected: false },
+    kubera: connectors.kubera ? await connectors.kubera.status() : { configured: false },
     telegram: { configured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) },
     ntfy: { configured: !!process.env.NOTIFY_WEBHOOK_URL },
   }));
@@ -390,6 +391,11 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     await connectors.spotify?.disconnect();
     await jarvis.router.log("jarvis", "system", "Phil disconnected Spotify");
     return c.json({ ok: true });
+  });
+  // Check the Kubera key works (one call, cached for 20 minutes) and show the net worth line.
+  api.post("/connectors/kubera/test", async (c) => {
+    if (!connectors.kubera) return c.json({ error: "KUBERA_API_KEY and KUBERA_SECRET aren't set" }, 400);
+    try { return c.json({ ok: true, summary: await connectors.kubera.summary() }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
   });
   api.get("/apple-health", async (c) => c.json({ ...(await healthStatus(jarvis.store)), summary: await healthSummary(jarvis.store, 3) }));
   // Make the key (or a new one, which stops the old one working) and show how to set up the app.
