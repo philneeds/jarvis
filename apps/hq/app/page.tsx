@@ -33,7 +33,6 @@ export default function HomePage() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
-  const [micMenu, setMicMenu] = useState(false);
   const wide = useWide();
   const [heardText, setHeardText] = useState<string>();
   const voice = useVoice({
@@ -92,12 +91,11 @@ export default function HomePage() {
 
   const toggleVoice = () => {
     if (voice.conversation) { voice.endConversation(); setVoiceOn(false); return; }
-    setVoiceOn(true); setMicMenu(false);
+    setVoiceOn(true);
     void voice.startConversation();
   };
-  const coreState: CoreState = state?.status.killSwitch.all ? "paused" : voice.speaking ? "speaking" : voice.hearing ? "listening" : busy || voice.transcribing || state?.agents.some((a) => a.status === "working") ? "thinking" : voice.listening ? "listening" : "idle";
-  const coreLabel = coreState === "paused" ? "PAUSED" : coreState === "speaking" ? "SPEAKING" : voice.hearing ? "HEARING YOU" : voice.transcribing ? "GOT IT" : coreState === "thinking" ? "THINKING" : voice.listening ? "LISTENING" : voice.conversation ? "READY" : "STANDING BY";
-  const micLabel = voice.mics.find((m) => m.id === voice.micId)?.label ?? (voice.micId ? "saved mic" : "default mic");
+  const coreState: CoreState = state?.status.killSwitch.all ? "paused" : voice.speaking ? "speaking" : voice.hearing ? "listening" : busy || state?.agents.some((a) => a.status === "working") ? "thinking" : voice.listening ? "listening" : "idle";
+  const coreLabel = coreState === "paused" ? "PAUSED" : coreState === "speaking" ? "SPEAKING" : voice.hearing ? "HEARING YOU" : coreState === "thinking" ? "THINKING" : voice.listening ? "LISTENING" : voice.conversation ? "READY" : "STANDING BY";
 
   const orb = <Core state={coreState} level={voice.level} label={coreLabel} />;
   const core = (
@@ -119,16 +117,7 @@ export default function HomePage() {
         {voice.hearing ? (
           <button type="button" className="btn btn-sm btn-primary" onClick={voice.finishTurn} aria-label="Send what I said now">Send now</button>
         ) : (
-          <span>{voice.conversation ? (voice.transcribing ? "got it" : "listening · pause to send · say \"stop\" to end") : voice.serverTts ? "voice: ElevenLabs" : "voice: this device"}</span>
-        )}
-        <button type="button" className="uppercase tracking-[0.14em] underline-offset-2 hover:underline" style={{ color: "var(--accent)" }} aria-haspopup="listbox" aria-expanded={micMenu} onClick={async () => { if (!micMenu) await voice.refreshMics(); setMicMenu(!micMenu); }}>mic: {micLabel} ▾</button>
-        {micMenu && (
-          <div role="listbox" aria-label="Microphone" className="absolute left-0 right-0 top-full mt-1 flex flex-col border normal-case tracking-normal text-[12px]" style={{ borderColor: "var(--accent-soft)", background: "rgba(5,12,32,0.97)", zIndex: 30 }}>
-            {voice.mics.length === 0 && <span className="px-3 py-2" style={{ color: "var(--muted)" }}>Allow the mic once (press the mic button) and the list fills in.</span>}
-            {[{ id: "", label: "System default" }, ...voice.mics].map((m) => (
-              <button key={m.id || "default"} role="option" aria-selected={(voice.micId ?? "") === m.id} className="text-left px-3 py-2 hover:bg-[rgba(60,130,255,0.2)]" style={{ color: (voice.micId ?? "") === m.id ? "var(--ink-bright)" : "var(--ink)" }} onClick={() => { voice.setMic(m.id || undefined); setMicMenu(false); if (voice.conversation) { voice.endConversation(); void voice.startConversation(); } }}>{m.label}</button>
-            ))}
-          </div>
+          <span>{voice.conversation ? "listening · pause to send · say \"stop\" to end" : voice.serverTts ? "voice: ElevenLabs" : "voice: this device"}</span>
         )}
       </div>
       <Transcript pendingText={heardText ?? (voice.interim || undefined)} />

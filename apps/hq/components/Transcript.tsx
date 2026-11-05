@@ -21,15 +21,24 @@ export function Transcript({ limit = 8, pendingText }: { limit?: number; pending
   const { state, messages } = useLive();
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<string | null>(null);   // one message shown in full at a time
+  // Hidden by default; the choice is remembered on this device.
+  const [shown, setShown] = useState(false);
+  useEffect(() => { try { setShown(localStorage.getItem("hq.chatShown") === "1"); } catch { /* ignore */ } }, []);
+  const toggle = () => { const next = !shown; setShown(next); try { localStorage.setItem("hq.chatShown", next ? "1" : "0"); } catch { /* ignore */ } };
   const recent = messages.slice(-limit);
   const acks = messages.filter((m) => m.kind === "ack");
   const lastAck = acks[acks.length - 1];
   const working = !!lastAck && Date.now() - Date.parse(lastAck.at) < 6 * 60_000 && !messages.some((m) => m.kind === "final" && m.replyTo === lastAck.replyTo);
-  useEffect(() => { ref.current?.scrollTo({ top: ref.current.scrollHeight }); }, [messages.length, pendingText, working, open]);
+  useEffect(() => { ref.current?.scrollTo({ top: ref.current.scrollHeight }); }, [messages.length, pendingText, working, open, shown]);
   const who = (m: (typeof messages)[number]) => (m.role === "phil" ? "You" : m.role === "jarvis" ? "Jarvis" : m.role === "system" ? "HQ" : state?.agents.find((a) => a.id === m.agentId)?.name ?? m.agentId ?? "Agent");
   const tone = (m: (typeof messages)[number]) => (m.role === "phil" ? "var(--accent)" : m.role === "system" ? "var(--muted)" : m.role === "jarvis" ? "var(--ink-strong)" : state?.ventures[state.agents.find((a) => a.id === m.agentId)?.venture ?? "root"]?.color ?? "var(--green)");
   return (
-    <section aria-label="Conversation" className="w-full flex flex-col gap-1">
+    <section aria-label="Conversation" className="w-full flex flex-col items-center gap-1">
+      <button type="button" onClick={toggle} aria-expanded={shown} className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>{shown ? "Hide conversation ▴" : `Show conversation ▾`}</button>
+      {/* Collapsed, only what's in flight shows: what he just said and that an answer is coming. */}
+      {!shown && pendingText && <p className="m-0 text-[12px] italic text-center" style={{ color: "var(--amber)" }}>{pendingText}</p>}
+      {!shown && working && <p className="m-0 text-[11px] tracking-[0.12em] uppercase text-center" style={{ color: "var(--amber)" }}>still working · the answer lands here</p>}
+      {shown && <>
       <div ref={ref} className="flex flex-col gap-2 overflow-y-auto px-3 py-2 border" style={{ maxHeight: 300, scrollbarWidth: "thin", borderColor: "var(--line)", background: "rgba(5,12,32,0.55)", maskImage: "linear-gradient(to bottom, transparent, black 18px, black calc(100% - 6px), transparent)", WebkitMaskImage: "linear-gradient(to bottom, transparent, black 18px, black calc(100% - 6px), transparent)" }}>
         {recent.length === 0 && !pendingText && <p className="m-0 text-center text-[12px]" style={{ color: "var(--muted)" }}>Say the word. I&apos;m listening.</p>}
         {recent.map((m) => {
@@ -50,6 +59,7 @@ export function Transcript({ limit = 8, pendingText }: { limit?: number; pending
         {working && <p className="m-0 text-[11px] tracking-[0.12em] uppercase text-center" style={{ color: "var(--amber)" }}>still working · the answer lands here</p>}
       </div>
       <Link href="/command" className="self-center text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>Full chat ›</Link>
+      </>}
     </section>
   );
 }

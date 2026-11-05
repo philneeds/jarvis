@@ -1,15 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Vad } from "./vad";
 
 /**
- * Voice for Jarvis, built to feel like a conversation rather than a walkie-talkie.
+ * Voice for Jarvis.
  *
- * Listening: the mic Phil chose (remembered on this device) opens once per conversation and stays open. A small
- * voice-activity detector watches the level: speech starts when the room gets louder than its noise floor and an
- * utterance ends after a short silence. Each utterance is transcribed by the server (ElevenLabs) when it can, else
- * by the browser's own speech recognition.
+ * Listening: the browser's own speech recognition (Chrome, Safari). It decides when Phil has finished a sentence
+ * from the words, not the volume, which is what made the first version feel right. It uses the computer's input
+ * device as set in the system's sound settings. A level meter on the same mic drives the orb.
  *
  * Speaking: the reply is split into sentences; the first is fetched and played while the next is already being
  * generated, so the first words come fast. Stop words cut him off.
@@ -52,9 +50,6 @@ export function pickVoice(): SpeechSynthesisVoice | undefined {
   return voices.find((v) => v.lang.startsWith("en")) ?? voices[0];
 }
 
-const MIC_KEY = "hq.micId";
-export function savedMic(): string | undefined { try { return localStorage.getItem(MIC_KEY) ?? undefined; } catch { return undefined; } }
-export function saveMic(id: string | undefined) { try { if (id) localStorage.setItem(MIC_KEY, id); else localStorage.removeItem(MIC_KEY); } catch { /* ignore */ } }
 
 /** A short two-tone chime so he knows the mic is open without waiting for speech. */
 function chime(ctx: AudioContext, up = true) {
@@ -73,14 +68,10 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
   const [speaking, setSpeaking] = useState(false);
   const [listening, setListening] = useState(false);
   const [hearing, setHearing] = useState(false);      // speech detected right now
-  const [transcribing, setTranscribing] = useState(false);
   const [level, setLevel] = useState(0);
   const [interim, setInterim] = useState("");
   const [serverTts, setServerTts] = useState<boolean | null>(null);
-  const [serverStt, setServerStt] = useState(false);
   const [error, setError] = useState<string>();
-  const [mics, setMics] = useState<{ id: string; label: string }[]>([]);
-  const [micId, setMicIdState] = useState<string | undefined>();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recRef = useRef<Rec | null>(null);
   const micStream = useRef<MediaStream | null>(null);
@@ -92,38 +83,17 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
   onHeardRef.current = opts.onHeard;
 
   useEffect(() => {
-    setMicIdState(savedMic());
-    fetch("/api/tts/status", { credentials: "include" }).then((r) => r.json()).then((j) => { setServerTts(!!j.available); setServerStt(!!j.stt); }).catch(() => setServerTts(false));
+    fetch("/api/tts/status", { credentials: "include" }).then((r) => r.json()).then((j) => setServerTts(!!j.available)).catch(() => setServerTts(false));
   }, []);
 
   const ctx = () => ctxRef.current ?? (ctxRef.current = new AudioContext());
 
-  /** Mics on this machine; labels appear once the mic has been allowed. */
-  const refreshMics = useCallback(async () => {
-    try {
-      const all = await navigator.mediaDevices.enumerateDevices();
-      const list = all.filter((d) => d.kind === "audioinput").map((d, i) => ({ id: d.deviceId, label: d.label || `Microphone ${i + 1}` }));
-      setMics(list);
-      return list;
-    } catch { return []; }
-  }, []);
-  const setMic = useCallback((id: string | undefined) => { saveMic(id); setMicIdState(id); }, []);
-
-  /** Open the chosen mic once; later calls reuse it. */
+  /** The system's default mic, opened once per conversation for the level meter. */
   const openMic = useCallback(async (): Promise<MediaStream> => {
     if (micStream.current?.active) return micStream.current;
-    const want = savedMic();
-    const constraints = (id?: string): MediaStreamConstraints => ({ audio: { ...(id ? { deviceId: { exact: id } } : {}), echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
-    let stream: MediaStream;
-    try { stream = await navigator.mediaDevices.getUserMedia(constraints(want)); }
-    catch (e) {
-      if (want) { stream = await navigator.mediaDevices.getUserMedia(constraints()); saveMic(undefined); setMicIdState(undefined); } // the saved mic is gone
-      else throw e;
-    }
-    micStream.current = stream;
-    void refreshMics();
-    return stream;
-  }, [refreshMics]);
+    micStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+    return micStream.current;
+  }, []);
   const closeMic = useCallback(() => { micStream.current?.getTracks().forEach((t) => t.stop()); micStream.current = null; }, []);
 
   const meter = useCallback((node: AudioNode, c: AudioContext) => {
@@ -227,100 +197,50 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
     cancelAnimationFrame(levelRaf.current); setLevel(0); setListening(false); setHearing(false); setInterim("");
   }, []);
 
-  /** Transcribe one recorded utterance on the server. */
-  const transcribe = useCallback(async (blob: Blob): Promise<string> => {
-    setTranscribing(true);
-    try {
-      const res = await fetch("/api/tts/stt", { method: "POST", credentials: "include", headers: { "content-type": blob.type || "audio/webm" }, body: blob });
-      if (!res.ok) { setError("Couldn't transcribe that; using the browser instead."); setServerStt(false); return ""; }
-      return ((await res.json()) as { text?: string }).text ?? "";
-    } catch { return ""; } finally { setTranscribing(false); }
-  }, []);
-
   /**
    * Listen for one utterance; resolves with the text ("" if nothing was heard, or nothing within timeoutMs).
-   * The mic stays open between calls. Speech start/end come from the level, not from the recognizer.
+   * The recognizer ends the turn itself when Phil stops talking; "Send now" asks it to finish early.
    */
   const listen = useCallback(async (opts: { timeoutMs?: number } = {}): Promise<string> => {
+    const r = recognizer();
+    if (!r) { setError("Voice input isn't available in this browser. Chrome or Safari work."); return ""; }
     stopSpeaking();
     setError(undefined); setInterim("");
-    let stream: MediaStream;
-    try { stream = await openMic(); }
-    catch { setError("Microphone not available. Allow the mic for this site, or pick another one under the mic menu."); return ""; }
-    const c = ctx();
-    if (c.state === "suspended") await c.resume().catch(() => undefined);
-    const source = c.createMediaStreamSource(stream);
-    const an = c.createAnalyser(); an.fftSize = 1024; source.connect(an);
-    const buf = new Uint8Array(an.frequencyBinCount);
-    setListening(true);
-
-    const useServer = serverStt && typeof MediaRecorder !== "undefined";
-    const mime = typeof MediaRecorder !== "undefined" ? (["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) => MediaRecorder.isTypeSupported(m)) ?? "") : "";
-    let rec: Rec | null = null;
-    let recText = "", recFinal = false;
-    if (!useServer) {
-      rec = recognizer();
-      if (!rec) { setError("Voice input isn't available in this browser. Chrome or Safari work, or add an ElevenLabs key for server transcription."); setListening(false); source.disconnect(); return ""; }
-      recRef.current = rec; rec.lang = "en-US"; rec.interimResults = true; rec.continuous = true;
-      rec.onresult = (e) => { let s = ""; for (let i = 0; i < e.results.length; i++) s += e.results[i]![0]!.transcript; recText = s; setInterim(s); if (e.results[e.results.length - 1]?.isFinal) recFinal = true; };
-      rec.onerror = (e) => { if (e.error !== "no-speech" && e.error !== "aborted") setError(`Mic: ${e.error}`); };
-      rec.onend = () => { recFinal = true; };
-      try { rec.start(); } catch { /* already running */ }
-    }
-
+    // The orb's level meter. Decoration only: listening works without it.
+    let stopMeter = () => undefined as void;
+    try {
+      const stream = await openMic();
+      const c = ctx();
+      if (c.state === "suspended") await c.resume().catch(() => undefined);
+      const src = c.createMediaStreamSource(stream);
+      const stop = meter(src, c);
+      stopMeter = () => { stop(); src.disconnect(); };
+    } catch { /* no meter */ }
     return new Promise<string>((resolve) => {
-      const vad = new Vad();
-      let done = false, chunks: Blob[] = [];
-      let recorder: MediaRecorder | null = null;
-      const t0 = performance.now();
-      // A timer rather than animation frames: frames stop when the tab is hidden, and a turn must still end.
-      let timer: ReturnType<typeof setInterval> | undefined;
-      const stopLoop = () => { if (timer) clearInterval(timer); timer = undefined; source.disconnect(); an.disconnect(); };
-      const finish = async (text: string) => {
+      recRef.current = r; r.lang = "en-US"; r.interimResults = true; r.continuous = false;
+      let finalText = "", latest = "", done = false, heard = false;
+      const finish = () => {
         if (done) return; done = true;
-        stopLoop(); forceEnd.current = null;
-        if (rec) { try { rec.abort(); } catch { /* fine */ } recRef.current = null; }
-        setListening(false); setHearing(false); setLevel(0); setInterim("");
-        resolve(text.trim());
+        clearTimeout(timer); stopMeter(); forceEnd.current = null; abortListen.current = null; recRef.current = null;
+        setListening(false); setHearing(false); setInterim("");
+        resolve((finalText || latest).trim());
       };
-      abortListen.current = () => { try { if (recorder && recorder.state !== "inactive") recorder.stop(); } catch { /* fine */ } void finish(""); };
-      const endUtterance = async () => {
-        if (done) return;
-        stopLoop(); forceEnd.current = null; setHearing(false); setLevel(0);
-        if (useServer) {
-          const blob = await new Promise<Blob>((res) => { if (!recorder || recorder.state === "inactive") return res(new Blob(chunks, { type: mime })); recorder.onstop = () => res(new Blob(chunks, { type: mime })); recorder.stop(); });
-          setListening(false);
-          const text = await transcribe(blob);
-          done = true; resolve(text.trim());
-        } else {
-          // Give the recognizer a moment to finalize, then take what it has.
-          try { rec?.stop(); } catch { /* fine */ }
-          const until = performance.now() + 1200;
-          while (!recFinal && performance.now() < until) await new Promise((r) => setTimeout(r, 50));
-          void finish(recText);
-        }
+      // The reply window: if nobody has started talking by then, close the mic.
+      const timer = opts.timeoutMs ? setTimeout(() => { if (!heard) { try { r.abort(); } catch { /* fine */ } finish(); } }, opts.timeoutMs) : undefined;
+      r.onresult = (e) => {
+        heard = true; setHearing(true);
+        let s = ""; for (let i = 0; i < e.results.length; i++) s += e.results[i]![0]!.transcript;
+        latest = s; setInterim(s);
+        if (e.results[e.results.length - 1]?.isFinal) finalText = s;
       };
-      // "Send now": end the turn on Phil's say-so.
-      forceEnd.current = () => { if (vad.force() === "end") void endUtterance(); };
-      const tick = () => {
-        if (done) return;
-        an.getByteTimeDomainData(buf);
-        let sum = 0; for (const v of buf) { const d = (v - 128) / 128; sum += d * d; }
-        const rms = Math.sqrt(sum / buf.length);
-        setLevel(Math.min(1, rms * 4));
-        const now = performance.now();
-        const e = vad.push(rms, now);
-        if (e === "start") {
-          setHearing(true);
-          if (useServer && mime) { chunks = []; recorder = new MediaRecorder(stream, { mimeType: mime }); recorder.ondataavailable = (ev) => { if (ev.data.size) chunks.push(ev.data); }; recorder.start(250); }
-        } else if (e === "cancel") {
-          setHearing(false); try { recorder?.stop(); } catch { /* fine */ } recorder = null; chunks = []; // a cough, not words
-        } else if (e === "end") { void endUtterance(); return; }
-        if (!vad.speaking && opts.timeoutMs && now - t0 > opts.timeoutMs) void finish("");
-      };
-      timer = setInterval(tick, 30);
+      r.onend = finish;
+      r.onerror = (e) => { if (e.error !== "no-speech" && e.error !== "aborted") setError(`Mic: ${e.error}`); finish(); };
+      forceEnd.current = () => { try { r.stop(); } catch { finish(); } }; // the recognizer hands back what it has, then ends
+      abortListen.current = () => { try { r.abort(); } catch { /* fine */ } finish(); };
+      setListening(true);
+      try { r.start(); } catch { finish(); }
     });
-  }, [openMic, serverStt, stopSpeaking, transcribe]);
+  }, [openMic, meter, stopSpeaking]);
 
   const [conversation, setConversation] = useState(false);
   const convRef = useRef(false);
@@ -345,7 +265,7 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
   /** Start a conversation: open the mic, chime, listen. No spoken "Listening." to wait through. */
   const startConversation = useCallback(async () => {
     convRef.current = true; setConversation(true); setError(undefined);
-    try { await openMic(); chime(ctx(), true); } catch { setError("Microphone not available. Allow the mic for this site, or pick another one under the mic menu."); convRef.current = false; setConversation(false); return; }
+    try { await openMic(); chime(ctx(), true); } catch { setError("Microphone not available. Allow the mic for this site, and check the input device in your computer's sound settings."); convRef.current = false; setConversation(false); return; }
     void loop();
   }, [loop, openMic]);
   /** End the current turn now and send what was said. */
@@ -354,5 +274,5 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
 
   useEffect(() => () => { convRef.current = false; stopListening(); stopSpeaking(); closeMic(); }, [stopListening, stopSpeaking, closeMic]);
 
-  return { speak, stopSpeaking, listen, stopListening, speaking, listening, hearing, transcribing, level, interim, serverTts, serverStt, error, conversation, startConversation, endConversation, finishTurn, mics, micId, setMic, refreshMics };
+  return { speak, stopSpeaking, listen, stopListening, speaking, listening, hearing, level, interim, serverTts, error, conversation, startConversation, endConversation, finishTurn };
 }
