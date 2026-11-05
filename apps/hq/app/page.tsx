@@ -87,7 +87,7 @@ export default function HomePage() {
   const micLabel = voice.mics.find((m) => m.id === voice.micId)?.label ?? (voice.micId ? "saved mic" : "default mic");
 
   const core = (
-    <div className="flex flex-col items-center gap-4 w-full max-w-md">
+    <div className="flex flex-col items-center gap-4 w-full max-w-2xl">
       <Core state={coreState} level={voice.level} label={coreLabel} />
       {voice.error && <p className="m-0 text-center text-[11px]" style={{ color: "var(--red)" }}>{voice.error}</p>}
       <Transcript pendingText={heardText ?? (voice.interim || undefined)} />
@@ -137,7 +137,7 @@ export default function HomePage() {
               <Clock since={since} />
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-[280px_1fr_280px] lg:items-start">
+            <div className="grid gap-6 lg:grid-cols-[300px_1fr_300px] lg:items-start">
               <div className="flex flex-col gap-7 order-2 lg:order-1">
                 <section aria-label="Needs your attention" className="flex flex-col gap-2">
                   <span className="label label-amber">❬ Needs your attention · {openItems.length + pending.length + errors.length}</span>
@@ -169,16 +169,16 @@ export default function HomePage() {
                   {changes.map((c) => <div key={c.id} className="flex gap-2 text-[12px] leading-snug lg:flex-row-reverse"><span className="w-20 flex-none text-[11px] lg:text-right" style={{ color: state?.ventures[state.agents.find((a) => a.id === c.agentId)?.venture ?? "root"]?.color }}>{(state?.agents.find((a) => a.id === c.agentId)?.name ?? c.agentId).toUpperCase()}</span><span style={{ color: "var(--ink-bright)" }}>{c.summary.slice(0, 90)}</span><span className="hidden lg:inline" style={{ color: "var(--dim)" }}>{timeAgo(c.at)}</span></div>)}
                   <Link href="/activity" className="text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>Full log ›</Link>
                 </section>
+                <div className="w-full text-left"><Objective /></div>
               </div>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[280px_1fr_280px] lg:items-end mt-auto">
-              <div className="flex items-center gap-3 order-2 lg:order-1">
+            <div className="flex items-end justify-between gap-4 mt-auto">
+              <div className="flex items-center gap-3">
                 <div className="w-11 h-11 rounded-full border-2 flex items-center justify-center" style={{ borderColor: "var(--accent)", boxShadow: "0 0 12px rgba(124,196,255,0.6)" }}><span className="display font-bold text-lg" style={{ color: "var(--ink-strong)" }}>P</span></div>
                 <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.12em]"><span style={{ color: "var(--ink-strong)" }}>PHIL</span><span style={{ color: "var(--muted)" }}>RECOVERY — · DOC (PHASE 3)</span></div>
               </div>
-              <div className="order-1 lg:order-2 lg:max-w-md lg:w-full lg:justify-self-center"><Objective /></div>
-              <div className="order-3 flex lg:justify-end"><button className="btn btn-sm" onClick={toggle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" /></svg>Display off</button></div>
+              <div className="flex"><button className="btn btn-sm" onClick={toggle}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" /></svg>Display off</button></div>
             </div>
           </>
         ) : (

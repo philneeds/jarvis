@@ -9,7 +9,7 @@ import { useLive } from "@/lib/live";
  * a "still working" line shows while an answer is on its way, and the full log is one tap away.
  */
 /** Characters of a long turn shown before "…" (about three lines at the home screen's width). */
-const SHORT = 190;
+const SHORT = 160;
 
 /** Markdown stripped for the compact view; the full rendering lives on Command. */
 function plain(md: string): string {
@@ -39,17 +39,17 @@ export function Transcript({ limit = 8, pendingText }: { limit?: number; pending
           // Cut in code, not CSS: browsers disagree on the legacy line-clamp and some collapse it to nothing.
           const shown = long && !full ? text.replace(/\s*\n+\s*/g, " · ").slice(0, SHORT).replace(/\s+\S*$/, "") + " …" : text;
           return (
-            <p key={m.id} className={`m-0 text-[12px] leading-relaxed whitespace-pre-line ${m.kind === "ack" || m.kind === "progress" ? "msg-ack" : ""} ${long ? "cursor-pointer" : ""}`} style={{ color: "var(--ink)" }} onClick={() => long && setOpen(full ? null : m.id)} title={long ? (full ? "Tap to shorten" : "Tap to read all of it") : undefined}>
+            <p key={m.id} className={`m-0 text-[12px] leading-relaxed whitespace-pre-line text-center ${m.kind === "ack" || m.kind === "progress" ? "msg-ack" : ""} ${long ? "cursor-pointer" : ""}`} style={{ color: "var(--ink)" }} onClick={() => long && setOpen(full ? null : m.id)} title={long ? (full ? "Tap to shorten" : "Tap to read all of it") : undefined}>
               <span className="text-[10px] tracking-[0.14em] uppercase mr-2" style={{ color: tone(m) }}>{who(m)}</span>
               {shown}
               {long && full && <span className="ml-2 text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>less ▴</span>}
             </p>
           );
         })}
-        {pendingText && <p className="m-0 text-[12px] italic" style={{ color: "var(--amber)" }}><span className="text-[10px] tracking-[0.14em] uppercase mr-2 not-italic" style={{ color: "var(--accent)" }}>You</span>{pendingText}</p>}
-        {working && <p className="m-0 text-[11px] tracking-[0.12em] uppercase" style={{ color: "var(--amber)" }}>still working · the answer lands here</p>}
+        {pendingText && <p className="m-0 text-[12px] italic text-center" style={{ color: "var(--amber)" }}><span className="text-[10px] tracking-[0.14em] uppercase mr-2 not-italic" style={{ color: "var(--accent)" }}>You</span>{pendingText}</p>}
+        {working && <p className="m-0 text-[11px] tracking-[0.12em] uppercase text-center" style={{ color: "var(--amber)" }}>still working · the answer lands here</p>}
       </div>
-      <Link href="/command" className="self-end text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>Full chat ›</Link>
+      <Link href="/command" className="self-center text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>Full chat ›</Link>
     </section>
   );
 }
