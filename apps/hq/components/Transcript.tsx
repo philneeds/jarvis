@@ -30,7 +30,7 @@ export function Transcript({ limit = 8, pendingText }: { limit?: number; pending
   const tone = (m: (typeof messages)[number]) => (m.role === "phil" ? "var(--accent)" : m.role === "system" ? "var(--muted)" : m.role === "jarvis" ? "var(--ink-strong)" : state?.ventures[state.agents.find((a) => a.id === m.agentId)?.venture ?? "root"]?.color ?? "var(--green)");
   return (
     <section aria-label="Conversation" className="w-full flex flex-col gap-1">
-      <div ref={ref} className="flex flex-col gap-2 overflow-y-auto pr-1" style={{ maxHeight: 300, scrollbarWidth: "thin" }}>
+      <div ref={ref} className="flex flex-col gap-2 overflow-y-auto px-3 py-2 border" style={{ maxHeight: 300, scrollbarWidth: "thin", borderColor: "var(--line)", background: "rgba(5,12,32,0.55)", maskImage: "linear-gradient(to bottom, transparent, black 18px, black calc(100% - 6px), transparent)", WebkitMaskImage: "linear-gradient(to bottom, transparent, black 18px, black calc(100% - 6px), transparent)" }}>
         {recent.length === 0 && !pendingText && <p className="m-0 text-center text-[12px]" style={{ color: "var(--muted)" }}>Say the word. I&apos;m listening.</p>}
         {recent.map((m) => {
           const text = plain(m.text);
@@ -42,6 +42,7 @@ export function Transcript({ limit = 8, pendingText }: { limit?: number; pending
             <p key={m.id} className={`m-0 text-[12px] leading-relaxed whitespace-pre-line ${m.kind === "ack" || m.kind === "progress" ? "msg-ack" : ""} ${long ? "cursor-pointer" : ""}`} style={{ color: "var(--ink)" }} onClick={() => long && setOpen(full ? null : m.id)} title={long ? (full ? "Tap to shorten" : "Tap to read all of it") : undefined}>
               <span className="text-[10px] tracking-[0.14em] uppercase mr-2" style={{ color: tone(m) }}>{who(m)}</span>
               {shown}
+              {long && full && <span className="ml-2 text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>less ▴</span>}
             </p>
           );
         })}
