@@ -253,12 +253,12 @@ test("a hand-off runs the right agent and posts its reply", async () => {
 test("bulk actions over the item cap wait for Phil even when the kind is auto-approved", async () => {
   const { jarvis, store } = make();
   const { setAgentConfig } = await import("../src/index.js");
-  await setAgentConfig(store, "monica", { rules: { autoApprove: ["record"], maxAutoDollars: 0, maxAutoItems: 100 } });
-  const small = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Archive 40", body: "", payload: { action: "x.y", max: 40 } });
+  await setAgentConfig(store, "stella", { rules: { autoApprove: ["record"], maxAutoDollars: 0, maxAutoItems: 100 } });
+  const small = await jarvis.requestApproval({ agentId: "stella", kind: "record", title: "Archive 40", body: "", payload: { action: "x.y", max: 40 } });
   assert.equal(small.status, "approved");
-  const big = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Archive 500", body: "", payload: { action: "x.y", max: 500 } });
+  const big = await jarvis.requestApproval({ agentId: "stella", kind: "record", title: "Archive 500", body: "", payload: { action: "x.y", max: 500 } });
   assert.equal(big.status, "pending");
-  const ids = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Archive ids", body: "", payload: { action: "x.y", ids: new Array(150).fill("m") } });
+  const ids = await jarvis.requestApproval({ agentId: "stella", kind: "record", title: "Archive ids", body: "", payload: { action: "x.y", ids: new Array(150).fill("m") } });
   assert.equal(ids.status, "pending");
 });
 
@@ -317,7 +317,7 @@ test("charters: every agent has one, they set default tools and rules, and Phil'
   // Defaults from the charter.
   const monica = await getAgentConfig(store, "monica");
   assert.ok(monica.tools.includes("calendar_list_events"));
-  assert.deepEqual(monica.rules.autoApprove, ["record"]);
+  assert.deepEqual((await getAgentConfig(store, "stella")).rules.autoApprove, ["record"]);
   // Phil's settings win.
   await setAgentConfig(store, "monica", { tools: ["memory_search"], rules: { autoApprove: [], maxAutoDollars: 0 } });
   const after = await getAgentConfig(store, "monica");
@@ -330,4 +330,24 @@ test("charters: every agent has one, they set default tools and rules, and Phil'
   // Jarvis can route to every layer, not just the leads' direct teams.
   const roster = rosterText();
   for (const id of ["boo", "ncrypt", "marcus", "devteam", "jason2"]) assert.match(roster, new RegExp(`@${id}\\]`));
+});
+
+test("Monica's rule: internal work goes through on its own, anything outbound waits for Phil", async () => {
+  const { jarvis, store } = make();
+  const done: string[] = [];
+  for (const act of ["calendar.update", "calendar.create", "gmail.archive", "gmail.send", "gmail.trash"]) jarvis.onApproved(act, async (a) => { done.push(a.title); return "ok"; });
+  // Even if a saved setting says otherwise, the charter's rule holds.
+  const { setAgentConfig } = await import("../src/index.js");
+  await setAgentConfig(store, "monica", { rules: { autoApprove: [], maxAutoDollars: 0 } });
+  const own = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Move gym to 7am", body: "", payload: { action: "calendar.update", id: "e1", start: "x" } });
+  const archive = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Archive promos", body: "", payload: { action: "gmail.archive", query: "category:promotions", max: 50 } });
+  const withGuests = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Move lunch with Dana", body: "", payload: { action: "calendar.update", id: "e2", guests: ["dana@x.com"] } });
+  const invite = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Dinner with Sam", body: "", payload: { action: "calendar.create", title: "Dinner", start: "a", end: "b", attendees: ["sam@x.com"] } });
+  const email = await jarvis.requestApproval({ agentId: "monica", kind: "send", title: "Reply to Mom", body: "", payload: { action: "gmail.send", to: "mom@x.com", subject: "hi", body: "hi" } });
+  const trash = await jarvis.requestApproval({ agentId: "monica", kind: "other", title: "Trash old receipts", body: "", payload: { action: "gmail.trash", query: "older_than:5y", max: 20 } });
+  const huge = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Archive everything", body: "", payload: { action: "gmail.archive", query: "in:inbox", max: 5000 } });
+  assert.equal(own.status, "approved", "her own event moves on its own");
+  assert.equal(archive.status, "approved", "archiving is internal");
+  for (const a of [withGuests, invite, email, trash, huge]) assert.equal(a.status, "pending", `${a.title} waits for Phil`);
+  assert.deepEqual(done.sort(), ["Archive promos", "Move gym to 7am"]);
 });

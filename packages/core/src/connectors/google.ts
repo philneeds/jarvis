@@ -367,10 +367,25 @@ export class GoogleConnector {
   /** Fill in the account an agent left implicit, so the card says which address sends or changes. */
   async normalize(payload: Record<string, unknown>, agentId: string): Promise<Record<string, unknown> | void> {
     const action = String(payload.action ?? "");
-    if (!/^(gmail|calendar)\./.test(action) || (typeof payload.account === "string" && payload.account)) return;
-    const allowed = (await getAgentConfig(this.store, agentId)).accounts?.map((e) => e.toLowerCase());
-    const t = await this.pick(undefined, allowed?.length ? allowed : undefined);
-    return t.email ? { ...payload, account: t.email } : undefined;
+    if (!/^(gmail|calendar)\./.test(action)) return;
+    let out = payload;
+    if (!(typeof payload.account === "string" && payload.account)) {
+      const allowed = (await getAgentConfig(this.store, agentId)).accounts?.map((e) => e.toLowerCase());
+      const t = await this.pick(undefined, allowed?.length ? allowed : undefined);
+      if (t.email) out = { ...out, account: t.email };
+    }
+    // Moving or removing an event other people are on reaches them: record who, so it waits for Phil.
+    if ((action === "calendar.update" || action === "calendar.delete") && typeof out.id === "string" && !Array.isArray(out.guests)) {
+      try { const guests = await this.eventGuests(out.id, typeof out.account === "string" ? out.account : undefined); if (guests.length) out = { ...out, guests }; }
+      catch { out = { ...out, guests: ["(couldn't check guests)"] }; } // unsure means it waits
+    }
+    return out === payload ? undefined : out;
+  }
+
+  /** Other people on an event (not the calendar's owner). */
+  async eventGuests(id: string, account?: string, calendarId = "primary"): Promise<string[]> {
+    const j = await this.api<{ attendees?: { email?: string; self?: boolean; resource?: boolean }[] }>(account, `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}`);
+    return (j.attendees ?? []).filter((x) => !x.self && !x.resource && x.email).map((x) => x.email!);
   }
 
   /** What each action does, in Phil's words, shown on the card before he approves. */
@@ -383,8 +398,8 @@ export class GoogleConnector {
       "gmail.label": (p) => `Adds the label "${String(p.label ?? "")}" to ${scope(p)} in ${acct(p)}. Nothing moves or is deleted.`,
       "gmail.trash": (p) => `Moves ${scope(p)} in ${acct(p)} to Trash. Gmail empties Trash after 30 days; until then you can restore them.`,
       "calendar.create": (p) => `Adds "${String(p.title ?? "")}" to the calendar on ${acct(p)} from ${String(p.start ?? "?")} to ${String(p.end ?? "?")}${Array.isArray(p.attendees) && p.attendees.length ? ` and invites ${p.attendees.join(", ")}` : ""}.`,
-      "calendar.update": (p) => `Changes the event "${String(p.title ?? p.id ?? "")}" on ${acct(p)}${p.start ? ` to ${String(p.start)}${p.end ? ` – ${String(p.end)}` : ""}` : ""}. Guests, if any, get the update from Google.`,
-      "calendar.delete": (p) => `Removes the event "${String(p.title ?? p.id ?? "")}" from the calendar on ${acct(p)}. Guests, if any, get a cancellation.`,
+      "calendar.update": (p) => `Changes the event "${String(p.title ?? p.id ?? "")}" on ${acct(p)}${p.start ? ` to ${String(p.start)}${p.end ? ` – ${String(p.end)}` : ""}` : ""}.${Array.isArray(p.guests) && p.guests.length ? ` It also changes for ${p.guests.join(", ")}.` : ""}`,
+      "calendar.delete": (p) => `Removes the event "${String(p.title ?? p.id ?? "")}" from the calendar on ${acct(p)}.${Array.isArray(p.guests) && p.guests.length ? ` It also disappears for ${p.guests.join(", ")}.` : ""}`,
     };
   }
 

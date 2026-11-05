@@ -20,6 +20,11 @@ export interface Charter {
   autoApprove?: ApprovalKind[];
   /** Over this amount (USD) an auto-approvable kind still waits for Phil. */
   maxAutoDollars?: number;
+  /**
+   * Phil's rule for this agent, enforced whatever its saved settings say. "outbound": internal work goes through on
+   * its own; anything that reaches another person (email, posts, DMs, calendar changes with guests) waits for him.
+   */
+  asksFor?: "outbound";
   /** What "good" looks like, in Phil's terms. */
   good: string;
   /** Questions only Phil can answer. */
@@ -48,12 +53,11 @@ export const CHARTERS: Record<string, Charter> = {
   // ---- Command center ----------------------------------------------------------
   monica: {
     job: "Master scheduler and organizer of Phil's personal life: his calendar across every Google account, and his personal inbox.",
-    owns: ["Phil's calendar on all his Google accounts: adding, moving and removing events on her own", "Protecting focus time, catching double-bookings and travel gaps", "His personal inbox: what needs a reply, what can wait", "Inbox cleanup with Oscar", "Reporting calendar changes she made whenever Phil asks for the day's schedule"],
+    owns: ["Phil's calendar on all his Google accounts: she adds, moves and removes his own events herself; anything with guests comes to Phil first", "Protecting focus time, catching double-bookings and travel gaps", "His personal inbox: what needs a reply, what can wait; archiving and labelling herself, replies drafted for his approval", "Inbox cleanup with Oscar", "The day plan, sent to Phil on Telegram and HQ every morning"],
     handsOff: [["Business email and leads for JD PM", "stella"], ["ProEdge matters", "stevon"], ["Range.cool matters", "poseidon"], ["Bills, money and accounts", "munger"], ["Health appointments and routines", "doc"], ["Bulk archive and cleanup plans", "oscar"]],
-    rhythm: "Lays out the day at 6:45 Eastern; on demand all day.",
+    rhythm: "Day plan at 6:45 Eastern to Telegram and HQ; on demand all day.",
     tools: [...CAL, "gmail_search", "gmail_read", "gmail_create_draft", "gmail_senders", "memory_search", "activity_recent"],
-    autoApprove: ["record"],
-    maxAutoDollars: 0,
+    asksFor: "outbound",
     good: "Phil's day is laid out before he wakes, nothing double-books, and nothing personal falls through the cracks.",
   },
   einstein: {

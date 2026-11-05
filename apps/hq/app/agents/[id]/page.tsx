@@ -155,6 +155,9 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
 
         <section className="card flex flex-col gap-3" aria-label="Approval rules">
           <span className="label label-amber">Approval rules</span>
+          {charter?.asksFor === "outbound" ? (
+            <p className="m-0 text-[12px]">Your rule: {agent.name} does internal work on her own (your own calendar events, archiving, labels, notes). Anything that reaches another person (email, replies, calendar changes with guests) and anything moved to Trash comes to you first.</p>
+          ) : <>
           <span className="text-[12px]">Kinds this agent may do without you. Money and strategies always wait, whatever you tick.</span>
           <div className="flex flex-wrap gap-2">
             {KINDS.map((k) => (
@@ -171,6 +174,7 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
               Auto up to <input className="input h-9 w-28" type="number" min={0} value={cfg.rules.maxAutoItems ?? 100} onChange={(e) => setCfg({ ...cfg, rules: { ...cfg.rules, maxAutoItems: Number(e.target.value) } })} aria-label="Item cap for automatic bulk actions" /> items
             </label>
           </div>
+          </>}
         </section>
 
         <div className="flex items-center gap-3">

@@ -14,6 +14,8 @@ export type JarvisEvent =
   | { type: "system"; status: SystemStatus }
   | { type: "venture"; venture: string }
   | { type: "brief"; text: string; at: string }
+  /** A scheduled report meant for Phil's phone as well as HQ (the brief, Monica's day plan). */
+  | { type: "report"; agentId: string; title: string; text: string; at: string }
   | { type: "attention"; item: AttentionItem; change: "raised" | "done" | "snoozed" | "reopened" };
 
 /** Something Phil has to act on. Lives until he ticks it off; raised by agents or by Phil. */

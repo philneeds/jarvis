@@ -12,6 +12,8 @@ export interface Schedule {
   when: string;
   /** Phase in which this schedule becomes active. */
   phase: number;
+  /** Also send the result to Phil's phone (Telegram) as a report. */
+  push?: boolean;
 }
 
 /** Scouts and briefs on their timers. Nothing runs before its phase. */
@@ -19,7 +21,7 @@ export const SCHEDULES: Schedule[] = [
   { id: "daily-brief", agentId: "jarvis", task: "brief", when: process.env.BRIEF_AT ? `daily@${process.env.BRIEF_AT}` : "daily@07:00", phase: 0 },
   { id: "oscar-condense", agentId: "oscar", task: "condense", when: "daily@03:30", phase: 0 },
   { id: "oscar-inbox", agentId: "oscar", task: "Weekly inbox cleanup with Monica. For each of Phil's personal Google accounts: use gmail_senders on 'in:inbox older_than:14d' and 'category:promotions older_than:30d', then propose ONE archive plan per account as an approval (gmail.archive by query, with the match count in the body). Never trash. Keep anything from a real person or about money, travel, health or a job.", when: "weekly:sun@04:00", phase: 0 },
-  { id: "monica-day", agentId: "monica", task: "Lay out Phil's day: what's on the calendar, what's unscheduled, what to protect.", when: "daily@06:45", phase: 1 },
+  { id: "monica-day", agentId: "monica", task: "Lay out Phil's day for him to read on his phone: what's on the calendar across his accounts, conflicts, what's unscheduled, what to protect. Propose any calendar change as an approval; change nothing yourself.", when: "daily@06:45", phase: 0, push: true },
   { id: "stella-leads", agentId: "stella", task: "Review new leads and open jobs for JD PM; flag anything waiting on a customer reply.", when: "daily@06:50", phase: 1 },
   { id: "mantis-markets", agentId: "mantis", task: "Market read for the day: what moved on-chain overnight and what the team should watch.", when: "daily@06:55", phase: 1 },
   { id: "ansem-scan", agentId: "ansem", task: "Hourly scan: new memecoins and low caps worth a look, with the reason each is on the list.", when: "every:60", phase: 2 },
@@ -87,11 +89,15 @@ export class Scheduler {
           const text = await this.jarvis.brief();
           await this.jarvis.say({ role: "jarvis", text: `Daily brief\n\n${text}` });
           bus.emitEvent({ type: "brief", text, at: new Date().toISOString() });
+          bus.emitEvent({ type: "report", agentId: "jarvis", title: "Daily brief", text, at: new Date().toISOString() });
         } else if (s.task === "condense") {
           if ((await this.jarvis.store.memory.list()).length >= 20) await this.jarvis.say({ role: "system", text: await this.jarvis.condenseMemory() });
         } else {
           const r = await this.jarvis.runAgent(agent, s.task, { direct: false, from: "Scheduler" });
-          if (!r.blocked) await this.jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId });
+          if (!r.blocked) {
+            await this.jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId });
+            if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: s.id === "monica-day" ? "Your day" : `${agent.name} report`, text: r.text, at: new Date().toISOString() });
+          }
         }
       } catch (e) {
         await this.jarvis.router.log(agent.id, "error", `Schedule ${s.id} failed: ${(e as Error).message}`);

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { bus, type Approval, type AttentionItem, type ChatMessage, type SystemStatus } from "../events.js";
-import { AGENTS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
+import { AGENTS, CHARTERS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
 import { ModelRouter } from "../router/index.js";
 import type { Store } from "../store/types.js";
 import { usageSummary } from "../usage/caps.js";
@@ -36,6 +36,20 @@ export function spokenAddress(text: string): RegExpMatchArray | null {
   if (!agent || agent.id === "jarvis") return null;
   // Looks like a typed @mention so the same path handles it.
   return [m[0]!, agent.id, m[2]!] as unknown as RegExpMatchArray;
+}
+
+/** Actions that reach another person. */
+const OUTBOUND_ACTIONS = new Set(["gmail.send", "x.post", "x.reply", "x.dm"]);
+
+/** Does this approval reach anyone besides Phil: a message, a post, or a calendar change other people will see? */
+export function isOutbound(a: Pick<Approval, "kind" | "payload">): boolean {
+  const p = (a.payload ?? {}) as { action?: unknown; attendees?: unknown; guests?: unknown };
+  if (a.kind === "send" || a.kind === "post") return true;
+  if (typeof p.action === "string" && OUTBOUND_ACTIONS.has(p.action)) return true;
+  if (Array.isArray(p.attendees) && p.attendees.length) return true;
+  if (Array.isArray(p.guests) && p.guests.length) return true;
+  // An action no connector recognises is treated as outbound: when unsure, ask.
+  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|memory\.replace|record\.)/.test(p.action);
 }
 
 /** Which payload field holds the text Phil edits on the card, per action. */
@@ -522,7 +536,13 @@ export class Jarvis {
     // Bulk size: an explicit max, or the number of ids. Over the agent's item cap, Phil decides.
     const items = Array.isArray(pay.ids) ? pay.ids.length : Number(pay.max ?? 0);
     const itemCap = rules.maxAutoItems ?? 100;
-    if (a.kind !== "money" && a.kind !== "strategy" && rules.autoApprove.includes(a.kind) && amount <= rules.maxAutoDollars && items <= itemCap) {
+    const asksFor = CHARTERS[a.agentId]?.asksFor;
+    const action = (a.payload as { action?: unknown } | undefined)?.action;
+    // Phil's outbound rule: internal work goes through; anything reaching another person waits. Trash and money always wait.
+    const auto = asksFor === "outbound"
+      ? !isOutbound(a) && a.kind !== "money" && a.kind !== "strategy" && action !== "gmail.trash" && items <= itemCap
+      : a.kind !== "money" && a.kind !== "strategy" && rules.autoApprove.includes(a.kind) && amount <= rules.maxAutoDollars && items <= itemCap;
+    if (auto) {
       await this.router.log(a.agentId, "approval", `${getAgent(a.agentId)?.name ?? a.agentId}: "${a.title}" auto-approved by Phil's rule (${a.kind}${amount ? `, $${amount}` : ""})`, a.runId, { kind: a.kind, body: a.body });
       const done = await this.decide(approval.id, "approved", "auto: Phil's rule");
       return done ?? approval;
