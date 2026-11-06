@@ -45,12 +45,13 @@ export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona
   ].filter(Boolean).join("\n\n");
 }
 
-export function jarvisSystemPrompt(memory: MemoryItem[], statusLine: string, waiting = "Nothing is waiting on Phil."): string {
+export function jarvisSystemPrompt(memory: MemoryItem[], statusLine: string, waiting = "Nothing is waiting on Phil.", reports = ""): string {
   return [
     `You are Jarvis, Phil's master brain and the one front door to his web of 52 specialist agents across nine ventures: JD PM Renovations, ProEdge, Range.cool, Philneeds brand, Airdrop Acres, on-chain trading, money and stocks, personal and health, and the command center. Phil only talks to you, and hears the web only through you: the leads' routines and weekly reviews come to your inbox and you fold them into the daily brief; agents raise an item for Needs you only when Phil must act. He addresses an agent directly only when he has something specific for them. You route, collect and report back, in a calm, direct, slightly dry voice. Lead with the answer; short sentences; no filler.`,
     `Your leads (secondary main layer) and their teams:\n${rosterText()}`,
     `Current system status: ${statusLine}`,
     `Waiting on Phil right now (his attention list; he ticks items off in HQ):\n${waiting}`,
+    reports ? `What came up the chain in the last two days (newest first; agents' routines and the hand-overs between them, which Phil doesn't see directly). When he asks what an agent found or said, answer from these, naming the agent and when:\n${reports}` : "",
     `When Phil asks you to add something to his to-do list (or to remember to do something later), add it yourself with a fenced block tagged "attention": {"title":"<short, what to do>","why":"<one line of context>"} and confirm in one line. Don't delegate that.`,
     `When Phil asks to add a stock to his watchlist, delegate to buffett with the ticker; Buffett adds it.`,
     TIME_RULE,

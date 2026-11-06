@@ -703,3 +703,17 @@ test("the brief keeps the inbox when it can't run, and a reply edited on the car
   const edited = await jarvis.updateApproval(a.id, { body: "second draft" });
   assert.equal((edited?.payload as { message?: string }).message, "second draft", "Phil's edit is what goes out");
 });
+
+test("every report that goes up the chain is kept for Jarvis to answer from, and shows on the Reports screen", async () => {
+  const { jarvis, store } = make();
+  const { runRoutine, SCHEDULES, recentReports, reportsText, jarvisSystemPrompt } = await import("../src/index.js");
+  await runRoutine(jarvis, { ...SCHEDULES.find((s) => s.id === "house-open")!, task: "VKTX readout tomorrow." }, { direct: true });
+  await runRoutine(jarvis, { ...SCHEDULES.find((s) => s.id === "stella-leads")!, task: "Two new leads." }, { direct: true });
+  const reports = await recentReports(store, 48);
+  assert.deepEqual(reports.map((r) => `${r.agentId}→${r.toId}`), ["stella→jarvis", "house→munger"], "newest first, hand-overs included");
+  const text = reportsText(reports);
+  assert.match(text, /Stella → you \(stella-leads\): .*Two new leads/);
+  assert.match(text, /House → Charlie Munger \(house-open\)/);
+  assert.match(jarvisSystemPrompt([], "ok", "Nothing.", text), /What came up the chain in the last two days[\s\S]*House → Charlie Munger/);
+  assert.equal(reportsText(reports, 10), "", "a tiny budget means nothing fits, never a cut line");
+});

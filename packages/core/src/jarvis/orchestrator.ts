@@ -266,7 +266,8 @@ export class Jarvis {
     const memory = await this.store.memory.list();
     const status = await this.systemStatus();
     const recent = (await this.store.chat.list(12)).slice(0, -1).map((m) => `${m.role === "phil" ? "Phil" : m.agentId ?? "Jarvis"}: ${m.text.slice(0, 300)}`).join("\n");
-    const system = jarvisSystemPrompt(memory, status.text, await this.attentionText());
+    const { recentReports, reportsText } = await import("../scheduler.js");
+    const system = jarvisSystemPrompt(memory, status.text, await this.attentionText(), reportsText(await recentReports(this.store, 48)));
 
     const imageIds = this.convo.getStore()?.images ?? [];
     const planText = imageIds.length ? `${userText}\n\n(Phil attached ${imageIds.length} image${imageIds.length > 1 ? "s" : ""}. Anything about how something looks goes to Joi; the image goes with the task.)` : userText;

@@ -18,6 +18,7 @@ const PRIMARY = [
 const MORE = [
   { href: "/brief", label: "Daily brief" },
   { href: "/schedules", label: "Schedules" },
+  { href: "/reports", label: "Reports" },
   { href: "/activity", label: "Activity" },
   { href: "/usage", label: "Usage" },
   { href: "/memory", label: "Memory" },

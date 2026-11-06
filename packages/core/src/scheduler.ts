@@ -159,10 +159,39 @@ export function withInbox<T>(fn: () => Promise<T>): Promise<T> { const p = inbox
 
 export interface RoutineReport { agent: AgentDef; scheduleId: string; text: string; runId: string }
 
+/** Every report that went up the chain in the last few days, for Jarvis to answer from and for the Reports screen. */
+export const REPORTS_LOG_KEY = "reports.log";
+export interface LoggedReport { id: string; agentId: string; toId: string; scheduleId: string; at: string; text: string }
+const LOG_DAYS = 3;
+async function logReports(jarvis: Jarvis, toId: string, reports: RoutineReport[]) {
+  await withInbox(async () => {
+    const cutoff = Date.now() - LOG_DAYS * 86_400_000;
+    const log = (await jarvis.store.settings.get<LoggedReport[]>(REPORTS_LOG_KEY, [])).filter((r) => Date.parse(r.at) > cutoff);
+    await jarvis.store.settings.set(REPORTS_LOG_KEY, [...log, ...reports.map((r) => ({ id: r.runId, agentId: r.agent.id, toId, scheduleId: r.scheduleId, at: new Date().toISOString(), text: r.text.slice(0, 4000) }))].slice(-200));
+  });
+}
+export async function recentReports(store: Store, hours = 48): Promise<LoggedReport[]> {
+  const cutoff = Date.now() - hours * 3_600_000;
+  return (await store.settings.get<LoggedReport[]>(REPORTS_LOG_KEY, [])).filter((r) => Date.parse(r.at) > cutoff).reverse();
+}
+/** The reports as a compact block for Jarvis's prompt: newest first, each trimmed, the whole thing capped. */
+export function reportsText(reports: LoggedReport[], maxChars = 7000): string {
+  const out: string[] = [];
+  let used = 0;
+  for (const r of reports) {
+    const who = getAgent(r.agentId)?.name ?? r.agentId, to = r.toId === "jarvis" ? "you" : getAgent(r.toId)?.name ?? r.toId;
+    const line = `- ${r.at.slice(0, 16).replace("T", " ")} ${who} → ${to} (${r.scheduleId}): ${r.text.replace(/\s+/g, " ").slice(0, 400)}`;
+    if (used + line.length > maxChars) break;
+    out.push(line); used += line.length;
+  }
+  return out.join("\n");
+}
+
 /** Hand one or more reports to the lead they belong to, in one run: they absorb them and raise only what Phil must act on. */
 export async function deliverReports(jarvis: Jarvis, toId: string, reports: RoutineReport[]) {
   if (!reports.length) return;
   const to = toId === "jarvis" ? undefined : getAgent(toId);
+  await logReports(jarvis, toId, reports);
   if (to) {
     for (const r of reports) await jarvis.router.log(r.agent.id, "run", `${r.agent.name} → ${to.name} (${r.scheduleId}): ${r.text.slice(0, 200)}`, r.runId, { report: r.text });
     const body = reports.map((r) => `${r.agent.name} reports to you (${r.scheduleId}):\n\n${r.text}`).join("\n\n---\n\n");
