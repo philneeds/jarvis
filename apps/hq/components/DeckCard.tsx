@@ -17,6 +17,7 @@ export function DeckCard({ venture, routineId, agentName, when }: { venture: str
   const [tpl, setTpl] = useState<Tpl>(null);
   const [msg, setMsg] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const startedAt = useRef(0);
   const dataInput = useRef<HTMLInputElement>(null);
   const tplInput = useRef<HTMLInputElement>(null);
 
@@ -24,7 +25,7 @@ export function DeckCard({ venture, routineId, agentName, when }: { venture: str
   useEffect(() => { void load(); }, [load]);
   // A deck made in the background shows up without a reload.
   useEffect(() => { if (!busy) return; const t = setInterval(() => void load(), 5000); const stop = setTimeout(() => setBusy(false), 180_000); return () => { clearInterval(t); clearTimeout(stop); }; }, [busy, load]);
-  useEffect(() => { if (busy && decks[0] && Date.now() - Date.parse(decks[0].at) < 180_000) { setBusy(false); setMsg(`Deck ready: ${decks[0].title}.`); } }, [decks, busy]);
+  useEffect(() => { if (busy && decks[0] && Date.parse(decks[0].at) > startedAt.current) { setBusy(false); setMsg(`Deck ready: ${decks[0].title}.`); } }, [decks, busy]);
 
   const upload = async (list: FileList | null, kind: "files" | "template") => {
     if (!list?.length) return;
@@ -48,7 +49,7 @@ export function DeckCard({ venture, routineId, agentName, when }: { venture: str
         <span className="text-[11px]" style={{ color: "var(--muted)" }}>{agentName} builds it {when}</span>
         <button className="btn btn-sm btn-primary ml-auto" disabled={busy || !week.length} title={week.length ? undefined : "Upload this week's sales data first"} onClick={async () => {
           setMsg(undefined);
-          try { await api(`/api/schedules/${routineId}/run`, { method: "POST" }); setBusy(true); setMsg(`${agentName} is building it. It lands in chat and on Telegram in a minute or two.`); } catch (e) { setMsg((e as Error).message); }
+          try { startedAt.current = Date.now(); await api(`/api/schedules/${routineId}/run`, { method: "POST" }); setBusy(true); setMsg(`${agentName} is building it. It lands in chat and on Telegram in a minute or two.`); } catch (e) { setMsg((e as Error).message); }
         }}>{busy ? "Building…" : "Make the deck now"}</button>
       </div>
 

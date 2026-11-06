@@ -180,8 +180,9 @@ export class GoHighLevelConnector {
 
   /** Send one message to a contact through GoHighLevel (SMS, Email, WhatsApp, FB, IG). Only ever called after Phil approves. */
   async sendMessage(p: { contactId: string; type: string; message: string; subject?: string; html?: string }): Promise<{ conversationId?: string; messageId?: string }> {
-    const type = String(p.type).toUpperCase() === "EMAIL" ? "Email" : String(p.type).toUpperCase();
-    if (!["SMS", "EMAIL", "WHATSAPP", "FB", "IG"].includes(type.toUpperCase())) throw new Error(`can't send a "${p.type}" message; use SMS, Email, WhatsApp, FB or IG`);
+    const CHANNEL: Record<string, string> = { SMS: "SMS", EMAIL: "Email", WHATSAPP: "WhatsApp", FB: "FB", FACEBOOK: "FB", IG: "IG", INSTAGRAM: "IG" };
+    const type = CHANNEL[String(p.type).toUpperCase()];
+    if (!type) throw new Error(`can't send a "${p.type}" message; use SMS, Email, WhatsApp, FB or IG`);
     const body: Record<string, unknown> = { type, contactId: p.contactId, message: p.message };
     if (type === "Email") { body.subject = p.subject ?? "From JD PM Renovations"; if (p.html) body.html = p.html; }
     const res = await this.f(`${this.opts.baseUrl ?? "https://services.leadconnectorhq.com"}/conversations/messages`, { method: "POST", headers: { authorization: `Bearer ${this.opts.apiKey}`, version: "2021-04-15", accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body) });

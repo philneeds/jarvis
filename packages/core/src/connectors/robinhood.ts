@@ -24,8 +24,8 @@ const CLIENT_KEY = "robinhood.client";
 const TOKENS_KEY = "robinhood.tokens";
 const STATUS_KEY = "robinhood.status";
 const DEFAULT_URL = "https://agent.robinhood.com/mcp/trading";
-/** A tool that changes something, when the server gives no annotation. */
-const WRITE = /(place|submit|create|cancel|modify|replace|update|delete|remove|buy|sell|transfer|deposit|withdraw|enable|disable|set_)/i;
+/** Without an annotation, only a tool that plainly reads is treated as a read; anything else waits for Phil. */
+const READ = /^(get|list|search|quote|quotes|lookup|fetch|read|history|show|describe|view|find|check)[_-]?/i;
 const b64url = (b: Buffer) => b.toString("base64url");
 
 export class RobinhoodConnector {
@@ -50,10 +50,12 @@ export class RobinhoodConnector {
   private async discover(): Promise<Meta> {
     if (this.meta) return this.meta;
     const base = new URL(this.url);
-    const res = await this.f(`${base.origin}/.well-known/oauth-authorization-server`);
-    if (!res.ok) throw new Error(`Robinhood's sign-in details aren't available (${res.status})`);
-    this.meta = (await res.json()) as Meta;
-    return this.meta;
+    // The path-aware form first (what the MCP spec says), then the plain one (what Robinhood serves today).
+    for (const u of [`${base.origin}/.well-known/oauth-authorization-server${base.pathname}`, `${base.origin}/.well-known/oauth-authorization-server`]) {
+      const res = await this.f(u).catch(() => undefined);
+      if (res?.ok) { const j = (await res.json().catch(() => null)) as Meta | null; if (j?.authorization_endpoint && j.token_endpoint) { this.meta = j; return j; } }
+    }
+    throw new Error("Robinhood's sign-in details aren't available right now");
   }
 
   private async client(): Promise<Client> {
@@ -108,10 +110,10 @@ export class RobinhoodConnector {
     return t;
   }
 
-  private async accessToken(): Promise<string> {
+  private async accessToken(force = false): Promise<string> {
     const t = await this.store.settings.get<Tokens | null>(TOKENS_KEY, null);
     if (!t) throw new Error("Robinhood isn't connected. Phil connects it in Settings.");
-    if (t.expires_at && this.now() > t.expires_at - 60_000) {
+    if (force || (t.expires_at && this.now() > t.expires_at - 60_000)) {
       if (!t.refresh_token) throw new Error("Robinhood's sign-in expired; reconnect it in Settings.");
       const c = await this.client();
       return (await this.token({ grant_type: "refresh_token", refresh_token: t.refresh_token, client_id: c.client_id, resource: this.url })).access_token;
@@ -127,11 +129,15 @@ export class RobinhoodConnector {
 
   // ---- MCP over HTTP ------------------------------------------------------------------------------
 
-  private async rpc<T>(method: string, params?: unknown, retry = true): Promise<T> {
+  private async rpc<T>(method: string, params?: unknown, retry = true, fresh = false): Promise<T> {
     const id = this.rpcId++;
-    const token = await this.accessToken();
+    const token = await this.accessToken(fresh);
     const res = await this.f(this.url, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18", ...(this.session ? { "mcp-session-id": this.session } : {}) }, body: JSON.stringify({ jsonrpc: "2.0", id, method, params: params ?? {} }) });
-    if (res.status === 401) { await this.mark(false, "Robinhood refused the token"); throw new Error("Robinhood refused HQ's sign-in; reconnect it in Settings."); }
+    if (res.status === 401) {
+      // One refresh and retry before giving up (the token may have expired without an expires_in to warn us).
+      if (!fresh && (await this.store.settings.get<Tokens | null>(TOKENS_KEY, null))?.refresh_token) return this.rpc(method, params, retry, true);
+      await this.mark(false, "Robinhood refused the token"); throw new Error("Robinhood refused HQ's sign-in; reconnect it in Settings.");
+    }
     if (res.status === 404 && this.session && retry) { this.session = undefined; return this.rpc(method, params, false); } // session expired
     if (!res.ok) { await this.mark(false, `Robinhood error ${res.status}`); throw new Error(`Robinhood error ${res.status}: ${(await res.text()).slice(0, 200)}`); }
     const sid = res.headers.get("mcp-session-id");
@@ -165,7 +171,7 @@ export class RobinhoodConnector {
   isWrite(t: McpTool): boolean {
     if (t.annotations?.readOnlyHint === true) return false;
     if (t.annotations && t.annotations.readOnlyHint === false) return true;
-    return WRITE.test(t.name) || WRITE.test(t.annotations?.title ?? "");
+    return !READ.test(t.name);
   }
 
   async call(name: string, args: Record<string, unknown> = {}): Promise<string> {

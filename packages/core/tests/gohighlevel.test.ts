@@ -72,4 +72,6 @@ test("a GoHighLevel reply waits for Phil, then goes out through the API on appro
   assert.deepEqual(sent[0]!.body, { type: "SMS", contactId: "c1", message: "Hi Ana, the quote is on its way tomorrow. Stephanie, JD PM" });
   assert.equal(sent[0]!.version, "2021-04-15");
   assert.match(done?.note ?? "", /Sent to Ana Lopez \(\+15855550100\) via GoHighLevel \(SMS\), message m9/);
+  await g.sendMessage({ contactId: "c1", type: "whatsapp", message: "hi" });
+  assert.equal(sent[1]!.body.type, "WhatsApp", "channel names are sent the way GoHighLevel spells them");
 });

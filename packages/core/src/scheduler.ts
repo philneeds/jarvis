@@ -1,7 +1,7 @@
 import type { Store } from "./store/types.js";
 import { bus } from "./events.js";
 import type { Jarvis } from "./jarvis/orchestrator.js";
-import { AGENTS, getAgent } from "./registry/index.js";
+import { AGENTS, getAgent, type AgentDef } from "./registry/index.js";
 import { getAgentConfig } from "./config.js";
 import { listDecks } from "./decks.js";
 import { listDataFiles } from "./salesdata.js";
@@ -153,12 +153,38 @@ const REPORT_TITLE: Record<string, string> = { "stevon-weekly": "Stevon: Tuesday
 export const REPORT_INBOX_KEY = "reports.inbox";
 export interface QueuedReport { id: string; agentId: string; scheduleId: string; at: string; text: string }
 
+/** The inbox is read-modify-write, so changes to it run one at a time within this process. */
+let inboxLock: Promise<unknown> = Promise.resolve();
+export function withInbox<T>(fn: () => Promise<T>): Promise<T> { const p = inboxLock.then(fn, fn); inboxLock = p.catch(() => undefined); return p; }
+
+export interface RoutineReport { agent: AgentDef; scheduleId: string; text: string; runId: string }
+
+/** Hand one or more reports to the lead they belong to, in one run: they absorb them and raise only what Phil must act on. */
+export async function deliverReports(jarvis: Jarvis, toId: string, reports: RoutineReport[]) {
+  if (!reports.length) return;
+  const to = toId === "jarvis" ? undefined : getAgent(toId);
+  if (to) {
+    for (const r of reports) await jarvis.router.log(r.agent.id, "run", `${r.agent.name} → ${to.name} (${r.scheduleId}): ${r.text.slice(0, 200)}`, r.runId, { report: r.text });
+    const body = reports.map((r) => `${r.agent.name} reports to you (${r.scheduleId}):\n\n${r.text}`).join("\n\n---\n\n");
+    const rr = await jarvis.runAgent(to, `${body}\n\nThis is for you, not Phil: keep what matters in memory (scope venture:${to.venture}) and on the board, hand anything actionable to whoever owns it, and raise an attention or approval block only if Phil himself must act. Reply in one or two lines on what you did with ${reports.length > 1 ? "these" : "it"}.`, { direct: false, from: reports.length > 1 ? "The team" : reports[0]!.agent.name, parentRunId: reports[0]!.runId });
+    if (!rr.blocked) await jarvis.router.log(to.id, "run", `${to.name} took ${reports.length > 1 ? `${reports.length} reports (${reports.map((r) => r.agent.name).join(", ")})` : `${reports[0]!.agent.name}'s report`}: ${rr.text.slice(0, 200)}`, rr.runId);
+    return;
+  }
+  // A lead's report: into Jarvis's inbox, folded into the next daily brief.
+  for (const r of reports) await jarvis.router.log(r.agent.id, "run", `${r.agent.name} → Jarvis (${r.scheduleId}): ${r.text.slice(0, 200)}`, r.runId, { report: r.text });
+  await withInbox(async () => {
+    const inbox = await jarvis.store.settings.get<QueuedReport[]>(REPORT_INBOX_KEY, []);
+    await jarvis.store.settings.set(REPORT_INBOX_KEY, [...inbox, ...reports.map((r) => ({ id: r.runId, agentId: r.agent.id, scheduleId: r.scheduleId, at: new Date().toISOString(), text: r.text.slice(0, 4000) }))].slice(-40));
+  });
+}
+
 /**
  * One agent routine, now. The answer goes up the chain: to the agent's lead (who absorbs it: memory, board, hand-offs,
  * and an attention or approval only if Phil must act), or, for a lead, to Jarvis's inbox for the next daily brief.
  * Only a deliverable (push) goes to Phil himself, in chat and on Telegram. The Activity log keeps every report.
+ * With deliver: false the report is returned instead, so a tick can hand several to the same lead in one go.
  */
-export async function runRoutine(jarvis: Jarvis, s: Schedule, opts: { direct?: boolean } = {}) {
+export async function runRoutine(jarvis: Jarvis, s: Schedule, opts: { direct?: boolean; deliver?: boolean } = {}) {
   const agent = getAgent(s.agentId);
   if (!agent || s.task === "brief" || s.task === "condense") return undefined;
   // A deck routine on its timer skips when Phil already had a deck made by hand since the last data upload.
@@ -179,17 +205,9 @@ export async function runRoutine(jarvis: Jarvis, s: Schedule, opts: { direct?: b
     return r;
   }
   const toId = s.to ?? agent.parent ?? "jarvis";
-  const to = toId === "jarvis" ? undefined : getAgent(toId);
-  if (to) {
-    await jarvis.router.log(agent.id, "run", `${agent.name} → ${to.name} (${s.id}): ${r.text.slice(0, 200)}`, r.runId, { report: r.text });
-    const rr = await jarvis.runAgent(to, `${agent.name} reports to you (${s.id}):\n\n${r.text}\n\nThis is for you, not Phil: keep what matters in memory (scope venture:${to.venture}) and on the board, hand anything actionable to whoever owns it, and raise an attention or approval block only if Phil himself must act. Reply in one or two lines on what you did with it.`, { direct: false, from: agent.name, parentRunId: r.runId });
-    if (!rr.blocked) await jarvis.router.log(to.id, "run", `${to.name} took ${agent.name}'s report: ${rr.text.slice(0, 200)}`, rr.runId);
-    return r;
-  }
-  // A lead's report: into Jarvis's inbox, folded into the next daily brief.
-  await jarvis.router.log(agent.id, "run", `${agent.name} → Jarvis (${s.id}): ${r.text.slice(0, 200)}`, r.runId, { report: r.text });
-  const inbox = await jarvis.store.settings.get<QueuedReport[]>(REPORT_INBOX_KEY, []);
-  await jarvis.store.settings.set(REPORT_INBOX_KEY, [...inbox, { id: r.runId, agentId: agent.id, scheduleId: s.id, at: new Date().toISOString(), text: r.text.slice(0, 4000) }].slice(-40));
+  const report: RoutineReport = { agent, scheduleId: s.id, text: r.text, runId: r.runId };
+  if (opts.deliver === false) return { ...r, report, toId };
+  await deliverReports(jarvis, toId, [report]);
   return r;
 }
 
@@ -233,15 +251,23 @@ export class Scheduler {
     });
   }
 
+  /** Routines running right now, so an overlapping tick never starts the same one twice. */
+  private running = new Set<string>();
+
   async tick(now = new Date()) {
     const phase = await this.jarvis.store.settings.get("phase", 0);
     // Last runs survive a restart, so a routine never runs twice in its window and the Schedules screen can show them.
     if (!this.loaded) { this.loaded = true; for (const [k, v] of Object.entries(await this.jarvis.store.settings.get<Record<string, number>>(LAST_RUN_KEY, {}))) if (!this.lastRun.has(k)) this.lastRun.set(k, v); }
+    // Reports for the same lead from this tick are handed over together, so Munger gets one message from five scouts.
+    const batches = new Map<string, RoutineReport[]>();
     for (const s of this.due(now, phase, await this.allSchedules())) {
-      this.lastRun.set(s.id, now.getTime());
+      // A long routine can span ticks: skip what's still running, and re-check since the snapshot was taken.
+      if (this.running.has(s.id) || !this.due(now, phase, [s]).length) continue;
+      if ((this.lastRun.get(s.id) ?? 0) < now.getTime()) this.lastRun.set(s.id, now.getTime());
       await this.jarvis.store.settings.set(LAST_RUN_KEY, Object.fromEntries(this.lastRun));
       const agent = getAgent(s.agentId);
       if (!agent) continue;
+      this.running.add(s.id);
       // The log gets a schedule line only once the run did something Phil can see; a skipped or blocked timer stays out of it.
       const done = (what: string, runId?: string) => this.jarvis.router.log(agent.id, "schedule", `Scheduled: ${s.id} · ${what}`, runId);
       try {
@@ -258,12 +284,18 @@ export class Scheduler {
             await done(text.split("\n")[0]!.slice(0, 120));
           }
         } else {
-          const r = await runRoutine(this.jarvis, s);
-          if (r && !r.blocked) await done(`${agent.name} reported back`, r.runId);
+          const r = await runRoutine(this.jarvis, s, { deliver: false });
+          if (r && !r.blocked) {
+            await done(`${agent.name} reported back`, r.runId);
+            if ("report" in r && r.report) batches.set(r.toId, [...(batches.get(r.toId) ?? []), r.report]);
+          }
         }
       } catch (e) {
         await this.jarvis.router.log(agent.id, "error", `Schedule ${s.id} failed: ${(e as Error).message}`);
-      }
+      } finally { this.running.delete(s.id); }
+    }
+    for (const [toId, reports] of batches) {
+      try { await deliverReports(this.jarvis, toId, reports); } catch (e) { await this.jarvis.router.log(toId === "jarvis" ? "jarvis" : toId, "error", `Handing over ${reports.length} report(s) failed: ${(e as Error).message}`); }
     }
     bus.emitEvent({ type: "system", status: await this.jarvis.systemStatus() });
   }

@@ -82,7 +82,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  // Nothing to fetch on the login screen; it would only 401.
+  useEffect(() => { if (typeof window !== "undefined" && location.pathname.startsWith("/login")) return; void refresh(); }, [refresh]);
 
   useEffect(() => {
     let stop = false, retry = 1000, ws: WebSocket | null = null, timer: ReturnType<typeof setTimeout> | undefined;

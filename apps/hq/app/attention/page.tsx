@@ -29,8 +29,11 @@ export default function NeedsYouPage() {
     return () => window.removeEventListener("hashchange", read);
   }, []);
 
-  const active: Section = chosen ?? (toApprove > 0 ? "approve" : "todo");
-  const order: Section[] = toApprove > 0 ? ["approve", "todo"] : ["todo", "approve"];
+  // The default tab and order are picked once the counts first load, so they don't flip while Phil is reading.
+  const [first, setFirst] = useState<Section | null>(null);
+  useEffect(() => { if (loaded && !first) setFirst(toApprove > 0 ? "approve" : "todo"); }, [loaded, first, toApprove]);
+  const active: Section = chosen ?? first ?? "todo";
+  const order: Section[] = (first ?? "todo") === "approve" ? ["approve", "todo"] : ["todo", "approve"];
   const pick = (s: Section) => { setChosen(s); history.replaceState(null, "", `#${s}`); };
 
   const summary = !loaded

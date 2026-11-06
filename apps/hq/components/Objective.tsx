@@ -107,7 +107,7 @@ export function Objective() {
                       <label className="flex items-center gap-2 text-[12px] cursor-pointer" style={{ color: b.done ? "var(--muted)" : "var(--ink)" }}>
                         <input type="checkbox" checked={b.done} onChange={(e) => void update(g, { benchmarksDone: e.target.checked ? { done: [b.id] } : { undone: [b.id] } })} />
                         <span className="flex-1 min-w-0" style={{ textDecoration: b.done ? "line-through" : undefined }}>{b.text}</span>
-                        <span className="text-[10px]" style={{ color: "var(--dim)" }}>{b.weight}%</span>
+                        <span className="text-[10px]" style={{ color: "var(--dim)" }} title={`weight ${b.weight}`}>{Math.round((b.weight / Math.max(1, g.benchmarks!.reduce((n, x) => n + x.weight, 0))) * 100)}%</span>
                       </label>
                     </li>
                   ))}

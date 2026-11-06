@@ -67,7 +67,7 @@ interface TrashEntry { id: string; at: string; kind: "memory" | "record" | "metr
 const clampPct = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0);
 
 /** Which payload field holds the text Phil edits on the card, per action. */
-const TEXT_FIELD: Record<string, string> = { "gmail.send": "body", "x.post": "text", "x.reply": "text", "x.dm": "text" };
+const TEXT_FIELD: Record<string, string> = { "gmail.send": "body", "x.post": "text", "x.reply": "text", "x.dm": "text", "ghl.message": "message" };
 
 export class Jarvis {
   readonly store: Store;
@@ -94,6 +94,10 @@ export class Jarvis {
     // Phil's goals for the month, as agreed with Adam: add the new ones, retire the finished or dropped ones.
     this.executors.set("goals.set", async (a) => {
       const p = (a.payload ?? {}) as { add?: { name?: unknown; deadline?: unknown; pct?: unknown; primary?: unknown }[]; retire?: unknown[] };
+      const current = await this.goals();
+      const retiring = (p.retire ?? []).map(String).filter((id) => current.some((g) => g.id === id)).length;
+      const adding = (p.add ?? []).filter((g) => typeof g.name === "string" && g.name.trim()).length;
+      if (current.length - retiring + adding > Jarvis.MAX_GOALS) throw new Error(`that would leave ${current.length - retiring + adding} goals; at most ${Jarvis.MAX_GOALS}. Retire more first.`);
       const retired: string[] = [];
       for (const id of (p.retire ?? []).map(String)) { const r = await this.deleteGoal(id); if (r) retired.push(r.goal.name); }
       const added: string[] = [];
@@ -783,14 +787,22 @@ export class Jarvis {
     const states = await this.store.agentState.all();
     const recent = (await this.store.activity.list({ limit: 15 })).map((e) => `${e.at.slice(0, 16)} ${e.summary}`);
     const now = new Date();
-    // Reports the leads sent up since the last brief (their routines and weekly reviews), then cleared.
+    // A morning lead still working (Monica at 6:45, Stella at 6:50, Mantis at 6:55) gets up to two minutes to finish,
+    // so its report goes in today's brief rather than tomorrow's.
+    const morning = ["monica", "stella", "mantis", "munger", "doc"];
+    for (let i = 0; i < 12; i++) {
+      const working = (await this.store.agentState.all()).filter((x) => morning.includes(x.id) && x.status === "working");
+      if (!working.length) break;
+      await new Promise((r) => setTimeout(r, Number(process.env.BRIEF_WAIT_STEP_MS ?? 10_000)));
+    }
+    // Reports the leads sent up since the last brief (their routines and weekly reviews). Cleared only once the brief
+    // is written, so a failed run keeps them for the retry.
     const inbox = await this.store.settings.get<{ id: string; agentId: string; scheduleId: string; at: string; text: string }[]>("reports.inbox", []);
     const queued = inbox.map((q) => ({ name: `${getAgent(q.agentId)?.name ?? q.agentId} (${q.scheduleId}, ${q.at.slice(0, 16).replace("T", " ")})`, text: q.text.slice(0, 2500) }));
-    if (inbox.length) await this.store.settings.set("reports.inbox", []);
     // Leads with data access check in live (Monica's calendar, Stella's mailbox, Mantis's markets…), in parallel,
     // time-boxed. A lead whose routine already reported in the last three hours isn't asked again.
     const fresh = new Set(inbox.filter((q) => now.getTime() - Date.parse(q.at) < 3 * 3_600_000).map((q) => q.agentId));
-    const leadIds = ["monica", "stella", "mantis", "munger", "doc"].filter((id) => !fresh.has(id));
+    const leadIds = morning.filter((id) => !fresh.has(id));
     const reporters: AgentDef[] = [];
     for (const id of leadIds) {
       const a = getAgent(id)!;
@@ -817,6 +829,8 @@ export class Jarvis {
     if (r.blocked) return `No brief: ${r.blocked}`;
     const { text, approvals, remember } = extractBlocks(r.text);
     await this.absorb(jarvis, approvals, remember, r.runId);
+    // Drop exactly what was briefed; a report that landed meanwhile stays for the next one.
+    if (inbox.length) { const briefed = new Set(inbox.map((q) => q.id)); const { withInbox } = await import("../scheduler.js"); await withInbox(async () => { const nowInbox = await this.store.settings.get<{ id: string }[]>("reports.inbox", []); await this.store.settings.set("reports.inbox", nowInbox.filter((q) => !briefed.has(q.id))); }); }
     const entry = { at: new Date().toISOString(), text };
     await this.store.settings.set("lastBrief", entry);
     const history = await this.store.settings.get<{ at: string; text: string }[]>("briefs", []);

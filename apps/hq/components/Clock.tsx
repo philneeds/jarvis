@@ -11,8 +11,16 @@ export function Clock({ since }: { since?: string }) {
     setNow(new Date());
     const t = setInterval(() => setNow(new Date()), 1000);
     const lat = process.env.NEXT_PUBLIC_LAT ?? "43.16", lon = process.env.NEXT_PUBLIC_LON ?? "-77.61";
-    const load = () => fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&temperature_unit=fahrenheit`)
-      .then((r) => r.json()).then((j) => setWx({ t: Math.round(j.current.temperature_2m), c: WMO[j.current.weather_code] ?? "" })).catch(() => undefined);
+    // One weather fetch per 15 minutes per browser, whatever page Phil is on; the last reading is kept between pages.
+    const KEY = "hq.weather";
+    const load = () => {
+      try {
+        const c = JSON.parse(localStorage.getItem(KEY) ?? "null") as { at: number; t?: number; c?: string; failed?: boolean } | null;
+        if (c && Date.now() - c.at < 15 * 60_000) { if (typeof c.t === "number") setWx({ t: c.t, c: c.c ?? "" }); return; } // a recent failure also waits
+      } catch { /* fetch */ }
+      void fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&temperature_unit=fahrenheit`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status))))).then((j) => { const w = { t: Math.round(j.current.temperature_2m), c: WMO[j.current.weather_code] ?? "" }; setWx(w); try { localStorage.setItem(KEY, JSON.stringify({ at: Date.now(), ...w })); } catch { /* ignore */ } }).catch(() => { try { localStorage.setItem(KEY, JSON.stringify({ at: Date.now(), failed: true })); } catch { /* ignore */ } });
+    };
     load();
     const w = setInterval(load, 15 * 60_000);
     return () => { clearInterval(t); clearInterval(w); };

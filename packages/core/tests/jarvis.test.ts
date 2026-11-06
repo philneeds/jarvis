@@ -672,3 +672,34 @@ test("leads report to Jarvis's inbox, not Phil; the next daily brief folds them 
   assert.equal(to("stevon-weekly"), undefined); assert.equal(to("daily-brief"), undefined);
   assert.deepEqual(SCHEDULES.filter((s) => s.push).map((s) => s.id), ["stevon-weekly"]);
 });
+
+test("one tick hands the five scouts' notes to Munger in one go; a routine still running isn't started again", async () => {
+  const { jarvis, store } = make();
+  await store.settings.set("phase", 2);
+  const { Scheduler, SCHEDULES } = await import("../src/index.js");
+  const scouts = SCHEDULES.filter((s) => s.when === "weekdays@08:30");
+  const s = new Scheduler(jarvis, scouts);
+  const mondayAt830 = new Date(2026, 10, 9, 8, 31);
+  await s.tick(mondayAt830);
+  const log = await store.activity.list({ limit: 300 });
+  const mungerTook = log.filter((e) => e.agentId === "munger" && /took 5 reports \(Marcus, House, Exxon, Altman, Armstrong\)/.test(e.summary));
+  assert.equal(mungerTook.length, 1, "Munger absorbed all five in one run");
+  assert.equal(log.filter((e) => e.agentId === "munger" && e.kind === "run" && /ran on/.test(e.summary)).length, 1, "exactly one Munger model run");
+  // A second tick 30 seconds later does nothing: the window is marked, and nothing overlaps.
+  const before = log.length;
+  await s.tick(new Date(mondayAt830.getTime() + 30_000));
+  assert.equal((await store.activity.list({ limit: 300 })).length, before);
+});
+
+test("the brief keeps the inbox when it can't run, and a reply edited on the card is what GoHighLevel sends", async () => {
+  const { jarvis, store } = make();
+  const { REPORT_INBOX_KEY } = await import("../src/index.js");
+  await store.settings.set(REPORT_INBOX_KEY, [{ id: "r1", agentId: "stella", scheduleId: "stella-leads", at: new Date().toISOString(), text: "two new leads" }]);
+  await store.settings.set("killSwitch", { all: true, trading: false, agents: [] });
+  assert.match(await jarvis.brief(), /^No brief:/);
+  assert.equal((await store.settings.get<unknown[]>(REPORT_INBOX_KEY, [])).length, 1, "kept for the retry");
+  await store.settings.set("killSwitch", { all: false, trading: false, agents: [] });
+  const a = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Reply", body: "first draft", payload: { action: "ghl.message", contactId: "c1", type: "SMS", message: "first draft" } });
+  const edited = await jarvis.updateApproval(a.id, { body: "second draft" });
+  assert.equal((edited?.payload as { message?: string }).message, "second draft", "Phil's edit is what goes out");
+});

@@ -175,7 +175,8 @@ export class ModelRouter {
  */
 export async function prefetchTools(tools: ToolDef[], ctx: ToolContext, timeoutMs = 15_000): Promise<string> {
   const { z } = await import("zod");
-  const runnable = tools.filter((t) => !NATIVE_FOR_GROK.has(t.name) && z.object(t.schema).safeParse({}).success).slice(0, 5);
+  const noInput = tools.filter((t) => !NATIVE_FOR_GROK.has(t.name) && z.object(t.schema).safeParse({}).success);
+  const runnable = noInput.slice(0, 8);
   if (!runnable.length) return "";
   const out = await Promise.all(runnable.map(async (t) => {
     try {
@@ -183,6 +184,6 @@ export async function prefetchTools(tools: ToolDef[], ctx: ToolContext, timeoutM
       return `### ${t.name}\n${String(r).slice(0, 6000)}`;
     } catch (e) { return `### ${t.name}\n(couldn't fetch: ${(e as Error).message})`; }
   }));
-  const needInput = tools.filter((t) => !runnable.includes(t) && !NATIVE_FOR_GROK.has(t.name)).map((t) => t.name);
+  const needInput = tools.filter((t) => !noInput.includes(t) && !NATIVE_FOR_GROK.has(t.name)).map((t) => t.name);
   return `\n\n---\nYou can't call HQ's tools from here, so HQ already ran these for you just now. Use these numbers, and say where a number came from.${needInput.length ? ` (${needInput.join(", ")} need input and weren't run; use your own web and X search instead.)` : ""}\n\n${out.join("\n\n")}`;
 }

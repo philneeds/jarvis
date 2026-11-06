@@ -26,7 +26,7 @@ test("Robinhood: HQ registers itself, signs Phil in with PKCE, speaks MCP over H
       if (rpc.method === "initialize") return new Response(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { protocolVersion: "2025-06-18", serverInfo: { name: "robinhood" } } }), { headers: { "content-type": "application/json", "mcp-session-id": "sess-9" } });
       if (rpc.method === "notifications/initialized") return new Response(null, { status: 202 });
       assert.equal(h["mcp-session-id"], "sess-9", "the session id goes on every later call");
-      if (rpc.method === "tools/list") return Response.json({ jsonrpc: "2.0", id: rpc.id, result: { tools: [{ name: "get_positions", description: "Positions across accounts", annotations: { readOnlyHint: true } }, { name: "place_order", description: "Place an order in the agentic account", inputSchema: { type: "object", properties: { symbol: { type: "string" } } } }, { name: "get_quote", description: "Quote for a symbol" }] } });
+      if (rpc.method === "tools/list") return Response.json({ jsonrpc: "2.0", id: rpc.id, result: { tools: [{ name: "get_positions", description: "Positions across accounts", annotations: { readOnlyHint: true } }, { name: "place_order", description: "Place an order in the agentic account", inputSchema: { type: "object", properties: { symbol: { type: "string" } } } }, { name: "get_quote", description: "Quote for a symbol" }, { name: "execute_trade", description: "no annotation, not a read" }] } });
       if (rpc.method === "tools/call") {
         if (rpc.params?.name === "get_positions") return new Response(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: "AAPL 10 sh · NVDA 5 sh" }] } })}\n\n`, { headers: { "content-type": "text/event-stream" } });
         if (rpc.params?.name === "place_order") return Response.json({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: `order placed: ${JSON.stringify(rpc.params.arguments)}` }] } });
@@ -54,7 +54,8 @@ test("Robinhood: HQ registers itself, signs Phil in with PKCE, speaks MCP over H
   const list = await t("robinhood_tools").handler({}, ctx);
   assert.match(list, /read get_positions: Positions across accounts/);
   assert.match(list, /WRITE \(approval\) place_order/);
-  assert.match(list, /read get_quote/, "no annotation and no write-looking name counts as a read");
+  assert.match(list, /read get_quote/, "no annotation but a read-looking name counts as a read");
+  assert.match(list, /WRITE \(approval\) execute_trade/, "no annotation and no read-looking name waits for Phil");
   assert.equal(await t("robinhood_read").handler({ tool: "get_positions" }, ctx), "AAPL 10 sh · NVDA 5 sh", "an SSE answer is read");
   assert.match(await t("robinhood_read").handler({ tool: "place_order", args: { symbol: "AAPL" } }, ctx), /changes something, so it isn't a read/);
   assert.match(await t("robinhood_read").handler({ tool: "nope" }, ctx), /no tool called nope/);
