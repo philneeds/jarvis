@@ -5,7 +5,7 @@ import { defineTool, type ToolDef } from "../tools/index.js";
 import type { Executor, Describer } from "../jarvis/orchestrator.js";
 
 /**
- * X (Twitter) connector for Boo, ncrypt, Nick and Intern. Several accounts (Philneeds, Range.cool, Acres),
+ * X (Twitter) connector for Boo, ncrypt, Block and Intern. Several accounts (Philneeds, Range.cool, Acres),
  * each connected once with OAuth 2.0 + PKCE on X's API v2; tokens live in settings["x.accounts"].
  * Reads are tools. Posting, replying and DMs are approval actions and run only after Phil approves.
  * Live X research stays with Grok (Lucas); this connector is for Phil's own accounts.
@@ -143,7 +143,7 @@ export class XConnector {
         handler: async (a) => { const ms = await this.mentions(a.account, a.max ?? 20); return ms.length ? ms.map((m) => `[${m.id}] ${m.created_at ?? ""} by ${m.author_id ?? "?"}: ${m.text}`).join("\n") : "No recent mentions."; },
       }),
       defineTool({
-        name: "x_own_posts", description: "Recent posts from one of Phil's X accounts, with metrics (for Nick's analytics).",
+        name: "x_own_posts", description: "Recent posts from one of Phil's X accounts, with metrics (for Block's analytics).",
         schema: { ...acctArg, max: z.number().int().min(5).max(100).optional() },
         handler: async (a) => { const ps = await this.ownPosts(a.account, a.max ?? 20); return ps.length ? ps.map((p) => `[${p.id}] ${p.created_at ?? ""} ${JSON.stringify(p.public_metrics ?? {})}\n  ${p.text}`).join("\n") : "No posts yet."; },
       }),

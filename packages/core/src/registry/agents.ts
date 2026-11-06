@@ -128,10 +128,10 @@ export const AGENTS: AgentDef[] = [
   { id: "claw", name: "Claw", short: "New tech & AI", layer: 2, parent: "mantis", links: ["lucas"], venture: "crypto", model: "grok", phase: 2, priority: "pause-first", desc: "Expert in new and trending tech and AI: what we need to know about." },
   {
     id: "lucas", name: "Lucas", short: "X research", layer: 2, parent: "mantis", venture: "crypto", serves: ["philneeds"], model: "grok", phase: 2, priority: "room",
-    desc: "In charge of X research. In-depth reports on what's new, what's trending, what's worth talking about and what people want to hear, plus any alpha or gems in the weeds. Mantis's whole team feeds him; he feeds Nick's team.",
+    desc: "In charge of X research. In-depth reports on what's new, what's trending, what's worth talking about and what people want to hear, plus any alpha or gems in the weeds. Mantis's whole team feeds him; he feeds Block's team.",
   },
   {
-    id: "nick", name: "Nick", short: "Philneeds brand manager", layer: 2, parent: "mantis", links: ["lucas"], venture: "philneeds", model: "claude-sonnet", phase: 2, priority: "room",
+    id: "nick", name: "Block", short: "Philneeds brand manager", layer: 2, parent: "mantis", links: ["lucas"], venture: "philneeds", model: "claude-sonnet", phase: 2, priority: "room",
     desc: "Manager of the Philneeds brand, Boo and ncrypt. Reviews the analytics and improves the agents below him for better performance. Gets research from Lucas.",
   },
   { id: "boo", name: "Boo", short: "Ghostwriter", layer: 3, parent: "nick", venture: "philneeds", serves: ["range", "acres"], model: "grok", phase: 2, priority: "room", desc: "Ghostwriter. Drafts and (after Phil's approval) posts for the X account: Philneeds, Range.cool and Acres." },

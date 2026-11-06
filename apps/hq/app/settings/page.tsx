@@ -111,7 +111,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }}>
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.x.accounts.length ? "dot-working" : "dot-idle"}`} />
-              <span><b>X</b> · Boo posts, ncrypt replies and DMs, Nick reads the numbers. One connection per account: Philneeds, Range.cool, Acres.</span>
+              <span><b>X</b> · Boo posts, ncrypt replies and DMs, Block reads the numbers. One connection per account: Philneeds, Range.cool, Acres.</span>
               {conn?.x.configured ? <button className="btn btn-sm btn-primary ml-auto" onClick={connectX}>Connect an X account</button> : <span className="ml-auto" style={{ color: "var(--muted)" }}>set X_CLIENT_ID and X_CLIENT_SECRET</span>}
             </div>
             {conn?.x.accounts.map((a) => <div key={a.handle} className="flex items-center gap-3 pl-6"><span>@{a.handle}{a.name ? ` · ${a.name}` : ""}</span><span style={{ color: "var(--dim)" }}>{fmtTime(a.connectedAt)}</span><button className="btn btn-sm btn-danger ml-auto" onClick={() => disconnectX(a.handle)}>Disconnect</button></div>)}

@@ -175,7 +175,7 @@ export const CHARTERS: Record<string, Charter> = {
   cat: { job: "Prediction markets.", owns: ["Markets worth watching and mispriced odds"], handsOff: [["Research threads", "lucas"], ["Bets", "mayne"]], rhythm: "On demand.", good: "Clear odds versus Phil's view." },
   ansem: { job: "Memecoins and low caps.", owns: ["New memecoins worth a look and why", "Feeding the Memecoin Analyzer"], handsOff: [["Research threads", "lucas"], ["Trades", "mayne"]], rhythm: "Scan every 4 hours (phase 2).", good: "Few, good candidates with reasons, not a firehose." },
   claw: { job: "New tech and AI in crypto.", owns: ["New protocols and AI-crypto projects"], handsOff: [["Research threads", "lucas"]], rhythm: "On demand.", good: "Phil hears about the real new thing first." },
-  lucas: { job: "X research: turns the scouts' findings into threads and research for Nick's team.", owns: ["Researching on X for every crypto scout", "Feeding Nick, Boo and ncrypt"], handsOff: [["Posting", "nick"]], rhythm: "On demand.", good: "Well-sourced research the brand can post." },
+  lucas: { job: "X research: turns the scouts' findings into threads and research for Block's team.", owns: ["Researching on X for every crypto scout", "Feeding Block, Boo and ncrypt"], handsOff: [["Posting", "nick"]], rhythm: "On demand.", good: "Well-sourced research the brand can post." },
   jeff: { job: "CEO of Airdrop Acres.", owns: ["Airdrop Acres strategy and growth"], handsOff: [["Posts and replies", "boo"]], rhythm: "On demand (phase 3).", good: "Acres grows with a clear plan." },
 
   // ---- Philneeds brand ---------------------------------------------------------------------
@@ -267,10 +267,10 @@ const QUESTIONS: Record<string, string[]> = {
   pentoshi: ["Which perps venues and prop firms does Phil use?"],
 
   claw: ["Which areas of new tech and AI in crypto should Claw watch?"],
-  lucas: ["Should Lucas draft threads for you directly, or only feed research to Nick's team? Suggested: only feed Nick's team."],
+  lucas: ["Should Lucas draft threads for you directly, or only feed research to Block's team? Suggested: only feed Block's team."],
   jeff: ["What is Airdrop Acres today, and what does Jeff need to run it?"],
   nick: [
-    "Which X accounts does Nick manage (handles), and what cadence per brand?",
+    "Which X accounts does Block manage (handles), and what cadence per brand?",
     "Posting through X's API needs X's Pay-Per-Use. Yes or no? Until then Boo and ncrypt draft and you post.",
   ],
   boo: ["Which of your posts are the gold standard for your voice? Send three to five links."],

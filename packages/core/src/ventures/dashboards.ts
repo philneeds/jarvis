@@ -28,7 +28,7 @@ export const VENTURE_DASH: Record<VentureId, VentureDash> = {
     records: [{ kind: "watch", label: "Watchlist", statuses: ["watching", "entered", "exited", "dropped"], fields: [{ key: "symbol", label: "Symbol" }, { key: "thesis", label: "Thesis" }, { key: "scout", label: "Scout" }] }, { kind: "paper", label: "Paper tests (Mayne)", statuses: ["running", "won", "lost", "stopped"], fields: [{ key: "strategy", label: "Strategy" }, { key: "entry", label: "Entry" }, { key: "exit", label: "Exit" }, { key: "pnl", label: "P&L", type: "money" }] }],
   },
   philneeds: {
-    blurb: "Nick's numbers for the Philneeds brand: Boo's posts and ncrypt's replies.",
+    blurb: "Block's numbers for the Philneeds brand: Boo's posts and ncrypt's replies.",
     metrics: [{ key: "followers", label: "Followers", unit: "n", good: "up" }, { key: "impressions_week", label: "Impressions / week", unit: "n", good: "up" }, { key: "posts_week", label: "Posts / week", unit: "n" }, { key: "engagement", label: "Engagement", unit: "%", good: "up" }],
     records: [{ kind: "post", label: "Posts (Boo)", statuses: ["drafted", "approved", "posted", "winner", "dropped"], fields: [{ key: "account", label: "Account" }, { key: "url", label: "URL" }, { key: "likes", label: "Likes", type: "number" }] }],
   },
