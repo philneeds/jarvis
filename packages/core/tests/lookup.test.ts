@@ -12,6 +12,19 @@ test("x_search runs X through Grok for Claude agents: the CLI's JSON comes back 
     assert.match(prompt, /Search X \(Twitter\) for: SOL/);
     assert.match(prompt, /the 5 most relevant posts from the last 7 days/);
     assert.match(out, /^@trader1 · Nov 6/);
+    // A repeat of the same query within 15 minutes is served from the cache; two at once share one Grok run.
+    let calls = 0; let t = 1_000_000;
+    const slow = makeXSearchTool(async () => { calls++; await new Promise((r) => setTimeout(r, 30)); return JSON.stringify({ text: "@a · post" }); }, () => t);
+    const ctx = { store: undefined as never, agentId: "mantis" };
+    const [r1, r2] = await Promise.all([slow.handler({ query: "SOL" }, ctx), slow.handler({ query: "sol " }, ctx)]);
+    assert.equal(calls, 1, "the same query in flight is shared");
+    assert.equal(r1, "@a · post"); assert.equal(r2, "@a · post");
+    t += 5 * 60_000;
+    assert.match(await slow.handler({ query: "SOL" }, ctx), /@a · post\n\n\(X search from 5 min ago\.\)/);
+    assert.equal(calls, 1, "served from the cache");
+    t += 20 * 60_000;
+    await slow.handler({ query: "SOL" }, ctx);
+    assert.equal(calls, 2, "stale after 15 minutes");
     const down = makeXSearchTool(async () => { throw new Error("grok exited 1: not logged in"); });
     assert.match(await down.handler({ query: "SOL" }, { store: undefined as never, agentId: "mantis" }), /X search isn't available right now \(grok exited 1: not logged in\)/);
   } finally { if (was !== undefined) process.env.JARVIS_MOCK = was; }
