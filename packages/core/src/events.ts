@@ -29,7 +29,11 @@ export interface Goal {
   deadline?: string;
   primary: boolean;
   updatedAt: string;
+  /** What moves the bar: David sets these for each goal; done benchmarks' weights add up to the percent. */
+  benchmarks?: Benchmark[];
 }
+
+export interface Benchmark { id: string; text: string; weight: number; done: boolean; doneAt?: string }
 
 /** Something Phil has to act on. Lives until he ticks it off; raised by agents or by Phil. */
 export interface AttentionItem {

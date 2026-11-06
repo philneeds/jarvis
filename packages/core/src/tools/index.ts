@@ -51,12 +51,15 @@ export function buildTools(): ToolDef[] {
     }),
     defineTool({
       name: "goals_list",
-      description: "Phil's goals as they stand: id, name, percent done, deadline, and which one is primary.",
+      description: "Phil's goals as they stand: id, name, percent done, deadline, which one is primary, and each goal's benchmarks (id, done or not, weight).",
       schema: {},
       async handler(_args, { store }) {
-        const goals = await store.settings.get<{ id: string; name: string; pct: number; deadline?: string; primary: boolean; updatedAt: string }[] | null>("goals", null);
+        const goals = await store.settings.get<{ id: string; name: string; pct: number; deadline?: string; primary: boolean; updatedAt: string; benchmarks?: { id: string; text: string; weight: number; done: boolean; doneAt?: string }[] }[] | null>("goals", null);
         if (!goals?.length) return "No goals set yet.";
-        return goals.map((g) => `[${g.id}] ${g.primary ? "PRIMARY " : ""}${g.name} · ${g.pct}% done${g.deadline ? ` · due ${g.deadline}` : ""} · updated ${g.updatedAt.slice(0, 10)}`).join("\n");
+        return goals.map((g) => [
+          `[${g.id}] ${g.primary ? "PRIMARY " : ""}${g.name} · ${g.pct}% done${g.deadline ? ` · due ${g.deadline}` : ""} · updated ${g.updatedAt.slice(0, 10)}`,
+          ...(g.benchmarks?.length ? g.benchmarks.map((b) => `  ${b.done ? "[x]" : "[ ]"} (${b.id}) ${b.text} · weight ${b.weight}${b.doneAt ? ` · met ${b.doneAt.slice(0, 10)}` : ""}`) : ["  No benchmarks yet."]),
+        ].join("\n")).join("\n");
       },
     }),
     defineTool({

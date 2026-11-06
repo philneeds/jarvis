@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { bus, type Approval, type AttentionItem, type ChatMessage, type Goal, type SystemStatus } from "../events.js";
+import { bus, type Approval, type AttentionItem, type ChatMessage, type Goal, type Benchmark, type SystemStatus } from "../events.js";
 import { AGENTS, CHARTERS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
 import { ModelRouter } from "../router/index.js";
 import type { MemoryItem, MetricPoint, RecordItem, Store } from "../store/types.js";
@@ -57,7 +57,7 @@ export function isOutbound(a: Pick<Approval, "kind" | "payload">): boolean {
   if (Array.isArray(p.attendees) && p.attendees.length) return true;
   if (Array.isArray(p.guests) && p.guests.length) return true;
   // An action no connector recognises is treated as outbound: when unsure, ask.
-  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|spotify\.playlist\.(create|add)|goals\.update|watchlist\.add|memory\.replace|record\.)/.test(p.action);
+  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|spotify\.playlist\.(create|add)|goals\.(update|benchmarks)|watchlist\.add|memory\.replace|record\.)/.test(p.action);
 }
 
 /** Something Phil deleted, kept for a while so he can undo it. */
@@ -103,17 +103,34 @@ export class Jarvis {
         added.push(g.name.trim());
       }
       if (!added.length && !retired.length) throw new Error("the proposal had no goals to add or retire");
+      // David's job: benchmarks for every new goal, so the bar moves on evidence. In the background, after this approval.
+      const david = getAgent("david");
+      if (added.length && david) setTimeout(() => { void this.runAgent(david, `New goals were just set: ${added.join("; ")}. Call goals_list and set benchmarks for each new goal (goals.benchmarks): the 3 to 6 concrete, checkable things that, done, mean the goal is reached, weighted by how much each moves it.`, { from: "Jarvis" }).then((r) => (r.blocked ? undefined : this.say({ role: "agent", agentId: david.id, text: r.text, runId: r.runId }))).catch(() => undefined); }, 0);
       return `Goals set${added.length ? `: ${added.join("; ")}` : ""}${retired.length ? `. Retired: ${retired.join("; ")}` : ""}.`;
     });
     // David keeps percent-done honest: an internal change, so it goes through and is reported in chat.
     this.executors.set("goals.update", async (a) => {
-      const p = (a.payload ?? {}) as { id?: unknown; pct?: unknown };
-      const pct = Number(p.pct);
-      if (typeof p.id !== "string" || !Number.isFinite(pct)) throw new Error("goals.update needs the goal id and a pct from 0 to 100");
-      const g = await this.updateGoal(p.id, { pct });
+      const p = (a.payload ?? {}) as { id?: unknown; pct?: unknown; done?: unknown; undone?: unknown };
+      if (typeof p.id !== "string") throw new Error("goals.update needs the goal id (goals_list)");
+      const pct = p.pct === undefined ? undefined : Number(p.pct);
+      const done = Array.isArray(p.done) ? p.done.map(String) : [];
+      const undone = Array.isArray(p.undone) ? p.undone.map(String) : [];
+      if (!done.length && !undone.length && (pct === undefined || !Number.isFinite(pct))) throw new Error("goals.update needs benchmarks to tick (done) or a pct from 0 to 100");
+      const g = await this.updateGoal(p.id, { ...(pct !== undefined && Number.isFinite(pct) ? { pct } : {}), ...(done.length || undone.length ? { benchmarksDone: { done, undone } } : {}) }, a.agentId);
       if (!g) throw new Error("no goal with that id; check goals_list");
-      return `"${g.name}" is now ${g.pct}% done.`;
+      return `"${g.name}" is now ${g.pct}% done${done.length ? ` (${done.length} benchmark${done.length > 1 ? "s" : ""} met)` : ""}.`;
     });
+    // David's benchmarks for a goal: what moves its bar, each weighted.
+    this.executors.set("goals.benchmarks", async (a) => {
+      const p = (a.payload ?? {}) as { id?: unknown; benchmarks?: unknown };
+      if (typeof p.id !== "string" || !Array.isArray(p.benchmarks)) throw new Error("goals.benchmarks needs the goal id and a list of benchmarks");
+      const list = (p.benchmarks as { text?: unknown; weight?: unknown; done?: unknown }[]).filter((b) => b && typeof b.text === "string" && b.text.trim()).map((b) => ({ text: String(b.text), weight: Number(b.weight), done: b.done === true }));
+      if (!list.length) throw new Error("no benchmarks in the proposal");
+      const g = await this.updateGoal(p.id, { benchmarks: list }, a.agentId);
+      if (!g) throw new Error("no goal with that id; check goals_list");
+      return `"${g.name}" has ${g.benchmarks?.length ?? 0} benchmarks; it's ${g.pct}% done.`;
+    });
+    this.describers.set("goals.benchmarks", (p) => `Sets ${Array.isArray(p.benchmarks) ? p.benchmarks.length : "the"} benchmarks for a goal on your home screen; ticking them moves its bar. Nothing leaves HQ.`);
     // A scout's own idea for the stock watchlist, added once Phil approves.
     this.executors.set("watchlist.add", async (a) => {
       const p = (a.payload ?? {}) as { symbol?: unknown; sector?: unknown; thesis?: unknown };
@@ -123,7 +140,7 @@ export class Jarvis {
       return `${symbol} is on the watchlist.`;
     });
     this.describers.set("watchlist.add", (p) => `Adds ${String(p.symbol ?? "").toUpperCase()} to your stock watchlist on the Money board. Nothing is bought.`);
-    this.describers.set("goals.update", (p) => `Sets a goal's progress to ${Number(p.pct)}% on your home screen. Nothing leaves HQ.`);
+    this.describers.set("goals.update", (p) => Array.isArray(p.done) && p.done.length ? `Ticks ${p.done.length} benchmark${p.done.length > 1 ? "s" : ""} on a goal, which moves its bar on your home screen. Nothing leaves HQ.` : `Sets a goal's progress to ${Number(p.pct)}% on your home screen. Nothing leaves HQ.`);
     this.describers.set("goals.set", (p) => {
       const add = (Array.isArray(p.add) ? p.add : []) as { name?: string; primary?: boolean; deadline?: string }[];
       const retire = Array.isArray(p.retire) ? p.retire.length : 0;
@@ -516,7 +533,7 @@ export class Jarvis {
     await this.store.settings.set("goals", sorted);
     // Agents read memory, not settings: keep a plain-words copy of the goals there.
     if (sorted.length) {
-      const fmt = (g: Goal) => `${g.name} (${g.pct}% done${g.deadline ? `, deadline ${g.deadline}` : ""})`;
+      const fmt = (g: Goal) => `${g.name} (${g.pct}% done${g.deadline ? `, deadline ${g.deadline}` : ""}${g.benchmarks?.length ? `, ${g.benchmarks.filter((b) => b.done).length} of ${g.benchmarks.length} benchmarks met` : ""})`;
       const [first, ...rest] = sorted;
       await this.store.memory.set({ scope: "phil", key: "goals", value: `Primary: ${fmt(first!)}.${rest.length ? ` Also: ${rest.map(fmt).join("; ")}.` : ""}`, source: "phil" });
     } else await this.store.memory.remove("phil", "goals");
@@ -542,8 +559,11 @@ export class Jarvis {
     return goal;
   }
 
-  /** Rename, move progress, set or clear the deadline, or make it the primary goal. */
-  async updateGoal(id: string, patch: { name?: string; pct?: number; deadline?: string | null; primary?: true }): Promise<Goal | undefined> {
+  /**
+   * Rename, move progress, set or clear the deadline, make it the primary goal, replace its benchmarks, or tick them.
+   * With benchmarks, the percent is the done benchmarks' share of the total weight.
+   */
+  async updateGoal(id: string, patch: { name?: string; pct?: number; deadline?: string | null; primary?: true; benchmarks?: { text: string; weight?: number; done?: boolean }[]; benchmarksDone?: { done?: string[]; undone?: string[] } }, by = "phil"): Promise<Goal | undefined> {
     const list = await this.goalList();
     const goal = list.find((g) => g.id === id);
     if (!goal) return undefined;
@@ -555,9 +575,29 @@ export class Jarvis {
     if (patch.pct !== undefined) goal.pct = clampPct(patch.pct);
     if (patch.deadline !== undefined) goal.deadline = patch.deadline || undefined;
     if (patch.primary) for (const g of list) g.primary = g.id === id;
-    goal.updatedAt = new Date().toISOString();
+    const now = new Date().toISOString();
+    if (patch.benchmarks) {
+      // Replacing the list keeps what was already done (matched by text).
+      const was = new Map((goal.benchmarks ?? []).map((b) => [b.text.trim().toLowerCase(), b]));
+      goal.benchmarks = patch.benchmarks.slice(0, 12).map((b) => {
+        const text = b.text.trim().slice(0, 200), old = was.get(text.toLowerCase());
+        const done = b.done ?? old?.done ?? false;
+        return { id: old?.id ?? randomUUID().slice(0, 8), text, weight: Math.max(1, Math.min(100, Math.round(Number.isFinite(b.weight) ? b.weight! : 1))), done, doneAt: done ? old?.doneAt ?? now : undefined };
+      });
+    }
+    if (patch.benchmarksDone && goal.benchmarks) {
+      const hit = (key: string) => (b: Benchmark) => b.id === key || b.text.toLowerCase() === key.trim().toLowerCase();
+      for (const key of patch.benchmarksDone.done ?? []) { const b = goal.benchmarks.find(hit(key)); if (b && !b.done) { b.done = true; b.doneAt = now; } }
+      for (const key of patch.benchmarksDone.undone ?? []) { const b = goal.benchmarks.find(hit(key)); if (b) { b.done = false; b.doneAt = undefined; } }
+    }
+    if ((patch.benchmarks || patch.benchmarksDone) && goal.benchmarks?.length && patch.pct === undefined) {
+      const total = goal.benchmarks.reduce((n, b) => n + b.weight, 0);
+      goal.pct = clampPct((goal.benchmarks.filter((b) => b.done).reduce((n, b) => n + b.weight, 0) / total) * 100);
+    }
+    goal.updatedAt = now;
     await this.saveGoals(list);
-    await this.router.log("jarvis", "memory", `Phil updated goal "${goal.name}"${patch.primary ? " and made it primary" : ""}${patch.pct !== undefined ? ` (${goal.pct}%)` : ""}`);
+    const who = by === "phil" ? "Phil" : getAgent(by)?.name ?? by;
+    await this.router.log(by === "phil" ? "jarvis" : by, "memory", `${who} updated goal "${goal.name}"${patch.primary ? " and made it primary" : ""}${patch.benchmarks ? ` with ${goal.benchmarks?.length ?? 0} benchmarks` : ""}${patch.pct !== undefined || patch.benchmarksDone || patch.benchmarks ? ` (${goal.pct}%)` : ""}`);
     return goal;
   }
 

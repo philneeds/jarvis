@@ -498,6 +498,32 @@ test("David updates a goal's progress on his own; Adam's goal changes still wait
   assert.equal(SCHEDULES.find((s) => s.id === "david-weekly")!.phase, 0, "David's Sunday check runs now");
 });
 
+test("David sets benchmarks for a goal; ticking them moves the bar by weight", async () => {
+  const { jarvis, store } = make();
+  const g = await jarvis.addGoal({ name: "Launch Range.cool v2", primary: true });
+  const set = await jarvis.requestApproval({ agentId: "david", kind: "record", title: "Benchmarks for v2", body: "what moves it", payload: { action: "goals.benchmarks", id: g.id, benchmarks: [{ text: "Spec signed off", weight: 20 }, { text: "Beta live", weight: 50 }, { text: "100 users", weight: 30 }] } });
+  assert.equal(set.status, "approved", "benchmarks are internal: David sets them himself");
+  let goal = (await jarvis.goals())[0]!;
+  assert.equal(goal.benchmarks!.length, 3);
+  assert.equal(goal.pct, 0);
+  const beta = goal.benchmarks!.find((b) => b.text === "Beta live")!;
+  await jarvis.requestApproval({ agentId: "david", kind: "record", title: "Beta is live", body: "evidence", payload: { action: "goals.update", id: g.id, done: [beta.id, "spec signed off"] } });
+  goal = (await jarvis.goals())[0]!;
+  assert.equal(goal.pct, 70, "20 + 50 of 100");
+  assert.ok(goal.benchmarks!.find((b) => b.text === "Spec signed off")!.done, "a benchmark can be ticked by its text too");
+  // Re-planning keeps what's done.
+  await jarvis.updateGoal(g.id, { benchmarks: [{ text: "Beta live", weight: 50 }, { text: "1,000 users", weight: 50 }] }, "david");
+  goal = (await jarvis.goals())[0]!;
+  assert.equal(goal.pct, 50);
+  // Phil unticks from the home screen.
+  await jarvis.updateGoal(g.id, { benchmarksDone: { undone: [beta.id] } });
+  assert.equal((await jarvis.goals())[0]!.pct, 0);
+  const { buildTools } = await import("../src/index.js");
+  const list = await buildTools().find((t) => t.name === "goals_list")!.handler({}, { store, agentId: "david" });
+  assert.match(list, /\[ \] \([\w-]+\) Beta live · weight 50/);
+  assert.match((await store.memory.get("phil", "goals"))!.value, /0 of 2 benchmarks met/);
+});
+
 test("X links: Jarvis opens the post first, so the agent sees what it says (and its photo)", async () => {
   const os = await import("node:os"); const path = await import("node:path"); const fs = await import("node:fs");
   process.env.JARVIS_UPLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-x-"));

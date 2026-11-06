@@ -177,7 +177,9 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     try { return c.json({ goal: await jarvis.addGoal(p.data), goals: await jarvis.goals() }); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
   });
   api.put("/goals/:id", async (c) => {
-    const p = z.object({ name: z.string().trim().min(1).max(160).optional(), pct: z.number().min(0).max(100).optional(), deadline: z.union([goalDate, z.literal(""), z.null()]).optional(), primary: z.literal(true).optional() })
+    const p = z.object({ name: z.string().trim().min(1).max(160).optional(), pct: z.number().min(0).max(100).optional(), deadline: z.union([goalDate, z.literal(""), z.null()]).optional(), primary: z.literal(true).optional(),
+      benchmarks: z.array(z.object({ text: z.string().trim().min(1).max(200), weight: z.number().min(1).max(100).optional(), done: z.boolean().optional() })).max(12).optional(),
+      benchmarksDone: z.object({ done: z.array(z.string().max(200)).max(12).optional(), undone: z.array(z.string().max(200)).max(12).optional() }).optional() })
       .strict().refine((v) => Object.keys(v).length > 0, "nothing to change").safeParse(await c.req.json().catch(() => null));
     if (!p.success) return c.json({ error: p.error.issues[0]?.message ?? "bad body" }, 400);
     const goal = await jarvis.updateGoal(c.req.param("id"), p.data);

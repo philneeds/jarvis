@@ -108,13 +108,13 @@ export const CHARTERS: Record<string, Charter> = {
   },
 
   david: {
-    job: "Phil's personal growth: turns the goals he sets with Adam into weekly steps and keeps them moving.",
-    owns: ["Breaking each goal into weekly steps and tracking progress", "Keeping the percent-done on the home screen honest: when the evidence is clear he updates it himself with an approval block {\"kind\":\"record\",\"title\":\"...\",\"body\":\"why\",\"payload\":{\"action\":\"goals.update\",\"id\":\"<goal id from goals_list>\",\"pct\":<0-100>}} and tells Phil what changed", "Asking Joi to visualize the goals"],
+    job: "Phil's personal growth: reviews every goal Phil sets with Adam, decides what benchmarks move its progress bar, and keeps them moving.",
+    owns: ["Reviewing each goal as it's set and giving it 3 to 6 concrete, checkable benchmarks, weighted by how much each moves the goal: an approval block {\"kind\":\"record\",\"title\":\"...\",\"body\":\"why these\",\"payload\":{\"action\":\"goals.benchmarks\",\"id\":\"<goal id from goals_list>\",\"benchmarks\":[{\"text\":\"...\",\"weight\":30}]}}", "Moving the bar only on evidence: ticking a benchmark when it's met, with {\"kind\":\"record\",\"title\":\"...\",\"body\":\"the evidence\",\"payload\":{\"action\":\"goals.update\",\"id\":\"<goal id>\",\"done\":[\"<benchmark id>\"]}}, and telling Phil what moved and why", "Breaking each goal into weekly steps toward the next benchmark", "Asking Joi to visualize the goals"],
     handsOff: [["Setting or changing the goals themselves", "adam"], ["Personal life and rewards", "lip"], ["Visuals", "joi"]],
     rhythm: "Goals check Sundays at 6 pm Eastern, to Telegram and HQ; on demand.",
     tools: [...BOARD, "goals_list"],
     asksFor: "outbound",
-    good: "Phil can see his goals moving every week.",
+    good: "Every goal has clear benchmarks, and Phil can see the bar move every week for a reason.",
   },
   doc: {
     job: "Health lead: turns Phil's Apple Health data into a plain daily read and one thing to focus on, starting with sleep and training.",

@@ -31,7 +31,7 @@ export function Objective() {
     setErr(undefined);
     try { setGoals((await fn()).goals); return true; } catch (e) { setErr((e as Error).message); return false; }
   };
-  const update = (g: Goal, patch: { name?: string; pct?: number; deadline?: string | null; primary?: true }) => run(() => put(`/api/goals/${g.id}`, patch));
+  const update = (g: Goal, patch: { name?: string; pct?: number; deadline?: string | null; primary?: true; benchmarksDone?: { done?: string[]; undone?: string[] } }) => run(() => put(`/api/goals/${g.id}`, patch));
   const remove = async (g: Goal) => {
     setErr(undefined);
     try {
@@ -88,15 +88,31 @@ export function Objective() {
       ) : (
         <button onClick={() => setEdit(true)} className="w-full text-left bg-transparent border-0 p-0 cursor-pointer display glow font-bold leading-[1.05]" style={{ fontSize: 22, color: "#fff" }}>Set your main goal</button>
       )}
-      <div className="flex justify-between text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}><span>{goals.length > 1 ? `All ${goals.length} goals` : primary ? `${primary.pct}% done` : "No goals yet"}</span><span>{pct}%</span></div>
+      <div className="flex justify-between text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}><span>{goals.length > 1 ? `All ${goals.length} goals` : primary ? `${primary.pct}% done` : "No goals yet"}{primary?.benchmarks?.length ? ` · ${primary.benchmarks.filter((b) => b.done).length} of ${primary.benchmarks.length} benchmarks` : ""}</span><span>{pct}%</span></div>
       <div className="bar"><i style={{ width: `${pct}%` }} /></div>
       {open && primary && (
         <div className="flex flex-col gap-2 pt-2 border-t" style={{ borderColor: "var(--line)" }}>
           {[primary, ...others].map((g, i) => (
-            <div key={g.id} className="flex items-center gap-3 text-[11px] tracking-[0.08em]">
-              <span className="w-36 truncate" style={{ color: "var(--ink-strong)" }} title={g.name}>{g.name}</span>
-              <div className="flex-1 h-[3px]" style={{ background: "rgba(124,196,255,0.15)" }}><div className="h-full" style={{ width: `${g.pct}%`, background: i === 0 ? "var(--accent)" : i === 1 ? "var(--green)" : "var(--gold)", boxShadow: `0 0 6px ${i === 0 ? "var(--accent)" : i === 1 ? "var(--green)" : "var(--gold)"}` }} /></div>
-              <span className="w-11 text-right" style={{ color: "var(--muted)" }}>{g.pct}%</span>
+            <div key={g.id} className="flex flex-col gap-1">
+              <div className="flex items-center gap-3 text-[11px] tracking-[0.08em]">
+                <span className="w-36 truncate" style={{ color: "var(--ink-strong)" }} title={g.name}>{g.name}</span>
+                <div className="flex-1 h-[3px]" style={{ background: "rgba(124,196,255,0.15)" }}><div className="h-full" style={{ width: `${g.pct}%`, background: i === 0 ? "var(--accent)" : i === 1 ? "var(--green)" : "var(--gold)", boxShadow: `0 0 6px ${i === 0 ? "var(--accent)" : i === 1 ? "var(--green)" : "var(--gold)"}` }} /></div>
+                <span className="w-11 text-right" style={{ color: "var(--muted)" }}>{g.pct}%</span>
+              </div>
+              {/* David's benchmarks: what moves this bar. Ticking one moves it by its weight. */}
+              {g.benchmarks?.length ? (
+                <ul className="m-0 pl-3 list-none flex flex-col gap-0.5">
+                  {g.benchmarks.map((b) => (
+                    <li key={b.id}>
+                      <label className="flex items-center gap-2 text-[12px] cursor-pointer" style={{ color: b.done ? "var(--muted)" : "var(--ink)" }}>
+                        <input type="checkbox" checked={b.done} onChange={(e) => void update(g, { benchmarksDone: e.target.checked ? { done: [b.id] } : { undone: [b.id] } })} />
+                        <span className="flex-1 min-w-0" style={{ textDecoration: b.done ? "line-through" : undefined }}>{b.text}</span>
+                        <span className="text-[10px]" style={{ color: "var(--dim)" }}>{b.weight}%</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              ) : <span className="pl-3 text-[11px]" style={{ color: "var(--dim)" }}>David sets the benchmarks for this one.</span>}
             </div>
           ))}
           {others.length === 0 && <span className="text-[11px]" style={{ color: "var(--muted)" }}>Just the one goal. Add more under Edit.</span>}
