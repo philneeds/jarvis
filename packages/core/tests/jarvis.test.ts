@@ -571,3 +571,36 @@ test("Ask as they go: an agent's open questions are in its instructions, to ask 
   assert.match(sys, /Which mailbox is the business one\?/);
   assert.equal(SCHEDULES.find((s) => s.id === "ansem-scan")!.when, "every:240");
 });
+
+test("Schedules screen: plain-English timing, next run, phase, and last runs that survive a restart", async () => {
+  const { describeWhen, nextRun, scheduleView } = await import("../src/index.js");
+  assert.equal(describeWhen("weekly:sun@19:00"), "Sundays at 7:00 pm");
+  assert.equal(describeWhen("weekdays@08:30"), "Weekdays at 8:30 am");
+  assert.equal(describeWhen("monthly:1@08:00"), "1st of each month at 8:00 am");
+  assert.equal(describeWhen("every:240"), "Every 4 hours");
+  assert.equal(describeWhen("daily@00:05"), "Daily at 12:05 am");
+  const fri = new Date(2026, 10, 6, 17, 0); // Friday 5 pm
+  assert.equal(nextRun("weekdays@08:30", fri)!.getDay(), 1, "next weekday run after Friday evening is Monday");
+  assert.equal(nextRun("weekly:sun@19:00", fri)!.getDate(), 8);
+  assert.equal(nextRun("monthly:1@08:00", fri)!.getMonth(), 11);
+  const { jarvis, store } = make();
+  await store.settings.set("phase", 1);
+  const s = new Scheduler(jarvis, [{ id: "x", agentId: "stella", task: "status", when: "daily@06:50", phase: 1 }, { id: "y", agentId: "ansem", task: "scan", when: "every:240", phase: 2 }]);
+  await s.tick(new Date(2026, 10, 6, 6, 51));
+  const view = await scheduleView(store, new Date(2026, 10, 6, 7, 0), [{ id: "x", agentId: "stella", task: "status", when: "daily@06:50", phase: 1 }, { id: "y", agentId: "ansem", task: "scan", when: "every:240", phase: 2 }]);
+  const x = view.find((v) => v.id === "x")!, y = view.find((v) => v.id === "y")!;
+  assert.ok(x.active && x.lastRun && x.nextRun, "Stella's routine is on, ran, and has a next run");
+  assert.equal(y.active, false, "Ansem's waits for phase 2");
+  // A fresh scheduler (a restart) reads the last runs back, so it doesn't run the same window twice.
+  const s2 = new Scheduler(jarvis, [{ id: "x", agentId: "stella", task: "status", when: "daily@06:50", phase: 1 }]);
+  await s2.tick(new Date(2026, 10, 6, 6, 55));
+  const runs = (await store.activity.list({ limit: 200 })).filter((e) => e.kind === "run" && e.agentId === "stella");
+  assert.equal(runs.length, 1, "only the first tick ran Stella");
+});
+
+test("every built-in routine has a plain one-line summary for the Schedules screen", async () => {
+  const { SCHEDULES, scheduleView } = await import("../src/index.js");
+  const { store } = make();
+  const view = await scheduleView(store);
+  for (const s of SCHEDULES) { const v = view.find((x) => x.id === s.id)!; assert.ok(v.summary.length > 10 && v.summary.length <= 120, `${s.id}: ${v.summary}`); }
+});

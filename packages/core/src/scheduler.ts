@@ -1,3 +1,4 @@
+import type { Store } from "./store/types.js";
 import { bus } from "./events.js";
 import type { Jarvis } from "./jarvis/orchestrator.js";
 import { AGENTS, getAgent } from "./registry/index.js";
@@ -42,9 +43,102 @@ export const SCHEDULES: Schedule[] = [
   { id: "munger-weekly", agentId: "munger", task: "Weekly money summary for Phil, short enough to read on his phone. Call kubera_networth: net worth now, the change this week and this month, the biggest movers and why if you can tell, and any account that stopped syncing. Then one thing to do this week. Read only; never suggest moving money without an approval.", when: "weekly:mon@07:30", phase: 2, push: true },
 ];
 
+const LAST_RUN_KEY = "schedule.lastRun";
+
+/** The built-in routines plus each agent's own schedule from its settings. */
+export async function withCustom(store: Store, schedules: Schedule[] = SCHEDULES): Promise<Schedule[]> {
+  const custom: Schedule[] = [];
+  for (const a of AGENTS) {
+    const c = await getAgentConfig(store, a.id);
+    if (c.schedule?.enabled && c.schedule.when && c.schedule.task) custom.push({ id: `custom:${a.id}`, agentId: a.id, task: c.schedule.task, when: c.schedule.when, phase: 0 });
+  }
+  return [...schedules, ...custom];
+}
+
+const DAY = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const DAY_NAME = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
+const clock = (h: number, m: number) => `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`;
+const ord = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th"}`;
+
+/** "weekly:sun@19:00" → "Sundays at 7:00 pm". */
+export function describeWhen(when: string): string {
+  let m = when.match(/^every:(\d+)$/);
+  if (m) { const n = Number(m[1]); return n % 60 === 0 ? (n === 60 ? "Every hour" : `Every ${n / 60} hours`) : `Every ${n} minutes`; }
+  m = when.match(/^(daily|weekdays|weekly:([a-z]{3})|monthly:(\d{1,2}))@(\d{2}):(\d{2})$/);
+  if (!m) return when;
+  const t = clock(Number(m[4]), Number(m[5]));
+  if (m[1] === "daily") return `Daily at ${t}`;
+  if (m[1] === "weekdays") return `Weekdays at ${t}`;
+  if (m[2]) return `${DAY_NAME[DAY.indexOf(m[2])] ?? m[2]} at ${t}`;
+  return `${ord(Number(m[3]))} of each month at ${t}`;
+}
+
+/** When a routine next runs after `now` (server local time, as the scheduler uses). */
+export function nextRun(when: string, now: Date, last?: number): Date | undefined {
+  const ev = when.match(/^every:(\d+)$/);
+  if (ev) { const ms = Number(ev[1]) * 60_000; return new Date(Math.max(now.getTime(), (last ?? 0) + ms)); }
+  const m = when.match(/^(daily|weekdays|weekly:([a-z]{3})|monthly:(\d{1,2}))@(\d{2}):(\d{2})$/);
+  if (!m) return undefined;
+  for (let i = 0; i < 40; i++) {
+    const d = new Date(now); d.setDate(d.getDate() + i); d.setHours(Number(m[4]), Number(m[5]), 0, 0);
+    if (d.getTime() <= now.getTime()) continue;
+    if (m[1] === "weekdays" && (d.getDay() === 0 || d.getDay() === 6)) continue;
+    if (m[2] && DAY[d.getDay()] !== m[2]) continue;
+    if (m[3] && d.getDate() !== Number(m[3])) continue;
+    return d;
+  }
+  return undefined;
+}
+
+export interface ScheduleView { id: string; agentId: string; when: string; whenText: string; summary: string; task: string; phase: number; active: boolean; push: boolean; custom: boolean; lastRun?: string; nextRun?: string }
+
+/** One plain line per built-in routine for the Schedules screen; the full instructions sit behind "details". */
+const SUMMARY: Record<string, string> = {
+  "daily-brief": "The morning brief: each lead's report, what's waiting on you, today's calendar.",
+  "oscar-condense": "Tidies memory: merges duplicates and drops what's stale.",
+  "oscar-inbox": "Inbox cleanup plan for each account, sent to you as approvals. Never trashes.",
+  "einstein-weekly": "Weekly review: what to fix or improve, where your ideas stand, what to cut.",
+  "adam-monthly": "Goals session: how last month went, and this month's goals for your OK.",
+  "monica-day": "Your day: the calendar across your accounts, conflicts, and what to protect.",
+  "stella-leads": "Leads and jobs review; flags anything waiting on a customer.",
+  "karol-leads": "New-lead check: logs new leads and drafts first replies for your OK.",
+  "bill-installs": "Today's installs and materials, and anything that would delay a job.",
+  "mantis-markets": "Market read: what moved on-chain overnight and what to watch.",
+  "ansem-scan": "New memecoins and low caps worth a look, each with the reason.",
+  "pentoshi-scan": "Funding rates, perps positioning and prop-firm news.",
+  "buffett-weekly": "Holdings review after the close, up to three suggested changes; updates the watchlist.",
+  "david-weekly": "Goals check: where each goal stands and next week's steps.",
+  "munger-weekly": "Money summary: net worth, the week's change and the biggest movers.",
+  "nick-weekly": "Philneeds analytics: what worked and next week's plan for Boo and ncrypt.",
+  "poseidon-weekly": "Range.cool metrics, runway and the decisions that need you.",
+  "marcus-open": "Pre-market notes on tech and infrastructure stocks, for Buffett.",
+  "house-open": "Pre-market notes on biotech stocks, for Buffett.",
+  "exxon-open": "Pre-market notes on energy stocks, for Buffett.",
+  "altman-open": "Pre-market notes on AI-era stocks, for Buffett.",
+  "armstrong-open": "Pre-market notes on crypto-linked stocks, for Buffett.",
+};
+
+/** Every routine for the Schedules screen: what, when, whether it's on in this phase, last and next run. */
+export async function scheduleView(store: Store, now = new Date(), schedules: Schedule[] = SCHEDULES): Promise<ScheduleView[]> {
+  const phase = await store.settings.get("phase", 0);
+  const last = await store.settings.get<Record<string, number>>(LAST_RUN_KEY, {});
+  return (await withCustom(store, schedules)).map((s) => {
+    const active = s.phase <= phase;
+    const n = active ? nextRun(s.when, now, last[s.id]) : undefined;
+    return {
+      id: s.id, agentId: s.agentId, when: s.when, whenText: describeWhen(s.when),
+      summary: SUMMARY[s.id] ?? (s.task.length > 140 ? `${s.task.slice(0, 140).replace(/\s+\S*$/, "")}…` : s.task),
+      task: s.task === "brief" ? "The morning brief: each lead's report, what's waiting on Phil, today's calendar." : s.task === "condense" ? "Tidy memory: merge duplicates and drop what's stale (when memory passes 20 items)." : s.task,
+      phase: s.phase, active, push: !!s.push || s.task === "brief", custom: s.id.startsWith("custom:"),
+      lastRun: last[s.id] ? new Date(last[s.id]!).toISOString() : undefined, nextRun: n?.toISOString(),
+    };
+  });
+}
+
 export class Scheduler {
   private timer?: NodeJS.Timeout;
   private lastRun = new Map<string, number>();
+  private loaded = false;
   constructor(private jarvis: Jarvis, private schedules: Schedule[] = SCHEDULES) {}
 
   start(tickMs = 30_000) {
@@ -55,14 +149,7 @@ export class Scheduler {
   stop() { if (this.timer) clearInterval(this.timer); }
 
   /** Phil's per-agent schedules from agent settings, merged over the built-in ones. */
-  async allSchedules(): Promise<Schedule[]> {
-    const custom: Schedule[] = [];
-    for (const a of AGENTS) {
-      const c = await getAgentConfig(this.jarvis.store, a.id);
-      if (c.schedule?.enabled && c.schedule.when && c.schedule.task) custom.push({ id: `custom:${a.id}`, agentId: a.id, task: c.schedule.task, when: c.schedule.when, phase: 0 });
-    }
-    return [...this.schedules, ...custom];
-  }
+  async allSchedules(): Promise<Schedule[]> { return withCustom(this.jarvis.store, this.schedules); }
 
   /** Which schedules are due at `now`. Exposed for tests. */
   due(now: Date, phase: number, schedules: Schedule[] = this.schedules): Schedule[] {
@@ -90,8 +177,11 @@ export class Scheduler {
 
   async tick(now = new Date()) {
     const phase = await this.jarvis.store.settings.get("phase", 0);
+    // Last runs survive a restart, so a routine never runs twice in its window and the Schedules screen can show them.
+    if (!this.loaded) { this.loaded = true; for (const [k, v] of Object.entries(await this.jarvis.store.settings.get<Record<string, number>>(LAST_RUN_KEY, {}))) if (!this.lastRun.has(k)) this.lastRun.set(k, v); }
     for (const s of this.due(now, phase, await this.allSchedules())) {
       this.lastRun.set(s.id, now.getTime());
+      await this.jarvis.store.settings.set(LAST_RUN_KEY, Object.fromEntries(this.lastRun));
       const agent = getAgent(s.agentId);
       if (!agent) continue;
       // The log gets a schedule line only once the run did something Phil can see; a skipped or blocked timer stays out of it.

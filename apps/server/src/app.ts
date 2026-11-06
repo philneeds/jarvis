@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -396,6 +396,12 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.post("/connectors/kubera/test", async (c) => {
     if (!connectors.kubera) return c.json({ error: "KUBERA_API_KEY and KUBERA_SECRET aren't set" }, 400);
     try { return c.json({ ok: true, summary: await connectors.kubera.summary() }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
+  });
+  // Every routine in the web (built-in and each agent's own), for the Schedules screen and agent pages.
+  api.get("/schedules", async (c) => {
+    const agent = c.req.query("agent");
+    const all = await scheduleView(jarvis.store);
+    return c.json({ schedules: agent ? all.filter((s) => s.agentId === agent) : all, phase: await jarvis.store.settings.get("phase", 0) });
   });
   api.get("/apple-health", async (c) => c.json({ ...(await healthStatus(jarvis.store)), summary: await healthSummary(jarvis.store, 3) }));
   // Make the key (or a new one, which stops the old one working) and show how to set up the app.

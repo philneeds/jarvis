@@ -8,7 +8,7 @@ export * from "./jarvis/prompts.js";
 export * from "./jarvis/blocks.js";
 export * from "./jarvis/readable.js";
 export { Jarvis, type JarvisOptions } from "./jarvis/orchestrator.js";
-export { Scheduler, SCHEDULES, type Schedule } from "./scheduler.js";
+export { Scheduler, SCHEDULES, scheduleView, describeWhen, nextRun, type Schedule, type ScheduleView } from "./scheduler.js";
 export * from "./config.js";
 export * from "./uploads.js";
 export * from "./health.js";

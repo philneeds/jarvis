@@ -4,9 +4,9 @@ import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { Shell } from "@/components/Shell";
 import { useLive } from "@/lib/live";
-import { api } from "@/lib/api";
+import { api, fmtTime } from "@/lib/api";
 import { MayneLimits } from "@/components/MayneLimits";
-import type { AgentConfig, ApprovalKind, Charter, ModelKey } from "@jarvis/core";
+import type { AgentConfig, ApprovalKind, Charter, ModelKey, ScheduleView } from "@jarvis/core";
 
 const FIELDS: { key: keyof AgentConfig["persona"]; label: string; hint: string }[] = [
   { key: "reportsTo", label: "Reports to", hint: "Who this agent answers to, if not the registry default" },
@@ -31,10 +31,12 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
   const agent = state?.agents.find((a) => a.id === id);
   const [registryDefault, setRegistryDefault] = useState<ModelKey | undefined>();
   const [charter, setCharter] = useState<Charter | null>(null);
+  const [routines, setRoutines] = useState<ScheduleView[]>([]);
   const [editBrief, setEditBrief] = useState(false);
 
   useEffect(() => {
     api<{ config: AgentConfig; tools: string[]; defaultModel: ModelKey; charter: Charter | null }>(`/api/agents/${id}/config`).then((r) => { setCfg(r.config); setToolNames(r.tools); setRegistryDefault(r.defaultModel); setCharter(r.charter); setEditBrief(Object.values(r.config.persona).some((v) => v && String(v).trim())); }).catch((e) => setSaved((e as Error).message));
+    api<{ schedules: ScheduleView[] }>(`/api/schedules?agent=${encodeURIComponent(id)}`).then((r) => setRoutines(r.schedules.filter((s) => !s.custom))).catch(() => undefined);
     api<{ google: { accounts: { email: string }[] } }>("/api/connectors").then((r) => setGoogleAccounts(r.google.accounts.map((a) => a.email))).catch(() => undefined);
   }, [id]);
 
@@ -91,6 +93,16 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
             )}
           </section>
         )}
+
+        <section className="card flex flex-col gap-2" aria-label="Routines">
+          <div className="flex items-center gap-3"><span className="label">Routines</span><Link href="/schedules" className="ml-auto text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>All schedules ›</Link></div>
+          {routines.length === 0 ? <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>Nothing on a schedule; {agent.name} works when asked. You can add one under Schedule below.</p> : routines.map((s) => (
+            <div key={s.id} className="text-[12px] leading-relaxed" style={{ opacity: s.active ? 1 : 0.6 }}>
+              <b style={{ color: "var(--ink-bright)" }}>{s.whenText}</b>{s.push ? " · to Telegram" : ""}{s.active ? (s.nextRun ? ` · next ${fmtTime(s.nextRun)}` : "") : ` · starts in phase ${s.phase}`}
+              <div style={{ color: "var(--ink)" }}>{s.summary}</div>
+            </div>
+          ))}
+        </section>
 
         <section className="card flex flex-col gap-3" aria-label="Persona">
           <div className="flex items-center gap-3">
