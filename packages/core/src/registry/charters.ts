@@ -224,7 +224,7 @@ export const CHARTERS: Record<string, Charter> = {
   bill: { job: "Installs and materials for JD PM.", owns: ["Install schedule and materials orders"], handsOff: [["Customer messages", "stephanie"]], rhythm: "Installs and materials weekdays at 6:30 am Eastern; on demand.", tools: [...BOARD, "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "Jobs start on time with the right materials." },
   stephanie: { job: "Call center and customer support for JD PM.", owns: ["Customer replies and follow-ups", "Drafting emails for Phil's approval"], handsOff: [["New leads", "karol"], ["Quotes", "jake"]], rhythm: "On demand.", tools: [...BOARD, ...GMAIL_READ, "gmail_create_draft"], good: "No customer waits more than a day for a reply." },
   frog: { job: "CRM, tools and tech for JD PM.", owns: ["The CRM and every JD PM tool working"], rhythm: "On demand.", tools: [...BOARD, "web_status"], good: "The CRM is the single source of truth." },
-  brian: { job: "CFO for JD PM only.", owns: ["JD PM invoices, costs and margins"], handsOff: [["Phil's personal money", "munger"]], rhythm: "JD PM numbers Mondays at 7:45 am Eastern, to Telegram and HQ; on demand.", tools: [...BOARD, ...GMAIL_READ], good: "Every job's margin is known and invoices go out on time." },
+  brian: { job: "CFO for JD PM only.", owns: ["JD PM invoices, costs and margins"], handsOff: [["Phil's personal money", "munger"]], rhythm: "On demand only; no scheduled report.", tools: [...BOARD, ...GMAIL_READ], good: "Every job's margin is known and invoices go out on time." },
 
   // ---- ProEdge -------------------------------------------------------------------------------------
   stevon: {
