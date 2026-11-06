@@ -1,5 +1,12 @@
 import type { AgentRequest, AgentResult, Provider } from "./types.js";
 import { ProviderError } from "./types.js";
+import { BUILTIN_TOOL_NAMES } from "../lookup.js";
+import type { ToolDef } from "../tools/index.js";
+
+/** HQ tools go through the in-process MCP server; web_search and web_fetch become Claude's own WebSearch and WebFetch. */
+export function splitTools(all: ToolDef[]): { hq: ToolDef[]; builtins: string[] } {
+  return { hq: all.filter((t) => !BUILTIN_TOOL_NAMES[t.name]), builtins: all.filter((t) => BUILTIN_TOOL_NAMES[t.name]).map((t) => BUILTIN_TOOL_NAMES[t.name]!) };
+}
 
 /**
  * Claude provider. Two modes:
@@ -28,7 +35,7 @@ export function claudeAgentSdkProvider(): Provider {
     async run(req: AgentRequest): Promise<AgentResult> {
       const t0 = Date.now();
       const { query, createSdkMcpServer, tool } = await import("@anthropic-ai/claude-agent-sdk");
-      const tools = req.tools ?? [];
+      const { hq: tools, builtins } = splitTools(req.tools ?? []);
       const mcp = tools.length
         ? createSdkMcpServer({
             name: "jarvis",
@@ -62,10 +69,10 @@ export function claudeAgentSdkProvider(): Provider {
           options: {
             model: req.model.modelId,
             systemPrompt: req.system,
-            maxTurns: req.maxTurns ?? (tools.length ? 8 : 2),
-            // Only HQ tools, never the CLI's file/shell tools.
-            allowedTools: tools.map((t) => `mcp__jarvis__${t.name}`),
-            tools: [],
+            maxTurns: req.maxTurns ?? (tools.length || builtins.length ? 8 : 2),
+            // Only HQ tools and the web, never the CLI's file/shell tools.
+            allowedTools: [...tools.map((t) => `mcp__jarvis__${t.name}`), ...builtins],
+            tools: builtins,
             ...(mcp ? { mcpServers: { jarvis: mcp } } : {}),
             permissionMode: "dontAsk",
             persistSession: false,

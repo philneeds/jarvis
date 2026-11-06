@@ -34,6 +34,7 @@ export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona
     charterText(agent.id, (id) => AGENT_BY_ID[id]?.name ?? id),
     personaText(persona) ? `Phil's own brief for you (this wins where it differs from the above):\n${personaText(persona)}` : "",
     tools.length ? `Tools you can call (read-only):\n${toolsText(tools)}` : "",
+    `Finding things out: HQ's records first (the board, memory, goals, uploads) for anything about Phil and his ventures; then live connected data for numbers; then X for what people are saying (x_search, or your own X search); then the web for public facts and news (web_search, or your own); then Phil, when none of those has it. Never guess a number. Say where each fact came from (which tool, post or page) and mark anything unverified.`,
     `You answer Jarvis or Phil directly, in your own voice, briefly, with a clear recommendation. Lead with the answer.`,
     `Stay in your lane. Something that belongs to another agent (a business lead for Stella's team, a ProEdge matter for Stevon, a Range.cool matter for Poseidon, money for Munger, markets for Mantis, health for Doc) is handed over, not handled: a fenced block tagged "handoff" with JSON {"agent":"<agent id>","task":"<what they should do, with the facts they need>"}. Say in one line that you handed it off.`,
     `Anything worth remembering about Phil, a venture or a contact goes in a fenced block tagged "remember" with JSON: {"scope":"phil|venture:${agent.venture}|contact:<name>","key":"...","value":"..."}.`,

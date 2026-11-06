@@ -26,6 +26,8 @@ export interface Charter {
    * "everything": every action waits for him; once approved, the agent carries it out.
    */
   asksFor?: "outbound" | "everything";
+  /** Where this agent looks things up, in order (rendered as its source ladder). */
+  sources?: string[];
   /** What "good" looks like, in Phil's terms. */
   good: string;
   /** Questions only Phil can answer. */
@@ -289,6 +291,67 @@ const QUESTIONS: Record<string, string[]> = {
     "Send the presentation template you use for Tuesday's meeting (upload the .pptx on Stevon's page), so the deck follows its order and look.",
   ],
 };
+
+/**
+ * Where each agent looks things up, in order. The rule everywhere: HQ's records first (the truth about Phil), then live
+ * connected data, then X for what people are saying, then the web for public facts, then Phil. X search always runs on
+ * Grok (natively for Grok agents, through x_search for Claude agents); the web runs on each agent's own model.
+ */
+const SOURCES: Record<string, { sources: string[]; tools?: string[] }> = {
+  monica: { sources: ["Phil's calendars and inboxes (the Google tools)", "Memory, for his preferences and standing plans", "Phil, for anything the calendar can't tell you"] },
+  einstein: { sources: ["web_health and activity_recent: how HQ itself is doing", "Memory: Phil's ideas list and past decisions", "web_search and web_fetch: tools, docs, release notes", "x_search: what builders are saying about a tool before you recommend it"], tools: ["web_search", "web_fetch", "x_search"] },
+  oscar: { sources: ["Memory and activity: what's stale or doubled", "Gmail (gmail_senders, gmail_search) for cleanup plans", "Phil, before anything is removed"] },
+  adam: { sources: ["goals_list and the venture boards: where things stand", "Memory: what Phil said he wants and why", "web_search: frameworks and benchmarks, only when they sharpen the advice"], tools: ["web_search"] },
+  joi: { sources: ["Memory: Phil's taste and past visuals", "The boards: what's going on worth showing", "web_search: references and examples"], tools: ["web_search"] },
+  lip: { sources: ["Spotify (spotify_top, spotify_recent) for his real taste", "Memory: preferences, people, plans", "web_search: places, events, gifts, bookings"], tools: ["web_search"] },
+  david: { sources: ["goals_list: the goals and their benchmarks", "The venture boards and activity: evidence a benchmark was met", "Memory: what Phil said about each goal"] },
+  doc: { sources: ["health_summary: Phil's own Apple Health data", "Memory: his training, conditions, what he's told you", "web_search: reputable medical sources only, and say it's general information, not a diagnosis"], tools: ["web_search"] },
+  munger: { sources: ["Kubera (kubera_networth, kubera_items, kubera_history): the real numbers", "The Money board and memory: patterns and past advice", "web_search: rates, markets, news behind a move"], tools: ["web_search"] },
+  buffett: { sources: ["Kubera (kubera_items): the actual holdings", "The scouts' notes on the Money board and in memory", "chat_recent: what Phil said about stocks this week", "web_search: filings, earnings, news", "x_search: sentiment, treated as noise until a filing or price confirms it"], tools: ["web_search", "x_search"] },
+  marcus: { sources: ["Memory: Phil's holdings and watchlist (in your prompt)", "Your web search: filings, earnings, catalysts, prices", "Your X search: breaking news and sentiment, labelled as such"] },
+  house: { sources: ["Memory: Phil's holdings and watchlist (in your prompt)", "Your web search: trial results, FDA calendar, filings", "Your X search: biotech chatter, labelled as such"] },
+  exxon: { sources: ["Memory: Phil's holdings and watchlist (in your prompt)", "Your web search: energy prices, filings, catalysts", "Your X search: sentiment, labelled as such"] },
+  altman: { sources: ["Memory: Phil's holdings and watchlist (in your prompt)", "Your web search: earnings, product news, filings", "Your X search: what the AI crowd is saying, labelled as such"] },
+  armstrong: { sources: ["Memory: Phil's holdings and watchlist (in your prompt)", "Your web search: filings, treasury moves, exchange news", "Your X search: crypto-stock chatter, labelled as such"] },
+  mayne: { sources: ["trading_limits and the Money board: the rules and the positions", "kubera_items: the actual balances", "Memory: Phil's strategy and what he's taught you", "hyperliquid_perps: live funding and open interest", "web_search: protocol docs and venue rules", "x_search: what traders say, treated as noise"], tools: ["hyperliquid_perps", "web_search", "x_search"] },
+  mantis: { sources: ["hyperliquid_perps: live prices, funding, open interest", "The scouts' latest notes (board and memory)", "x_search: what traders are saying, with handles", "web_search: the news behind a move"], tools: ["x_search", "web_search"] },
+  pentoshi: { sources: ["hyperliquid_perps (HQ runs it for you): funding, OI, moves", "Your X search: positioning talk and prop-firm news", "Your web search: funding across venues, firm rule changes"] },
+  tux: { sources: ["Memory: what Phil sent you about LP, marked verified or not", "Your web search: pool data, docs, audits", "Your X search: who's farming what, labelled as such"], tools: ["memory_search"] },
+  cat: { sources: ["Your web search: the markets and their odds", "Your X search: what people expect and why", "Memory: Phil's views"], tools: ["memory_search"] },
+  ansem: { sources: ["Your X search: what's getting attention right now", "Your web search: contract, liquidity, holders", "Memory: what Phil already passed on"], tools: ["memory_search"] },
+  claw: { sources: ["Your X search: who's building and shipping", "Your web search: docs, repos, launches", "Memory: what Phil already knows"] },
+  lucas: { sources: ["Your X search: the posts, threads and accounts behind a topic", "Your web search: the sources those posts cite", "Memory: what the scouts flagged"], tools: ["memory_search"] },
+  nick: { sources: ["x_own_posts and x_mentions once X is connected: the real numbers", "x_search: @philneeds, his topics, what's landing on X this week", "Memory: the voice guide and the current plan", "web_search: what's working on X in general"], tools: ["x_search", "web_search"] },
+  boo: { sources: ["Memory: the voice guide (key voice-guide)", "Your X search: @philneeds and the topic you're writing about", "Lucas's research, handed to you"], tools: ["memory_search"] },
+  ncrypt: { sources: ["x_mentions and x_dm_inbox once X is connected", "Your X search: the thread and the person you're replying to", "Memory: the voice guide"], tools: ["memory_search"] },
+  jeff: { sources: ["Memory: what Acres is and what Phil wants", "Your X search: @acres, airdrop talk, the community", "Your web search: the projects and chains involved"] },
+  poseidon: { sources: ["The Range.cool board: the numbers", "Memory: decisions and context", "Jason, Justin and Paul for their areas (hand off, don't guess)", "web_search: market, competitors, comparables"], tools: ["web_search"] },
+  paul: { sources: ["Jason: the actual code and infrastructure (hand off the fact-finding)", "Memory: what's been reviewed", "web_search and web_fetch: CVEs, audits, exploit write-ups", "x_search: live exploit chatter, for speed, verified before acting"], tools: ["web_search", "web_fetch", "x_search"] },
+  mark: { sources: ["Memory: the entity, jurisdiction and open matters", "web_search and web_fetch: statutes, regulators, filings; say it's not legal advice"], tools: ["web_search", "web_fetch"] },
+  allmin: { sources: ["Memory: brand assets, voice and positioning", "x_own_posts and x_mentions once X is connected", "x_search: Range.cool mentions, competitors, the audience", "web_search: references and campaigns"], tools: ["x_search", "web_search"] },
+  intern: { sources: ["Memory: the brand and what Allmin set", "Your X search: memes, formats and trends right now", "Allmin, for direction"], tools: ["memory_search"] },
+  justin: { sources: ["The Range.cool board and Munger's numbers: runway", "Memory: terms and investor history", "web_search: investors, rounds, comparables"], tools: ["web_search"] },
+  jason: { sources: ["The repos, once Phil shares them", "Memory: architecture decisions", "web_fetch and web_search: docs and release notes"], tools: ["web_search", "web_fetch"] },
+  devteam: { sources: ["Jason's assignment", "web_fetch: the docs for what you're building"], tools: ["web_fetch", "web_search"] },
+  stella: { sources: ["The JD PM board: leads, jobs, pipeline", "Gmail and the calendar: what customers said and when", "Memory: the crew, pricing, how Phil runs it", "web_search: a customer, supplier or permit"], tools: ["web_search"] },
+  karol: { sources: ["Gmail: Facebook notifications and referral emails", "The JD PM board: what's already logged", "web_search: to qualify a lead (the property, the area)"], tools: ["web_search"] },
+  jake: { sources: ["The JD PM board: the job and its history", "Memory: the price sheet and quote template, once Phil shares them", "The calendar: when the crew is free", "web_search: material prices"], tools: ["web_search"] },
+  bill: { sources: ["The calendar: installs", "The JD PM board: the jobs and what's needed", "Memory: suppliers", "web_search: supplier stock and prices"], tools: ["web_search"] },
+  stephanie: { sources: ["Gmail: the thread with the customer", "The JD PM board: their job", "Memory: hours, tone, what Phil promised"] },
+  frog: { sources: ["web_status: what HQ sees", "Memory: the tools and accounts", "web_search and web_fetch: GoHighLevel and tool docs"], tools: ["web_search", "web_fetch"] },
+  brian: { sources: ["The JD PM board: jobs and revenue", "Gmail: invoices and receipts", "Memory: GoHighLevel, the bank, margins", "web_search: tax and finance rules"], tools: ["web_search"] },
+  stevon: { sources: ["sales_data and deck_template: this week's numbers and the format", "The ProEdge board", "Memory: the team and what Phil said", "web_search: sales benchmarks"], tools: ["web_search"] },
+  salescoach: { sources: ["sales_data: the real calls and numbers", "Memory: the team", "web_search: training material and scripts"], tools: ["sales_data", "web_search"] },
+  scheduler: { sources: ["The calendar: who's booked when", "Memory: the team and their hours"] },
+  emailai: { sources: ["Gmail: the thread and the customer", "Memory: templates and tone"] },
+  mindset: { sources: ["Memory: the team and what's going on", "web_search: material, when it's useful"], tools: ["web_search"] },
+};
+for (const [id, s] of Object.entries(SOURCES)) {
+  const c = CHARTERS[id];
+  if (!c) continue;
+  c.sources = s.sources;
+  if (s.tools) c.tools = [...new Set([...(c.tools ?? []), ...s.tools])];
+}
 for (const [id, qs] of Object.entries(QUESTIONS)) if (CHARTERS[id]) CHARTERS[id].open = qs;
 
 /** The charter as a prompt section. Phil's own brief, when he filled it in, is shown after it and wins. */
@@ -300,6 +363,7 @@ export function charterText(id: string, name: (id: string) => string): string {
     `You own:\n${c.owns.map((o) => `- ${o}`).join("\n")}`,
     c.handsOff?.length ? `Not yours, hand it off:\n${c.handsOff.map(([w, a]) => `- ${w} → ${name(a)} (${a})`).join("\n")}` : "",
     `Rhythm: ${c.rhythm}`,
+    c.sources?.length ? `Where to look, in order:\n${c.sources.map((x, i) => `${i + 1}. ${x}`).join("\n")}` : "",
     `Good looks like: ${c.good}`,
     c.open?.length ? `Still to learn from Phil (ask as you go: one short question when it actually matters for the task in hand, never a list; then keep his answer in a remember block so you never ask twice; check memory first):\n${c.open.map((q) => `- ${q}`).join("\n")}` : "",
   ].filter(Boolean).join("\n");

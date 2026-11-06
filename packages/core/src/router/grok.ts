@@ -25,15 +25,37 @@ export function grokProvider(mode = process.env.GROK_MODE || "cli"): Provider {
 export const GROK_DENIED_TOOLS = "run_terminal_command,read_file,search_replace,write,list_dir,grep,spawn_subagent,kill_command_or_subagent,get_command_or_subagent_output,scheduler_create,scheduler_delete,scheduler_list,monitor,search_tool,use_tool,workflow,enter_plan_mode,exit_plan_mode,ask_user_question,send_feedback,image_gen,image_edit,image_to_video,reference_to_video";
 export const GROK_DEFAULT_ARGS = `--permission-mode dontAsk --max-turns 8 --output-format json --disallowed-tools ${GROK_DENIED_TOOLS} -p`;
 
+const grokCwd = () => {
+  if (process.env.GROK_CWD) return process.env.GROK_CWD;
+  const d = path.join(os.tmpdir(), "jarvis-grok");
+  try { fs.mkdirSync(d, { recursive: true }); } catch { /* fall back to cwd */ }
+  return d;
+};
+
+/** One headless Grok run: the prompt in, the final text out. Used by the provider and by HQ's x_search tool. */
+export function grokOnce(prompt: string, opts: { signal?: AbortSignal; timeoutMs?: number; maxTurns?: number } = {}): Promise<string> {
+  const bin = process.env.GROK_BIN || "grok";
+  let extra = (process.env.GROK_ARGS || GROK_DEFAULT_ARGS).split(" ").filter(Boolean);
+  if (opts.maxTurns) { const i = extra.indexOf("--max-turns"); if (i >= 0) extra[i + 1] = String(opts.maxTurns); else extra = ["--max-turns", String(opts.maxTurns), ...extra]; }
+  return new Promise<string>((resolve, reject) => {
+    let out = "", err = "";
+    const p = spawn(bin, [...extra, prompt], { stdio: ["ignore", "pipe", "pipe"], cwd: grokCwd(), env: { ...process.env, NO_COLOR: "1" } });
+    opts.signal?.addEventListener("abort", () => p.kill("SIGTERM"));
+    p.stdout.on("data", (d) => { out += d.toString(); });
+    p.stderr.on("data", (d) => { err += d.toString(); });
+    p.on("error", (e) => reject(new ProviderError(`Could not start '${bin}': ${e.message}`, "grok:cli", e)));
+    p.on("exit", (code) => {
+      if (code === 0) resolve(out);
+      else reject(new ProviderError(`grok exited ${code}: ${err.trim() || out.trim()}`.slice(0, 500), "grok:cli"));
+    });
+    // A run stuck on something interactive must not hold things forever.
+    const t = setTimeout(() => { p.kill("SIGTERM"); reject(new ProviderError(`grok timed out after ${Math.round((opts.timeoutMs ?? 300_000) / 60_000)} minutes`, "grok:cli")); }, opts.timeoutMs ?? Number(process.env.GROK_TIMEOUT_MS ?? 300_000));
+    p.on("exit", () => clearTimeout(t));
+  });
+}
+
 export function grokCliProvider(): Provider {
   const bin = process.env.GROK_BIN || "grok";
-  const extra = (process.env.GROK_ARGS || GROK_DEFAULT_ARGS).split(" ").filter(Boolean);
-  const cwd = (() => {
-    if (process.env.GROK_CWD) return process.env.GROK_CWD;
-    const d = path.join(os.tmpdir(), "jarvis-grok");
-    try { fs.mkdirSync(d, { recursive: true }); } catch { /* fall back to cwd */ }
-    return d;
-  })();
   return {
     id: "grok:cli",
     async available() {
@@ -47,22 +69,7 @@ export function grokCliProvider(): Provider {
     async run(req: AgentRequest): Promise<AgentResult> {
       const t0 = Date.now();
       const prompt = `${req.system}\n\n---\n\n${req.prompt}`;
-      const args = [...extra, prompt];
-      const text = await new Promise<string>((resolve, reject) => {
-        let out = "", err = "";
-        const p = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], cwd, env: { ...process.env, NO_COLOR: "1" } });
-        req.signal?.addEventListener("abort", () => p.kill("SIGTERM"));
-        p.stdout.on("data", (d) => { out += d.toString(); });
-        p.stderr.on("data", (d) => { err += d.toString(); });
-        p.on("error", (e) => reject(new ProviderError(`Could not start '${bin}': ${e.message}`, "grok:cli", e)));
-        p.on("exit", (code) => {
-          if (code === 0) resolve(out);
-          else reject(new ProviderError(`grok exited ${code}: ${err.trim() || out.trim()}`.slice(0, 500), "grok:cli"));
-        });
-        // A scout stuck on something interactive must not hold the run forever.
-        const t = setTimeout(() => { p.kill("SIGTERM"); reject(new ProviderError("grok timed out after 5 minutes", "grok:cli")); }, Number(process.env.GROK_TIMEOUT_MS ?? 300_000));
-        p.on("exit", () => clearTimeout(t));
-      });
+      const text = await grokOnce(prompt, { signal: req.signal });
       const parsed = parseGrokJson(text);
       return {
         text: (parsed?.text ?? text).trim(),

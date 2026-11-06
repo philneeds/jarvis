@@ -17,6 +17,7 @@ import { HEALTH_TOOLS } from "../health.js";
 import { XREAD_TOOLS, expandXLinks, xPostIds } from "../xread.js";
 import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
+import { LOOKUP_TOOLS } from "../lookup.js";
 import { DECK_HINT, makeDeck, normalizeDeck, type Deck } from "../decks.js";
 
 export interface JarvisOptions {
@@ -186,7 +187,7 @@ export class Jarvis {
   }
 
   /** Every tool an agent could be given: built-in plus connectors. */
-  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...this.connectorTools.values()]; }
+  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...LOOKUP_TOOLS, ...this.connectorTools.values()]; }
 
   // ---- Chat -------------------------------------------------------------
 
