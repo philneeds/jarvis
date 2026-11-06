@@ -271,7 +271,7 @@ const QUESTIONS: Record<string, string[]> = {
   allmin: ["Range.cool's X handle and posting cadence?", "Where do Range.cool's brand assets live (Figma, Drive)?"],
   intern: ["Which community channels does Intern work in (Discord, Telegram groups, X)?"],
   justin: ["Range.cool runway today, and any raise planned?"],
-  jason: ["Which repos are Range.cool's, and should Jason get read access on GitHub?"],
+  jason: ["Phil will share all of Range.cool's repos (it's on his to-do list). When he does: read-only access first, and ask before anything that writes."],
   jason2: ["Phil's Grok bot can connect to Cursor. When phase 3 starts, ask Phil how it's set up (which bot, where it runs, how it reaches Cursor) so HQ can route Jason 2.0's work through it. Cursor's own command-line agent is the fallback."],
   stella: [
       "Which mailbox is the business one?",
