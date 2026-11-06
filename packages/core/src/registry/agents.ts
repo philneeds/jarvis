@@ -136,9 +136,9 @@ export const AGENTS: AgentDef[] = [
     id: "nick", name: "Block", short: "Philneeds brand manager", layer: 2, parent: "mantis", links: ["lucas"], venture: "philneeds", model: "claude-sonnet", phase: 2, priority: "room",
     desc: "Manager of the Philneeds brand, Boo and ncrypt. Reviews the analytics and improves the agents below him for better performance. Gets research from Lucas.",
   },
-  { id: "boo", name: "Boo", short: "Ghostwriter", layer: 3, parent: "nick", venture: "philneeds", serves: ["range", "acres"], model: "grok", phase: 2, priority: "room", desc: "Ghostwriter. Drafts and (after Phil's approval) posts for the X account: Philneeds, Range.cool and Acres." },
-  { id: "ncrypt", name: "ncrypt", short: "Replies & DMs", layer: 3, parent: "nick", links: ["boo"], venture: "philneeds", serves: ["range", "acres"], model: "grok", phase: 2, priority: "room", desc: "All responses and DM prep on Telegram and X. Works closely with Boo for Philneeds, Range.cool and Acres." },
-  { id: "jeff", name: "Jeff", short: "CEO, Airdrop Acres", layer: 2, parent: "mantis", alsoReportsTo: ["jarvis"], venture: "acres", model: "grok", phase: 3, priority: "room", desc: "CEO and jack of all trades managing Airdrop Acres. Especially strong at community growth, expansion and distribution." },
+  { id: "boo", name: "Boo", short: "Ghostwriter", layer: 3, parent: "nick", venture: "philneeds", model: "grok", phase: 2, priority: "room", desc: "Ghostwriter for @philneeds. Drafts posts and threads in Phil's voice; they go out only after Phil approves." },
+  { id: "ncrypt", name: "ncrypt", short: "Replies & DMs", layer: 3, parent: "nick", links: ["boo"], venture: "philneeds", model: "grok", phase: 2, priority: "room", desc: "Replies and DM prep for @philneeds on X and Telegram. Works closely with Boo." },
+  { id: "jeff", name: "Jeff", short: "CEO, Airdrop Acres", layer: 2, parent: "mantis", alsoReportsTo: ["jarvis"], venture: "acres", model: "grok", phase: 3, priority: "room", desc: "CEO and jack of all trades managing Airdrop Acres, including its X account. Especially strong at community growth, expansion and distribution." },
 
   // ---- Range.cool --------------------------------------------------------
   {
@@ -147,8 +147,8 @@ export const AGENTS: AgentDef[] = [
   },
   { id: "paul", name: "Paul Blart", short: "Security & risk", layer: 2, parent: "poseidon", venture: "range", model: "claude-sonnet", phase: 3, priority: "room", desc: "Security risk analysis, and an overall advisor." },
   { id: "mark", name: "Mark", short: "Legal", layer: 2, parent: "poseidon", venture: "range", model: "claude-sonnet", phase: 3, priority: "room", desc: "In charge of all things legal." },
-  { id: "allmin", name: "Allmin", short: "Story, brand & marketing", layer: 2, parent: "poseidon", venture: "range", model: "claude-sonnet", phase: 3, priority: "room", desc: "Storytelling, branding, visual design and marketing for Range.cool." },
-  { id: "intern", name: "Intern", short: "Memes & DMs", layer: 2, parent: "poseidon", links: ["allmin", "boo", "ncrypt"], venture: "range", serves: ["philneeds"], model: "grok", phase: 3, priority: "pause-first", desc: "Works closely with Allmin on memes, and handles DMs with Boo and ncrypt." },
+  { id: "allmin", name: "Allmin", short: "Story, brand & marketing", layer: 2, parent: "poseidon", venture: "range", model: "claude-sonnet", phase: 3, priority: "room", desc: "Storytelling, branding, visual design and marketing for Range.cool, including its X account." },
+  { id: "intern", name: "Intern", short: "Memes & DMs", layer: 2, parent: "poseidon", links: ["allmin"], venture: "range", model: "grok", phase: 3, priority: "pause-first", desc: "Works closely with Allmin on Range.cool's memes and DMs." },
   { id: "justin", name: "Justin", short: "Fundraising & runway", layer: 2, parent: "poseidon", venture: "range", model: "claude-sonnet", phase: 3, priority: "room", desc: "Everything to do with fundraising and runway." },
   { id: "jason", name: "Jason", short: "CTO & core dev", layer: 2, parent: "poseidon", venture: "range", serves: ["lab"], model: "claude-opus", phase: 3, priority: "room", desc: "CTO and core developer behind everything at Range.cool. Runs on Claude Code and has his own team of devs." },
   { id: "jason2", name: "Jason 2.0", short: "Robot CTO, secondary brain", layer: 3, parent: "jason", links: ["devteam"], venture: "range", serves: ["lab"], model: "cursor", phase: 3, priority: "room", desc: "The Terminator version of Jason. Runs in Cursor as Jason's secondary brain: builds alongside him, reviews his code and catches what he misses." },

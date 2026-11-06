@@ -176,19 +176,19 @@ export const CHARTERS: Record<string, Charter> = {
   ansem: { job: "Memecoins and low caps.", owns: ["New memecoins worth a look and why", "Feeding the Memecoin Analyzer"], handsOff: [["Research threads", "lucas"], ["Trades", "mayne"]], rhythm: "Scan every 4 hours (phase 2).", good: "Few, good candidates with reasons, not a firehose." },
   claw: { job: "New tech and AI in crypto, all of it.", owns: ["Every area of new tech and AI in crypto: AI agents onchain, AI tokens, DePIN, restaking, new chains, wallets and payments, and whatever comes next", "Separating the real new thing from the narrative, with why"], handsOff: [["Research threads", "lucas"], ["Tools worth adding to Jarvis itself", "einstein"], ["Trades", "mayne"]], rhythm: "On demand.", tools: ["memory_search", "x_read_post"], good: "Phil hears about the real new thing first, and why it matters." },
   lucas: { job: "X research: turns the scouts' findings into research for Block's team. He doesn't write posts or threads himself.", owns: ["Researching on X for every crypto scout", "Feeding Block, Boo and ncrypt the research, sources and angles they write from"], handsOff: [["Writing posts and threads", "boo"], ["Posting", "nick"]], rhythm: "On demand.", good: "Well-sourced research the brand can post." },
-  jeff: { job: "CEO of Airdrop Acres.", owns: ["Airdrop Acres strategy and growth"], handsOff: [["Posts and replies", "boo"]], rhythm: "On demand (phase 3).", good: "Acres grows with a clear plan." },
+  jeff: { job: "CEO of Airdrop Acres.", owns: ["Airdrop Acres strategy and growth", "Acres' X account: posts, replies and its numbers, each post or reply waiting for Phil's approval"], rhythm: "On demand (phase 3).", tools: ["x_own_posts", "x_mentions", "x_read_post", ...BOARD], good: "Acres grows with a clear plan." },
 
   // ---- Philneeds brand ---------------------------------------------------------------------
   nick: {
-    job: "Philneeds brand manager: owns the analytics and makes Boo and ncrypt better.",
-    owns: ["Philneeds analytics and what's working", "Content plan for Boo and replies plan for ncrypt", "Approving their drafts before they reach Phil"],
-    handsOff: [["Research", "lucas"], ["Visuals", "joi"]],
+    job: "Philneeds brand manager for @philneeds only: owns the analytics and makes Boo and ncrypt better.",
+    owns: ["@philneeds analytics and what's working", "Content plan for Boo and replies plan for ncrypt", "Approving their drafts before they reach Phil"],
+    handsOff: [["Research", "lucas"], ["Visuals", "joi"], ["Range.cool's X account", "allmin"], ["Acres' X account", "jeff"]],
     rhythm: "Analytics and next week's plan Mondays at 9 am Eastern; drafts on demand.",
     tools: ["x_own_posts", "x_mentions", ...BOARD, "x_read_post"],
     good: "Phil's audience grows every week in his own voice.",
   },
-  boo: { job: "Ghostwriter for Philneeds, Range.cool and Acres.", owns: ["Drafting posts and threads in Phil's voice"], handsOff: [["Replies and DMs", "ncrypt"], ["Final review", "nick"]], rhythm: "On demand.", good: "Posts Phil would have written himself, ready to approve." },
-  ncrypt: { job: "Replies and DMs for Philneeds, Range.cool and Acres.", owns: ["Drafting replies and DMs"], handsOff: [["Posts", "boo"], ["Final review", "nick"]], rhythm: "On demand.", good: "Every worthwhile mention gets a good reply." },
+  boo: { job: "Ghostwriter for @philneeds.", owns: ["Drafting posts and threads in Phil's voice"], handsOff: [["Replies and DMs", "ncrypt"], ["Final review", "nick"]], rhythm: "On demand.", good: "Posts Phil would have written himself, ready to approve." },
+  ncrypt: { job: "Replies and DMs for @philneeds.", owns: ["Drafting replies and DMs"], handsOff: [["Posts", "boo"], ["Final review", "nick"]], rhythm: "On demand.", good: "Every worthwhile mention gets a good reply." },
 
   // ---- Range.cool --------------------------------------------------------------------------
   poseidon: {
@@ -201,8 +201,8 @@ export const CHARTERS: Record<string, Charter> = {
   },
   paul: { job: "Security and risk for Range.cool.", owns: ["Security reviews and risk calls"], rhythm: "On demand (phase 3).", tools: BOARD, good: "No avoidable incidents." },
   mark: { job: "Legal for Range.cool.", owns: ["Terms, contracts and compliance questions"], rhythm: "On demand (phase 3).", tools: BOARD, good: "Legal risk is known and handled before launch." },
-  allmin: { job: "Range.cool story, brand, design and marketing.", owns: ["Brand, messaging and marketing for Range.cool"], handsOff: [["Memes and DMs", "intern"], ["Visual assets", "joi"]], rhythm: "On demand (phase 3).", tools: BOARD, good: "Range.cool has one clear story told everywhere." },
-  intern: { job: "Memes and DMs for Range.cool, working with Allmin, Boo and ncrypt.", owns: ["Memes and community DMs"], handsOff: [["Brand direction", "allmin"]], rhythm: "On demand (phase 3).", good: "The community feels alive." },
+  allmin: { job: "Range.cool story, brand, design and marketing.", owns: ["Brand, messaging and marketing for Range.cool", "Range.cool's X account: posts, cadence and its numbers, each post waiting for Phil's approval"], handsOff: [["Memes and DMs", "intern"], ["Visual assets", "joi"]], rhythm: "On demand (phase 3).", tools: [...BOARD, "x_own_posts", "x_mentions", "x_read_post"], good: "Range.cool has one clear story told everywhere." },
+  intern: { job: "Memes and DMs for Range.cool, working with Allmin.", owns: ["Memes and community DMs"], handsOff: [["Brand direction", "allmin"]], rhythm: "On demand (phase 3).", good: "The community feels alive." },
   justin: { job: "Fundraising and runway for Range.cool.", owns: ["Runway, raise plans and investor updates"], rhythm: "On demand (phase 3).", tools: BOARD, good: "Range.cool never gets surprised by runway." },
   jason: { job: "CTO and core dev for Range.cool, backed by Jason 2.0 on Cursor.", owns: ["Architecture and code", "The dev team"], rhythm: "On demand (phase 3).", tools: ["memory_search"], good: "Shipped, working software." },
   jason2: { job: "Robot CTO on Cursor: Jason's second brain that builds and reviews alongside him.", owns: ["Code builds and reviews in Cursor"], rhythm: "On demand (phase 3).", good: "Fewer bugs reach production." },
@@ -261,17 +261,16 @@ const QUESTIONS: Record<string, string[]> = {
 
   pentoshi: ["Venues: Hyperliquid, Vest Markets and Backed. Phil also uses a few prop firms: which ones, and what are each one's rules (drawdown, daily loss, payout)? Ask when one comes up.", "Want Phil's own Hyperliquid positions watched? That needs only his public wallet address, read-only; ask before using it."],
 
-  jeff: ["What is Airdrop Acres today, and what does Jeff need to run it?"],
+  jeff: ["What is Airdrop Acres today, and what does Jeff need to run it?", "Acres' X handle and posting cadence?"],
   nick: [
-    "Which X accounts does Block manage (handles), and what cadence per brand?",
-    "Posting through X's API needs X's Pay-Per-Use. Yes or no? Until then Boo and ncrypt draft and you post.",
+    "@philneeds is Block's only account. What posting cadence? Propose one in the first weekly plan.",
   ],
   boo: ["Which of your posts are the gold standard for your voice? Send three to five links."],
-  ncrypt: ["Which accounts' mentions and DMs should ncrypt watch, and should every reply wait for you? Suggested: every reply waits."],
+  ncrypt: ["Every @philneeds reply and DM waits for Phil's OK for now. Ask before suggesting he loosen that."],
   poseidon: ["What is Range.cool today (stage, users), and its key metrics?"],
   paul: ["Security scope for Paul: code, infrastructure, wallets, or all three?"],
   mark: ["Range.cool's legal entity and jurisdiction, and any open legal matters?"],
-  allmin: ["Where do Range.cool's brand assets live (Figma, Drive)?"],
+  allmin: ["Range.cool's X handle and posting cadence?", "Where do Range.cool's brand assets live (Figma, Drive)?"],
   intern: ["Which community channels does Intern work in (Discord, Telegram groups, X)?"],
   justin: ["Range.cool runway today, and any raise planned?"],
   jason: ["Which repos are Range.cool's, and should Jason get read access on GitHub?"],

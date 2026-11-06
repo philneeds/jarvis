@@ -5,7 +5,7 @@ import { defineTool, type ToolDef } from "../tools/index.js";
 import type { Executor, Describer } from "../jarvis/orchestrator.js";
 
 /**
- * X (Twitter) connector for Boo, ncrypt, Block and Intern. Several accounts (Philneeds, Range.cool, Acres),
+ * X (Twitter) connector: Block's team (Boo, ncrypt) for @philneeds, Allmin for Range.cool, Jeff for Acres. Several accounts (Philneeds, Range.cool, Acres),
  * each connected once with OAuth 2.0 + PKCE on X's API v2; tokens live in settings["x.accounts"].
  * Reads are tools. Posting, replying and DMs are approval actions and run only after Phil approves.
  * Live X research stays with Grok (Lucas); this connector is for Phil's own accounts.
