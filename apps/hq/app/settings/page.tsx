@@ -8,7 +8,7 @@ import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 
 interface Passkey { id: string; label: string; createdAt: string }
-interface Connectors { google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
+interface Connectors { google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
 
 export default function SettingsPage() {
   const { state, refresh } = useLive();
@@ -27,6 +27,8 @@ export default function SettingsPage() {
   const [xMsg, setXMsg] = useState<string>();
   const [spMsg, setSpMsg] = useState<string>();
   const [kbMsg, setKbMsg] = useState<string>();
+  const [ghlMsg, setGhlMsg] = useState<string>();
+  const testGhl = async () => { setGhlMsg("Checking…"); try { const r = await post<{ summary: string }>("/api/connectors/ghl/test", {}); setGhlMsg(r.summary); await load(); } catch (e) { setGhlMsg((e as Error).message); } };
   const testKubera = async () => { setKbMsg("Checking…"); try { const r = await post<{ summary: string }>("/api/connectors/kubera/test", {}); setKbMsg(r.summary); await load(); } catch (e) { setKbMsg((e as Error).message); } };
   const [health, setHealth] = useState<{ keySet: boolean; lastIngest: { at: string; samples: number; workouts: number } | null; days: number; summary: string } | null>(null);
   const [healthKey, setHealthKey] = useState<string>();
@@ -138,6 +140,16 @@ export default function SettingsPage() {
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set KUBERA_API_KEY and KUBERA_SECRET</span>}
             </div>
             {(kbMsg || (conn?.kubera?.lastFetch && !conn.kubera.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: kbMsg && !/refused|error|limit|isn't set|failed/i.test(kbMsg) ? "var(--ink)" : "var(--red)" }}>{kbMsg ?? conn?.kubera?.lastFetch?.error}</p>}
+          </div>
+          <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="GoHighLevel">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`dot ${conn?.ghl?.lastFetch?.ok ? "dot-working" : conn?.ghl?.lastFetch ? "dot-error" : "dot-idle"}`} />
+              <span><b>GoHighLevel</b> · Stella's team reads JD PM's contacts, conversations, pipeline, invoices and appointments, read-only.</span>
+              {conn?.ghl?.configured
+                ? <><span style={{ color: "var(--dim)" }}>{conn.ghl.lastFetch ? `${conn.ghl.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.ghl.lastFetch.at)}` : "not read yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testGhl()}>Check now</button></>
+                : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GHL_API_KEY (a read-only Private Integration token) and GHL_LOCATION_ID</span>}
+            </div>
+            {(ghlMsg || (conn?.ghl?.lastFetch && !conn.ghl.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: ghlMsg && !/refused|error|limit|aren't set|failed/i.test(ghlMsg) ? "var(--ink)" : "var(--red)" }}>{ghlMsg ?? conn?.ghl?.lastFetch?.error}</p>}
           </div>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Apple Health">
             <div className="flex flex-wrap items-center gap-3">

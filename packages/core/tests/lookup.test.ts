@@ -47,7 +47,7 @@ test("every agent has a source ladder in its charter, and every tool a charter n
   const withSources = AGENTS.filter((a) => CHARTERS[a.id]?.sources?.length).length;
   assert.ok(withSources >= 45, `${withSources} agents have sources`);
   // Connector tools (Google, Spotify, Kubera, X, trading) only exist once that connector is set up.
-  const connector = /^(google_|gmail_|calendar_|spotify_|kubera_|x_own_|x_mentions|x_dm_|trading_)/;
+  const connector = /^(google_|gmail_|calendar_|spotify_|kubera_|ghl_|x_own_|x_mentions|x_dm_|trading_)/;
   for (const [id, c] of Object.entries(CHARTERS)) for (const t of c.tools ?? []) assert.ok(names.has(t) || connector.test(t), `${id} names unknown tool ${t}`);
   assert.match(charterText("mantis", (id) => id), /Where to look, in order:\n1\. hyperliquid_perps/);
   assert.ok(CHARTERS.mantis!.tools!.includes("x_search"), "Mantis (Claude) reaches X through x_search");

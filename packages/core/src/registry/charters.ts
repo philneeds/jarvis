@@ -37,6 +37,8 @@ export interface Charter {
 const GMAIL_READ = ["google_accounts", "gmail_search", "gmail_read"];
 const CAL = ["google_accounts", "calendar_list_events"];
 const BOARD = ["venture_board", "memory_search"];
+/** JD PM's record of customers, conversations, deals and invoices (GoHighLevel, read-only). */
+const GHL = ["ghl_contacts", "ghl_contact", "ghl_conversations", "ghl_messages", "ghl_pipeline", "ghl_invoices", "ghl_appointments"];
 
 export const CHARTERS: Record<string, Charter> = {
   // ---- Main layer ------------------------------------------------------------
@@ -216,17 +218,17 @@ export const CHARTERS: Record<string, Charter> = {
     owns: ["The JD PM board: leads, jobs, revenue and pipeline", "Leads from Facebook, referrals and the other places Phil names, each logged on the board", "Directing Karol, Jake, Bill, Stephanie, Frog and Brian", "Anything waiting on a customer, flagged daily"],
     handsOff: [["Phil's personal calendar", "monica"], ["Phil's personal money", "munger"]],
     rhythm: "Leads and jobs review at 6:50 Eastern; on demand.",
-    tools: [...BOARD, ...GMAIL_READ, "calendar_list_events", "activity_recent"],
+    tools: [...BOARD, ...GHL, ...GMAIL_READ, "calendar_list_events", "activity_recent"],
     autoApprove: ["record"],
     maxAutoDollars: 0,
     good: "Every lead gets a reply within a day and jobs stay on schedule.",
   },
-  karol: { job: "Lead generation for JD PM.", owns: ["Finding and logging new leads: Facebook (messages and notification emails), referrals, and any other source Phil names", "First reply to every new lead"], handsOff: [["Quotes and closing", "jake"]], rhythm: "New-lead check daily at 7:15 am Eastern; on demand.", tools: [...BOARD, ...GMAIL_READ], autoApprove: ["record"], maxAutoDollars: 0, good: "More qualified leads every week." },
-  jake: { job: "Sales, hiring and comp for JD PM.", owns: ["Quotes and closing", "Hiring and pay for the crew"], handsOff: [["Scheduling installs", "bill"]], rhythm: "On demand.", tools: [...BOARD, "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "A high close rate and a crew that stays." },
-  bill: { job: "Installs and materials for JD PM.", owns: ["Install schedule and materials orders"], handsOff: [["Customer messages", "stephanie"]], rhythm: "Installs and materials weekdays at 6:30 am Eastern; on demand.", tools: [...BOARD, "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "Jobs start on time with the right materials." },
-  stephanie: { job: "Call center and customer support for JD PM. Business hours: Monday to Saturday, 8 am to 5 pm, by appointment.", owns: ["Customer replies and follow-ups, giving JD PM's hours (Mon-Sat 8-5, by appointment) and offering a time inside them", "Drafting emails for Phil's approval"], handsOff: [["New leads", "karol"], ["Quotes", "jake"]], rhythm: "On demand.", tools: [...BOARD, ...GMAIL_READ, "gmail_create_draft"], good: "No customer waits more than a day for a reply." },
-  frog: { job: "CRM, tools and tech for JD PM.", owns: ["The CRM and every JD PM tool working"], rhythm: "On demand.", tools: [...BOARD, "web_status"], good: "The CRM is the single source of truth." },
-  brian: { job: "CFO for JD PM only.", owns: ["JD PM invoices (sent from GoHighLevel), costs and margins"], handsOff: [["Phil's personal money", "munger"]], rhythm: "On demand only; no scheduled report.", tools: [...BOARD, ...GMAIL_READ], good: "Every job's margin is known and invoices go out on time." },
+  karol: { job: "Lead generation for JD PM.", owns: ["Finding and logging new leads: Facebook (messages and notification emails), referrals, and any other source Phil names", "First reply to every new lead"], handsOff: [["Quotes and closing", "jake"]], rhythm: "New-lead check daily at 7:15 am Eastern; on demand.", tools: [...BOARD, "ghl_contacts", "ghl_contact", "ghl_conversations", "ghl_messages", ...GMAIL_READ], autoApprove: ["record"], maxAutoDollars: 0, good: "More qualified leads every week." },
+  jake: { job: "Sales, hiring and comp for JD PM.", owns: ["Quotes and closing", "Hiring and pay for the crew"], handsOff: [["Scheduling installs", "bill"]], rhythm: "On demand.", tools: [...BOARD, "ghl_pipeline", "ghl_contact", "ghl_conversations", "ghl_messages", "ghl_appointments", "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "A high close rate and a crew that stays." },
+  bill: { job: "Installs and materials for JD PM.", owns: ["Install schedule and materials orders"], handsOff: [["Customer messages", "stephanie"]], rhythm: "Installs and materials weekdays at 6:30 am Eastern; on demand.", tools: [...BOARD, "ghl_appointments", "ghl_pipeline", "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "Jobs start on time with the right materials." },
+  stephanie: { job: "Call center and customer support for JD PM. Business hours: Monday to Saturday, 8 am to 5 pm, by appointment.", owns: ["Customer replies and follow-ups, giving JD PM's hours (Mon-Sat 8-5, by appointment) and offering a time inside them", "Drafting emails for Phil's approval"], handsOff: [["New leads", "karol"], ["Quotes", "jake"]], rhythm: "On demand.", tools: [...BOARD, "ghl_conversations", "ghl_messages", "ghl_contact", "ghl_appointments", ...GMAIL_READ, "gmail_create_draft"], good: "No customer waits more than a day for a reply." },
+  frog: { job: "CRM, tools and tech for JD PM.", owns: ["The CRM and every JD PM tool working"], rhythm: "On demand.", tools: [...BOARD, "web_status", "ghl_contacts", "ghl_pipeline"], good: "The CRM is the single source of truth." },
+  brian: { job: "CFO for JD PM only.", owns: ["JD PM invoices (sent from GoHighLevel), costs and margins"], handsOff: [["Phil's personal money", "munger"]], rhythm: "On demand only; no scheduled report.", tools: [...BOARD, "ghl_invoices", "ghl_pipeline", ...GMAIL_READ], good: "Every job's margin is known and invoices go out on time." },
 
   // ---- ProEdge -------------------------------------------------------------------------------------
   stevon: {
@@ -284,7 +286,7 @@ const QUESTIONS: Record<string, string[]> = {
   jake: ["Is there a price sheet or quote template, and how is the crew paid?"],
   bill: ["Suppliers you use, and which calendar holds installs?"],
   stephanie: ["Tone for customer replies? Until Phil says, keep them friendly, short and professional, with a clear next step."],
-  frog: ["Invoices go out from GoHighLevel. Is GoHighLevel JD PM's CRM too, and should HQ connect to it (GoHighLevel has an API)? Phil will give more context later."],
+  frog: ["GoHighLevel is connected read-only once Phil adds the key. Should HQ also send replies and create contacts there (each as an approval)? Phil will give more context later."],
   brian: ["Invoices are in GoHighLevel; Phil will give more context later. JD PM's bank and target margin per job?"],
   stevon: [
     "What is ProEdge, who is on the team, and what are its key numbers? The sales coach, scheduler, email AI and mindset coach are set up from that answer.",
@@ -333,13 +335,13 @@ const SOURCES: Record<string, { sources: string[]; tools?: string[] }> = {
   justin: { sources: ["The Range.cool board and Munger's numbers: runway", "Memory: terms and investor history", "web_search: investors, rounds, comparables"], tools: ["web_search"] },
   jason: { sources: ["The repos, once Phil shares them", "Memory: architecture decisions", "web_fetch and web_search: docs and release notes"], tools: ["web_search", "web_fetch"] },
   devteam: { sources: ["Jason's assignment", "web_fetch: the docs for what you're building"], tools: ["web_fetch", "web_search"] },
-  stella: { sources: ["The JD PM board: leads, jobs, pipeline", "Gmail and the calendar: what customers said and when", "Memory: the crew, pricing, how Phil runs it", "web_search: a customer, supplier or permit"], tools: ["web_search"] },
-  karol: { sources: ["Gmail: Facebook notifications and referral emails", "The JD PM board: what's already logged", "web_search: to qualify a lead (the property, the area)"], tools: ["web_search"] },
-  jake: { sources: ["The JD PM board: the job and its history", "Memory: the price sheet and quote template, once Phil shares them", "The calendar: when the crew is free", "web_search: material prices"], tools: ["web_search"] },
-  bill: { sources: ["The calendar: installs", "The JD PM board: the jobs and what's needed", "Memory: suppliers", "web_search: supplier stock and prices"], tools: ["web_search"] },
-  stephanie: { sources: ["Gmail: the thread with the customer", "The JD PM board: their job", "Memory: hours, tone, what Phil promised"] },
-  frog: { sources: ["web_status: what HQ sees", "Memory: the tools and accounts", "web_search and web_fetch: GoHighLevel and tool docs"], tools: ["web_search", "web_fetch"] },
-  brian: { sources: ["The JD PM board: jobs and revenue", "Gmail: invoices and receipts", "Memory: GoHighLevel, the bank, margins", "web_search: tax and finance rules"], tools: ["web_search"] },
+  stella: { sources: ["GoHighLevel (ghl_pipeline, ghl_conversations, ghl_contacts): the record of leads, deals and what customers said", "The JD PM board: what HQ has logged", "Gmail and the calendar", "Memory: the crew, pricing, how Phil runs it", "web_search: a customer, supplier or permit"], tools: ["web_search"] },
+  karol: { sources: ["GoHighLevel (ghl_contacts newest first, ghl_conversations unread): new leads and what they asked", "Gmail: Facebook notifications and referral emails", "The JD PM board: what's already logged", "web_search: to qualify a lead (the property, the area)"], tools: ["web_search"] },
+  jake: { sources: ["GoHighLevel (ghl_pipeline, ghl_contact, ghl_messages): the deal, the customer and what was said", "The JD PM board", "Memory: the price sheet and quote template, once Phil shares them", "The calendar and ghl_appointments: when the crew is free", "web_search: material prices"], tools: ["web_search"] },
+  bill: { sources: ["ghl_appointments and the calendar: installs", "ghl_pipeline and the JD PM board: the jobs and what's needed", "Memory: suppliers", "web_search: supplier stock and prices"], tools: ["web_search"] },
+  stephanie: { sources: ["GoHighLevel (ghl_conversations, ghl_messages): the customer's texts, calls and messages", "Gmail: the email thread", "The JD PM board: their job", "Memory: hours, tone, what Phil promised"] },
+  frog: { sources: ["GoHighLevel (ghl_contacts, ghl_pipeline): is the CRM clean and complete", "web_status: what HQ sees", "Memory: the tools and accounts", "web_search and web_fetch: GoHighLevel and tool docs"], tools: ["web_search", "web_fetch"] },
+  brian: { sources: ["GoHighLevel (ghl_invoices, ghl_pipeline): invoices, what's due, won deals", "The JD PM board: jobs and revenue", "Gmail: receipts and supplier bills", "Memory: the bank, margins", "web_search: tax and finance rules"], tools: ["web_search"] },
   stevon: { sources: ["sales_data and deck_template: this week's numbers and the format", "The ProEdge board", "Memory: the team and what Phil said", "web_search: sales benchmarks"], tools: ["web_search"] },
   salescoach: { sources: ["sales_data: the real calls and numbers", "Memory: the team", "web_search: training material and scripts"], tools: ["sales_data", "web_search"] },
   scheduler: { sources: ["The calendar: who's booked when", "Memory: the team and their hours"] },
