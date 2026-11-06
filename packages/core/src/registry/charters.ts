@@ -170,7 +170,7 @@ export const CHARTERS: Record<string, Charter> = {
     tools: [...BOARD, "trading_limits", "x_read_post"],
     good: "Phil hears about the move worth making, and why, before it's obvious.",
   },
-  pentoshi: { job: "Perps, prop firms and funding rates.", owns: ["Funding, open interest and positioning on Hyperliquid (Phil's main venue; hyperliquid_perps), Vest Markets and Backed, the other venues Phil uses", "News and rule changes at the prop firms Phil uses (he uses a few)"], handsOff: [["Research threads to share", "lucas"], ["Trades", "mayne"]], rhythm: "Scan every 4 hours (phase 2).", tools: ["hyperliquid_perps", "memory_search", "x_read_post"], good: "Funding and positioning shifts flagged early, with the numbers." },
+  pentoshi: { job: "Perps, prop firms and funding rates.", owns: ["Funding, open interest and positioning on Hyperliquid (Phil's main perps venue; hyperliquid_perps) and the other venues Phil uses", "News and rule changes at Phil's prop firms: Vest Markets and Backed"], handsOff: [["Research threads to share", "lucas"], ["Trades", "mayne"]], rhythm: "Scan every 4 hours (phase 2).", tools: ["hyperliquid_perps", "memory_search", "x_read_post"], good: "Funding and positioning shifts flagged early, with the numbers." },
   tux: { job: "LP and DeFi yield research.", owns: ["LP strategies, pools and yields", "Saving what Phil sends him about LP into his memory, marked verified or not"], handsOff: [["Research threads to share", "lucas"], ["Positions", "mayne"]], rhythm: "On demand.", good: "Phil knows which yields are real and which are bait." },
   cat: { job: "Prediction markets.", owns: ["Markets worth watching and mispriced odds"], handsOff: [["Research threads", "lucas"], ["Bets", "mayne"]], rhythm: "On demand.", good: "Clear odds versus Phil's view." },
   ansem: { job: "Memecoins and low caps.", owns: ["New memecoins worth a look and why", "Feeding the Memecoin Analyzer"], handsOff: [["Research threads", "lucas"], ["Trades", "mayne"]], rhythm: "Scan every 4 hours (phase 2).", good: "Few, good candidates with reasons, not a firehose." },
@@ -259,7 +259,7 @@ const QUESTIONS: Record<string, string[]> = {
 
 
 
-  pentoshi: ["Venues: Hyperliquid, Vest Markets and Backed. Phil also uses a few prop firms: which ones, and what are each one's rules (drawdown, daily loss, payout)? Ask when one comes up.", "Want Phil's own Hyperliquid positions watched? That needs only his public wallet address, read-only; ask before using it."],
+  pentoshi: ["Prop firms: Vest Markets and Backed. What are each one's rules (max drawdown, daily loss limit, payouts)? Ask when it matters.", "Want Phil's own Hyperliquid positions watched? That needs only his public wallet address, read-only; ask before using it."],
 
   jeff: ["What is Airdrop Acres today, and what does Jeff need to run it?", "Acres' X handle and posting cadence?"],
   nick: [
