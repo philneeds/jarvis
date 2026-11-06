@@ -8,7 +8,7 @@ import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 
 interface Passkey { id: string; label: string; createdAt: string }
-interface Connectors { google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
+interface Connectors { google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
 
 export default function SettingsPage() {
   const { state, refresh } = useLive();
@@ -29,6 +29,9 @@ export default function SettingsPage() {
   const [kbMsg, setKbMsg] = useState<string>();
   const [ghlMsg, setGhlMsg] = useState<string>();
   const testGhl = async () => { setGhlMsg("Checking…"); try { const r = await post<{ summary: string }>("/api/connectors/ghl/test", {}); setGhlMsg(r.summary); await load(); } catch (e) { setGhlMsg((e as Error).message); } };
+  const [dcMsg, setDcMsg] = useState<string>();
+  const [ghMsg, setGhMsg] = useState<string>();
+  const testSimple = async (path: string, set: (s: string) => void) => { set("Checking…"); try { const r = await post<{ summary: string }>(path, {}); set(r.summary); await load(); } catch (e) { set((e as Error).message); } };
   const testKubera = async () => { setKbMsg("Checking…"); try { const r = await post<{ summary: string }>("/api/connectors/kubera/test", {}); setKbMsg(r.summary); await load(); } catch (e) { setKbMsg((e as Error).message); } };
   const [health, setHealth] = useState<{ keySet: boolean; lastIngest: { at: string; samples: number; workouts: number } | null; days: number; summary: string } | null>(null);
   const [healthKey, setHealthKey] = useState<string>();
@@ -150,6 +153,26 @@ export default function SettingsPage() {
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GHL_API_KEY (a read-only Private Integration token) and GHL_LOCATION_ID</span>}
             </div>
             {(ghlMsg || (conn?.ghl?.lastFetch && !conn.ghl.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: ghlMsg && !/refused|error|limit|aren't set|failed/i.test(ghlMsg) ? "var(--ink)" : "var(--red)" }}>{ghlMsg ?? conn?.ghl?.lastFetch?.error}</p>}
+          </div>
+          <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Discord">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`dot ${conn?.discord?.lastFetch?.ok ? "dot-working" : conn?.discord?.lastFetch ? "dot-error" : "dot-idle"}`} />
+              <span><b>Discord</b> · House reads the biotech server's channels, read-only{conn?.discord?.channels?.length ? ` (${conn.discord.channels.join(", ")})` : ""}.</span>
+              {conn?.discord?.configured
+                ? <><span style={{ color: "var(--dim)" }}>{conn.discord.lastFetch ? `${conn.discord.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.discord.lastFetch.at)}` : "not read yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testSimple("/api/connectors/discord/test", setDcMsg)}>Check now</button></>
+                : <span className="ml-auto" style={{ color: "var(--muted)" }}>set DISCORD_BOT_TOKEN and DISCORD_CHANNELS (label=channelId, comma-separated)</span>}
+            </div>
+            {(dcMsg || (conn?.discord?.lastFetch && !conn.discord.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: dcMsg && !/refused|error|limit|aren't set|can't read/i.test(dcMsg) ? "var(--ink)" : "var(--red)" }}>{dcMsg ?? conn?.discord?.lastFetch?.error}</p>}
+          </div>
+          <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="GitHub">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`dot ${conn?.github?.lastFetch?.ok ? "dot-working" : conn?.github?.lastFetch ? "dot-error" : "dot-idle"}`} />
+              <span><b>GitHub</b> · Jason, the dev team, Paul and Ansem read the repos you share, read-only{conn?.github?.repos?.length ? ` (${conn.github.repos.join(", ")})` : ""}.</span>
+              {conn?.github?.configured
+                ? <><span style={{ color: "var(--dim)" }}>{conn.github.lastFetch ? `${conn.github.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.github.lastFetch.at)}` : "not read yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testSimple("/api/connectors/github/test", setGhMsg)}>Check now</button></>
+                : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GITHUB_READ_TOKEN (fine-grained, read-only) and optionally GITHUB_REPOS</span>}
+            </div>
+            {(ghMsg || (conn?.github?.lastFetch && !conn.github.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: ghMsg && !/refused|error|limit|isn't set|not found/i.test(ghMsg) ? "var(--ink)" : "var(--red)" }}>{ghMsg ?? conn?.github?.lastFetch?.error}</p>}
           </div>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Apple Health">
             <div className="flex flex-wrap items-center gap-3">

@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { GoHighLevelConnector, GoogleConnector, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, XConnector, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
+import { DiscordConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, XConnector, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
 import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
 import { authEnabled, isAuthedRequest } from "./auth.js";
@@ -25,6 +25,11 @@ if (kubera) {
 // JD PM's GoHighLevel (read-only): contacts, conversations, pipeline, invoices, appointments.
 const ghl = GoHighLevelConnector.fromEnv(store);
 if (ghl) jarvis.addConnector(ghl, GoHighLevelConnector.promptHint());
+// House's biotech Discord (read-only) and the repos Phil shares with Jason, Paul and Ansem (read-only).
+const discord = DiscordConnector.fromEnv(store);
+if (discord) jarvis.addConnector(discord, DiscordConnector.promptHint());
+const github = GithubConnector.fromEnv(store);
+if (github) jarvis.addConnector(github, GithubConnector.promptHint());
 // Mayne's hard limits are always on: refused before Phil sees an over-limit trade, and again at execution.
 const guard = new TradingGuard(store);
 jarvis.addConnector(guard, TradingGuard.promptHint());
@@ -32,7 +37,7 @@ jarvis.onApprovalRequested(async (a) => {
   if ((a.payload as { action?: string } | undefined)?.action !== "trade.execute") return undefined;
   try { const c = await guard.check(parseTrade(a.payload)); return c.ok ? undefined : `Mayne's hard limits: ${c.reason}`; } catch (e) { return (e as Error).message; }
 });
-const app = createApp(jarvis, { google, x, guard, spotify, kubera, ghl });
+const app = createApp(jarvis, { google, x, guard, spotify, kubera, ghl, discord, github });
 
 // Live feed for HQ: agent status, chat, approvals, activity, usage, system status.
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
