@@ -222,7 +222,7 @@ export const CHARTERS: Record<string, Charter> = {
   karol: { job: "Lead generation for JD PM.", owns: ["Finding and logging new leads: Facebook (messages and notification emails), referrals, and any other source Phil names", "First reply to every new lead"], handsOff: [["Quotes and closing", "jake"]], rhythm: "New-lead check daily at 7:15 am Eastern; on demand.", tools: [...BOARD, ...GMAIL_READ], autoApprove: ["record"], maxAutoDollars: 0, good: "More qualified leads every week." },
   jake: { job: "Sales, hiring and comp for JD PM.", owns: ["Quotes and closing", "Hiring and pay for the crew"], handsOff: [["Scheduling installs", "bill"]], rhythm: "On demand.", tools: [...BOARD, "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "A high close rate and a crew that stays." },
   bill: { job: "Installs and materials for JD PM.", owns: ["Install schedule and materials orders"], handsOff: [["Customer messages", "stephanie"]], rhythm: "Installs and materials weekdays at 6:30 am Eastern; on demand.", tools: [...BOARD, "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "Jobs start on time with the right materials." },
-  stephanie: { job: "Call center and customer support for JD PM.", owns: ["Customer replies and follow-ups", "Drafting emails for Phil's approval"], handsOff: [["New leads", "karol"], ["Quotes", "jake"]], rhythm: "On demand.", tools: [...BOARD, ...GMAIL_READ, "gmail_create_draft"], good: "No customer waits more than a day for a reply." },
+  stephanie: { job: "Call center and customer support for JD PM. Business hours: Monday to Saturday, 8 am to 5 pm, by appointment.", owns: ["Customer replies and follow-ups, giving JD PM's hours (Mon-Sat 8-5, by appointment) and offering a time inside them", "Drafting emails for Phil's approval"], handsOff: [["New leads", "karol"], ["Quotes", "jake"]], rhythm: "On demand.", tools: [...BOARD, ...GMAIL_READ, "gmail_create_draft"], good: "No customer waits more than a day for a reply." },
   frog: { job: "CRM, tools and tech for JD PM.", owns: ["The CRM and every JD PM tool working"], rhythm: "On demand.", tools: [...BOARD, "web_status"], good: "The CRM is the single source of truth." },
   brian: { job: "CFO for JD PM only.", owns: ["JD PM invoices (sent from GoHighLevel), costs and margins"], handsOff: [["Phil's personal money", "munger"]], rhythm: "On demand only; no scheduled report.", tools: [...BOARD, ...GMAIL_READ], good: "Every job's margin is known and invoices go out on time." },
 
@@ -281,7 +281,7 @@ const QUESTIONS: Record<string, string[]> = {
   karol: ["Leads come from Facebook, referrals and other places; which others should Karol watch?", "May Karol send the first reply to a new lead himself? Suggested: draft it for your OK at first."],
   jake: ["Is there a price sheet or quote template, and how is the crew paid?"],
   bill: ["Suppliers you use, and which calendar holds installs?"],
-  stephanie: ["Business hours and the tone for customer replies?"],
+  stephanie: ["Tone for customer replies? Until Phil says, keep them friendly, short and professional, with a clear next step."],
   frog: ["Invoices go out from GoHighLevel. Is GoHighLevel JD PM's CRM too, and should HQ connect to it (GoHighLevel has an API)? Phil will give more context later."],
   brian: ["Invoices are in GoHighLevel; Phil will give more context later. JD PM's bank and target margin per job?"],
   stevon: [
