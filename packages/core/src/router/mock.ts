@@ -48,6 +48,15 @@ export function mockProvider(label = "mock"): Provider {
           const who = req.prompt.match(/lead\s+(?:for|from)?\s*([A-Z][\w']+(?: [A-Z][\w']+)?)/)?.[1] ?? "New lead";
           text += `\n\n\`\`\`record\n${JSON.stringify({ venture: "jdpm", kind: "lead", title: who, status: "new", fields: { source: "referral", value: 4200 } })}\n\`\`\`\n\`\`\`metric\n${JSON.stringify({ venture: "jdpm", key: "leads_week", value: 1 + Math.floor(Math.random() * 5) })}\n\`\`\``;
         }
+        if (/\bdeck\b/i.test(req.prompt) && /real PowerPoint deck/.test(req.system)) {
+          const deck = { title: "ProEdge weekly sales", subtitle: `(${label}) sample deck`, slides: [
+            { title: "This week at a glance", stats: [{ label: "Revenue", value: "$42,300", change: "+12% vs last week" }, { label: "Deals closed", value: "18", change: "+3" }, { label: "Close rate", value: "31%", change: "-2 pts" }], bullets: ["Revenue up on two large installs", "Close rate slipped on phone leads"], notes: "Open with the revenue number." },
+            { title: "Revenue by day", chart: { type: "bar", labels: ["Mon", "Tue", "Wed", "Thu", "Fri"], series: [{ name: "This week", values: [6200, 9100, 7800, 10400, 8800] }, { name: "Last week", values: [5900, 7200, 8100, 8300, 8200] }] }, bullets: ["Thursday was the best day"] },
+            { title: "By rep", table: { columns: ["Rep", "Closed", "Revenue"], rows: [["Ana", 6, "$14,900"], ["Ben", 5, "$12,100"], ["Cal", 7, "$15,300"]] } },
+            { title: "Focus this week", bullets: ["Follow up every phone lead within an hour", "Pair Ben with Cal on two calls"] },
+          ] };
+          text += `\n\nHeadlines: revenue up 12%, 18 deals, close rate down 2 points.\n\n\`\`\`slides\n${JSON.stringify(deck)}\n\`\`\``;
+        }
         if (/remember|note that/i.test(req.prompt)) {
           text += `\n\n\`\`\`remember\n${JSON.stringify({ scope: `venture:${req.agent.venture}`, key: "note-" + Date.now().toString(36), value: req.prompt.replace(/^.*?asks:\s*/s, "").slice(0, 120) })}\n\`\`\``;
         }

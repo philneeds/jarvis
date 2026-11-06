@@ -229,9 +229,9 @@ export const CHARTERS: Record<string, Charter> = {
   // ---- ProEdge -------------------------------------------------------------------------------------
   stevon: {
     job: "Everything ProEdge.",
-    owns: ["ProEdge's direction and results", "Directing the sales coach, scheduler, email AI and mindset coach"],
-    rhythm: "On demand (phase 2).",
-    tools: BOARD,
+    owns: ["ProEdge's direction and results", "The deck for Tuesday morning's sales meeting, from the sales data Phil uploads", "Directing the sales coach, scheduler, email AI and mindset coach"],
+    rhythm: "Builds the Tuesday meeting deck Mondays at 8 pm Eastern from the week's sales data; otherwise on demand.",
+    tools: [...BOARD, "sales_data", "deck_template"],
     good: "ProEdge grows with less of Phil's time.",
   },
   salescoach: { job: "Sales optimizer and trainer for ProEdge.", owns: ["Sales training and call reviews"], rhythm: "On demand (phase 2).", tools: BOARD, good: "Close rates go up." },
@@ -298,7 +298,10 @@ const QUESTIONS: Record<string, string[]> = {
   stephanie: ["Business hours and the tone for customer replies. Later: should she answer the phone (Einstein is looking at Grok's phone calls)?"],
   frog: ["Which CRM does JD PM use (same answer as Stella's)?"],
   brian: ["JD PM's bank and target margin per job?"],
-  stevon: ["What is ProEdge, who is on the team, and what are its key numbers? The sales coach, scheduler, email AI and mindset coach are set up from that answer."],
+  stevon: [
+    "What is ProEdge, who is on the team, and what are its key numbers? The sales coach, scheduler, email AI and mindset coach are set up from that answer.",
+    "Send the presentation template you use for Tuesday's meeting (upload the .pptx on Stevon's page), so the deck follows its order and look.",
+  ],
 };
 for (const [id, qs] of Object.entries(QUESTIONS)) if (CHARTERS[id]) CHARTERS[id].open = qs;
 

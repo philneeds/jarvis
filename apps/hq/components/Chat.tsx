@@ -161,6 +161,7 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
               <div className="flex flex-wrap gap-2 mb-1">{m.images.map((id) => <a key={id} href={imageUrl(id)} target="_blank" rel="noreferrer"><img src={imageUrl(id)} alt="Attached image" className="h-28 w-auto max-w-full object-cover border" style={{ borderColor: "var(--line)" }} /></a>)}</div>
             ) : null}
             {m.role === "phil" ? m.text : <Md text={m.text} />}
+            {m.files?.length ? <div className="flex flex-wrap gap-2 mt-1.5">{m.files.map((f) => <a key={f.id} href={`/api/files/${f.id}`} className="btn btn-sm" download>⬇ {f.name}</a>)}</div> : null}
             {m.role !== "system" && (
               <div className="msg-actions">
                 {m.id === lastPhil?.id && <button type="button" className="msg-act" disabled={busy} onClick={() => void send(m.text)} aria-label="Ask that again">Ask again</button>}

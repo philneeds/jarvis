@@ -1,4 +1,4 @@
-import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent, saveImage } from "@jarvis/core";
+import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent, saveImage, addDataFile, setTemplate, deckFile } from "@jarvis/core";
 
 /**
  * Two-way Telegram: Phil talks to Jarvis from his phone, and approvals arrive with Approve / Reject buttons.
@@ -28,15 +28,27 @@ export class TelegramBot {
     for (let i = 0; i < text.length; i += 3900) await this.api("sendMessage", { chat_id: this.opts.chatId, text: text.slice(i, i + 3900), ...(i + 3900 >= text.length ? extra : {}) }).catch(() => undefined);
   }
 
+  /** Send files (decks) as Telegram documents. */
+  async sendFiles(files: { id: string; name: string }[] = []) {
+    for (const f of files.slice(0, 3)) {
+      const d = await deckFile(this.jarvis.store, f.id);
+      if (!d) continue;
+      const form = new FormData();
+      form.append("chat_id", this.opts.chatId);
+      form.append("document", new Blob([new Uint8Array(d.data)], { type: d.mime }), d.name);
+      await this.f(`https://api.telegram.org/bot${this.opts.token}/sendDocument`, { method: "POST", body: form }).catch(() => undefined);
+    }
+  }
+
   start() {
     this.running = true;
     this.off = bus.onEvent((e: JarvisEvent) => {
       if (e.type === "chat.message" && e.message.channel === "telegram" && e.message.role !== "phil") {
         const o = e.message;
         const who = o.role === "jarvis" ? "Jarvis" : o.role === "system" ? "HQ" : getAgent(o.agentId ?? "")?.name ?? o.agentId ?? "Agent";
-        void this.send(`${who}: ${o.text}`);
+        void this.send(`${who}: ${o.text}`).then(() => this.sendFiles(o.files));
       }
-      if (e.type === "report") void this.send(`${e.title} · ${e.agentId === "jarvis" ? "Jarvis" : getAgent(e.agentId)?.name ?? e.agentId}\n\n${e.text}`);
+      if (e.type === "report") void this.send(`${e.title} · ${e.agentId === "jarvis" ? "Jarvis" : getAgent(e.agentId)?.name ?? e.agentId}\n\n${e.text}`).then(() => this.sendFiles(e.files));
       if (e.type === "approval.new") void this.announce(e.approval);
       if (e.type === "attention" && e.change === "raised") void this.send(`Needs you · ${getAgent(e.item.agentId)?.name ?? e.item.agentId}\n${e.item.title}\n\n${e.item.why.slice(0, 800)}${e.item.due ? `\nDue ${e.item.due}` : ""}`, { reply_markup: { inline_keyboard: [[{ text: "✔ Done", callback_data: `att:${e.item.id}:done` }, { text: "💤 Snooze 3d", callback_data: `att:${e.item.id}:snoozed` }]] } });
     });
@@ -44,16 +56,22 @@ export class TelegramBot {
   }
   stop() { this.running = false; this.off?.(); }
 
-  /** Fetch a photo Phil sent and keep it as an upload. */
-  private async downloadImage(fileId: string): Promise<string> {
+  /** Fetch a file Phil sent (Telegram bots can download up to 20 MB). */
+  private async download(fileId: string): Promise<{ path: string; data: Buffer }> {
     const r = (await (await this.api("getFile", { file_id: fileId })).json()) as { ok: boolean; result?: { file_path?: string; file_size?: number } };
     const fp = r.result?.file_path;
-    if (!r.ok || !fp) throw new Error("Telegram didn't give me the file");
+    if (!r.ok || !fp) throw new Error("Telegram didn't give me the file (bots can only download files up to 20 MB)");
     const res = await this.f(`https://api.telegram.org/file/bot${this.opts.token}/${fp}`);
     if (!res.ok) throw new Error(`download failed (${res.status})`);
+    return { path: fp, data: Buffer.from(await res.arrayBuffer()) };
+  }
+
+  /** Fetch a photo Phil sent and keep it as an upload. */
+  private async downloadImage(fileId: string): Promise<string> {
+    const { path: fp, data } = await this.download(fileId);
     const ext = fp.split(".").pop()?.toLowerCase();
     const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : ext === "gif" ? "image/gif" : "image/jpeg";
-    return saveImage(Buffer.from(await res.arrayBuffer()), mime);
+    return saveImage(data, mime);
   }
 
   private async announce(a: Approval) {
@@ -100,8 +118,24 @@ export class TelegramBot {
     const msg = u.message;
     if (!msg) return;
     const imageFile = msg.photo?.length ? msg.photo[msg.photo.length - 1]!.file_id : msg.document?.mime_type?.startsWith("image/") ? msg.document.file_id : undefined;
-    if (!msg.text && !imageFile) return;
+    const doc = !imageFile && msg.document ? msg.document : undefined;
+    if (!msg.text && !imageFile && !doc) return;
     if (String(msg.chat.id) !== this.opts.chatId) { await this.api("sendMessage", { chat_id: msg.chat.id, text: "This is Phil's Jarvis. Not for you." }).catch(() => undefined); return; }
+    if (doc) {
+      // A spreadsheet is this week's ProEdge sales data for Stevon's deck; a PowerPoint is the deck template.
+      const name = doc.file_name ?? "upload";
+      try {
+        const { data } = await this.download(doc.file_id);
+        if (/\.pptx$/i.test(name)) {
+          const t = await setTemplate(this.jarvis.store, "proedge", name, data);
+          await this.send(`Got the template "${name}" (${t.outline.length} slides). Stevon's decks will follow its order, colours and fonts.`);
+        } else {
+          const f = await addDataFile(this.jarvis.store, "proedge", { name, mime: doc.mime_type, data, note: msg.caption });
+          await this.send(`Saved ${name}${f.rows ? ` (${f.rows} rows)` : ""} as this week's ProEdge sales data. Stevon builds Tuesday's deck from it Monday at 8 pm; say "@stevon make the deck now" to get it sooner.`);
+        }
+      } catch (e) { await this.send(`I couldn't take ${name}: ${(e as Error).message}`); }
+      return;
+    }
     if (imageFile) {
       // A photo (with or without a caption) goes to Jarvis with the picture attached.
       try {
@@ -119,6 +153,6 @@ export class TelegramBot {
 
 export interface Update {
   update_id: number;
-  message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string; caption?: string; photo?: { file_id: string; width: number; height: number; file_size?: number }[]; document?: { file_id: string; mime_type?: string; file_size?: number } };
+  message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string; caption?: string; photo?: { file_id: string; width: number; height: number; file_size?: number }[]; document?: { file_id: string; mime_type?: string; file_size?: number; file_name?: string } };
   callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number } } };
 }

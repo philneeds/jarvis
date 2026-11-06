@@ -167,7 +167,7 @@ export const AGENTS: AgentDef[] = [
   { id: "brian", name: "Brian", short: "CFO, JD PM", layer: 2, parent: "stella", venture: "jdpm", model: "claude-sonnet", phase: 1, priority: "always", desc: "CFO for JD PM only: expenses, invoices, cash flow and everything to do with the dollar sign." },
 
   // ---- ProEdge -----------------------------------------------------------
-  { id: "stevon", name: "Stevon", short: "ProEdge", layer: 1, parent: "jarvis", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Responsible for everything to do with ProEdge, with four sub-agents that optimize the business." },
+  { id: "stevon", name: "Stevon", short: "ProEdge", layer: 1, parent: "jarvis", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", desc: "Responsible for everything to do with ProEdge, with four sub-agents that optimize the business." },
   { id: "salescoach", name: "Sales Coach", short: "Sales optimizer & trainer", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Sales optimizer and sales improvement trainer." },
   { id: "scheduler", name: "Scheduler", short: "Team schedule optimizer", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Schedule optimizer and maker for managing the team." },
   { id: "emailai", name: "Email AI", short: "Email automation & info", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Email automation and information." },

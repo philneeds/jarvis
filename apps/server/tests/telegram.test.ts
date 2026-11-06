@@ -91,3 +91,29 @@ test("a photo on Telegram reaches Jarvis with the picture attached", async () =>
   assert.ok(sent.some((s) => s.method === "sendMessage" && /^Joi: \(saw 1 image\)/.test(String(s.body.text))), "Joi answers having seen it");
   bot.stop();
 });
+
+test("a spreadsheet sent on Telegram becomes ProEdge sales data; the deck comes back as a document", async () => {
+  const store = memoryStore();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
+  const sent: { method: string; body: unknown }[] = [];
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url);
+    if (u.includes("/file/bot")) return new Response("rep,closed\nAna,5\nBen,3\n");
+    const method = u.split("/").pop()!;
+    sent.push({ method, body: init?.body instanceof FormData ? init.body : JSON.parse(String(init?.body)) });
+    const result = method === "getFile" ? { file_path: "documents/file_1.csv" } : [];
+    return new Response(JSON.stringify({ ok: true, result }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const bot = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f, pollTimeout: 0 });
+  bot.start();
+  await bot.handle({ update_id: 1, message: { message_id: 1, chat: { id: 42 }, document: { file_id: "abc", file_name: "week.csv", mime_type: "text/csv" } } });
+  const { listDataFiles, SCHEDULES, runRoutine } = await import("@jarvis/core");
+  assert.equal((await listDataFiles(store, "proedge"))[0]?.rows, 3);
+  assert.ok(sent.some((s) => s.method === "sendMessage" && /Saved week\.csv \(3 rows\)/.test(String((s.body as { text: string }).text))));
+  await runRoutine(jarvis, { ...SCHEDULES.find((s) => s.id === "stevon-weekly")!, task: "Build the deck for Tuesday." }, { direct: true });
+  await new Promise((r) => setTimeout(r, 200));
+  const doc = sent.find((s) => s.method === "sendDocument");
+  assert.ok(doc, "the deck is sent as a document");
+  assert.match(((doc!.body as FormData).get("document") as File).name, /\.pptx$/);
+  bot.stop();
+});

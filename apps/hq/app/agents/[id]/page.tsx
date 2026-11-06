@@ -6,6 +6,7 @@ import { Shell } from "@/components/Shell";
 import { useLive } from "@/lib/live";
 import { api, fmtTime } from "@/lib/api";
 import { MayneLimits } from "@/components/MayneLimits";
+import { DeckCard } from "@/components/DeckCard";
 import type { AgentConfig, ApprovalKind, Charter, ModelKey, ScheduleView } from "@jarvis/core";
 
 const FIELDS: { key: keyof AgentConfig["persona"]; label: string; hint: string }[] = [
@@ -103,6 +104,8 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
             </div>
           ))}
         </section>
+
+        {routines.filter((s) => s.deck).map((s) => <DeckCard key={s.id} venture={agent.venture} routineId={s.id} agentName={agent.name} when={s.whenText.replace(/^Mondays/, "Monday nights").replace(/^(\w)/, (c) => c.toLowerCase())} />)}
 
         <section className="card flex flex-col gap-3" aria-label="Persona">
           <div className="flex items-center gap-3">

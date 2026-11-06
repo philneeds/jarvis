@@ -52,6 +52,7 @@ export function Transcript({ limit = 8, pendingText }: { limit?: number; pending
               <span className="text-[10px] tracking-[0.14em] uppercase mr-2" style={{ color: tone(m) }}>{who(m)}</span>
               {m.images?.length ? <span style={{ color: "var(--muted)" }}>[{m.images.length} image{m.images.length > 1 ? "s" : ""}] </span> : null}
               {shown}
+              {m.files?.map((f) => <a key={f.id} href={`/api/files/${f.id}`} download className="ml-2" style={{ color: "var(--accent)" }} onClick={(e) => e.stopPropagation()}>⬇ {f.name}</a>)}
               {long && full && <span className="ml-2 text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }}>less ▴</span>}
             </p>
           );

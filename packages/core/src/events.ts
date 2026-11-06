@@ -15,7 +15,7 @@ export type JarvisEvent =
   | { type: "venture"; venture: string }
   | { type: "brief"; text: string; at: string }
   /** A scheduled report meant for Phil's phone as well as HQ (the brief, Monica's day plan). */
-  | { type: "report"; agentId: string; title: string; text: string; at: string }
+  | { type: "report"; agentId: string; title: string; text: string; at: string; files?: { id: string; name: string }[] }
   | { type: "attention"; item: AttentionItem; change: "raised" | "done" | "snoozed" | "reopened" | "edited" }
   | { type: "goals"; goals: Goal[] };
 
@@ -63,6 +63,8 @@ export interface ChatMessage {
   kind?: "ack" | "progress" | "final";
   /** Images Phil attached (upload ids, served at /api/uploads/<id>). */
   images?: string[];
+  /** Files handed to Phil (decks), served at /api/files/<id>. */
+  files?: { id: string; name: string }[];
 }
 
 export type ApprovalKind = "send" | "post" | "money" | "strategy" | "config" | "record" | "other";

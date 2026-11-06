@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -403,6 +403,62 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const all = await scheduleView(jarvis.store);
     return c.json({ schedules: agent ? all.filter((s) => s.agentId === agent) : all, phase: await jarvis.store.settings.get("phase", 0) });
   });
+  // Run one routine now (for example Stevon's deck before the Monday timer). It runs in the background; the answer
+  // lands in chat and, for routines that report, on Telegram.
+  api.post("/schedules/:id/run", async (c) => {
+    const s = (await withCustom(jarvis.store)).find((x) => x.id === c.req.param("id"));
+    if (!s || s.task === "brief" || s.task === "condense") return c.json({ error: "no such routine" }, 404);
+    void runRoutine(jarvis, s, { direct: true }).catch((e) => jarvis.router.log(s.agentId, "error", `Routine ${s.id} failed: ${(e as Error).message}`));
+    return c.json({ started: true });
+  });
+
+  // Data Phil uploads for a venture (ProEdge's weekly sales), its presentation template, and the decks made from them.
+  const venture = (v: string) => (VENTURE_IDS as readonly string[]).includes(v) && v !== "root" ? v : undefined;
+  const rawUpload = async (c: { req: { arrayBuffer(): Promise<ArrayBuffer>; header(n: string): string | undefined; query(n: string): string | undefined } }) => {
+    const data = Buffer.from(await c.req.arrayBuffer());
+    if (data.length > MAX_FILE_BYTES) throw new Error("file is over 20 MB");
+    return { data, name: (c.req.query("name") ?? "upload").replace(/[\\/\r\n]+/g, " ").slice(0, 160), mime: c.req.header("content-type") ?? "", note: c.req.query("note") ?? undefined };
+  };
+  api.get("/data/:venture", async (c) => {
+    const v = venture(c.req.param("venture"));
+    if (!v) return c.json({ error: "no such venture" }, 404);
+    const files = (await listDataFiles(jarvis.store, v)).map(({ text: _t, ...f }) => f);
+    const tpl = await getTemplate(jarvis.store, v);
+    return c.json({ files, decks: (await listDecks(jarvis.store, v)).slice(0, 20), template: tpl ? { name: tpl.name, at: tpl.at, slides: tpl.outline.length, fileId: tpl.fileId } : null });
+  });
+  api.post("/data/:venture/files", async (c) => {
+    const v = venture(c.req.param("venture"));
+    if (!v) return c.json({ error: "no such venture" }, 404);
+    try { const f = await addDataFile(jarvis.store, v, await rawUpload(c)); const { text: _t, ...rest } = f; return c.json({ file: rest }); }
+    catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
+  api.delete("/data/:venture/files/:id", async (c) => {
+    const v = venture(c.req.param("venture"));
+    if (!v) return c.json({ error: "no such venture" }, 404);
+    return (await removeDataFile(jarvis.store, v, c.req.param("id"))) ? c.json({ ok: true }) : c.json({ error: "not found" }, 404);
+  });
+  api.post("/data/:venture/template", async (c) => {
+    const v = venture(c.req.param("venture"));
+    if (!v) return c.json({ error: "no such venture" }, 404);
+    try { const u = await rawUpload(c); const t = await setTemplate(jarvis.store, v, u.name, u.data); return c.json({ template: { name: t.name, at: t.at, slides: t.outline.length, fileId: t.fileId } }); }
+    catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
+  api.delete("/data/:venture/template", async (c) => {
+    const v = venture(c.req.param("venture"));
+    if (!v) return c.json({ error: "no such venture" }, 404);
+    await clearTemplate(jarvis.store, v);
+    return c.json({ ok: true });
+  });
+  // Download a deck (by deck id) or a stored file (by file id).
+  api.get("/files/:id", async (c) => {
+    const id = c.req.param("id");
+    const d = await deckFile(jarvis.store, id);
+    const f = d ?? (await loadFile(id).then((x) => (x ? { name: id, ...x } : undefined)));
+    if (!f) return c.json({ error: "not found" }, 404);
+    const ascii = f.name.replace(/[^\x20-\x7e]+/g, "_").replace(/"/g, "'");
+    return new Response(new Uint8Array(f.data), { headers: { "content-type": f.mime, "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(f.name)}`, "cache-control": "private, max-age=3600" } });
+  });
+
   api.get("/apple-health", async (c) => c.json({ ...(await healthStatus(jarvis.store)), summary: await healthSummary(jarvis.store, 3) }));
   // Make the key (or a new one, which stops the old one working) and show how to set up the app.
   api.post("/apple-health/key", async (c) => {

@@ -15,6 +15,8 @@ import { TOOLS } from "../tools/index.js";
 import { imageInputs } from "../uploads.js";
 import { HEALTH_TOOLS } from "../health.js";
 import { XREAD_TOOLS, expandXLinks, xPostIds } from "../xread.js";
+import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
+import { DECK_HINT, makeDeck, normalizeDeck, type Deck } from "../decks.js";
 
 export interface JarvisOptions {
   store: Store;
@@ -166,7 +168,7 @@ export class Jarvis {
   }
 
   /** Every tool an agent could be given: built-in plus connectors. */
-  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...this.connectorTools.values()]; }
+  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...DATA_TOOLS, ...this.connectorTools.values()]; }
 
   // ---- Chat -------------------------------------------------------------
 
@@ -294,15 +296,31 @@ export class Jarvis {
     const memory = [...(await this.store.memory.list("phil")), ...(await this.store.memory.list(`venture:${agent.venture}`)), ...(await this.store.memory.list(`agent:${agent.id}`))];
     const cfg = await getAgentConfig(this.store, agent.id);
     const tools = this.allTools().filter((t) => cfg.tools.includes(t.name));
-    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "");
+    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "");
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
-    // Images Phil attached to this conversation go with every run in it, including hand-offs.
-    const images = await imageInputs(this.convo.getStore()?.images);
+    // Images Phil attached to this conversation go with every run in it, including hand-offs; agents that read uploaded
+    // data also see this week's screenshots.
+    const dataImages = cfg.tools.includes("sales_data") ? await recentDataImages(this.store, agent.venture) : [];
+    const images = await imageInputs([...(this.convo.getStore()?.images ?? []), ...dataImages]);
     const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id), images });
     if (r.blocked) return r;
     if (opts.noBlocks) return r; // the caller reads the reply itself (approval Q&A)
-    const { text, approvals, remember, metrics, records, handoffs, attention } = extractBlocks(r.text);
+    const { text: said, approvals, remember, metrics, records, handoffs, attention, slides } = extractBlocks(r.text);
+    let text = said;
     await this.absorb(agent, approvals, remember, r.runId, metrics, records);
+    // Decks: build the .pptx and hand it over in chat (and on Telegram when that's where the conversation is).
+    const decks: Deck[] = [];
+    for (const raw of slides.slice(0, 2)) {
+      const spec = normalizeDeck(raw);
+      if (!spec) { text += "\n\n(A deck was written but couldn't be read, so no file was made.)"; continue; }
+      try {
+        const d = await makeDeck(this.store, spec, { agentId: agent.id, venture: agent.venture });
+        decks.push(d);
+        await this.router.log(agent.id, "system", `${agent.name} made a deck: ${d.title} (${d.slides} slides)`, r.runId);
+        await this.say({ role: "agent", agentId: agent.id, text: `Deck ready: ${d.title} · ${d.slides} slides`, runId: r.runId, files: [{ id: d.id, name: d.name }], kind: "progress" });
+      } catch (e) { text += `\n\n(The deck couldn't be built: ${(e as Error).message})`; }
+    }
+    if (decks.length) text = `${text}\n\n[Deck ready: ${decks.map((d) => d.title).join("; ")}]`.trim();
     for (const a of attention) await this.raiseAttention({ ...a, agentId: agent.id, source: { runId: r.runId } });
     // Hand-offs: something that isn't this agent's job goes to the agent whose job it is; the receiver may hand back once.
     if (handoffs.length && (opts.depth ?? 0) < 2) {
@@ -314,7 +332,7 @@ export class Jarvis {
         await this.say({ role: "agent", agentId: to.id, text: hr.blocked ? `(${to.name} did not run: ${hr.blocked})` : hr.text, runId: hr.runId, via: [agent.id], kind: "progress" });
       }
     }
-    return { ...r, text };
+    return { ...r, text, decks };
   }
 
   private async absorb(agent: AgentDef, approvals: ReturnType<typeof extractBlocks>["approvals"], remember: ReturnType<typeof extractBlocks>["remember"], runId?: string, metrics: ReturnType<typeof extractBlocks>["metrics"] = [], records: ReturnType<typeof extractBlocks>["records"] = []) {

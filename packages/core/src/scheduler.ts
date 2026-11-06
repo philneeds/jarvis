@@ -3,6 +3,8 @@ import { bus } from "./events.js";
 import type { Jarvis } from "./jarvis/orchestrator.js";
 import { AGENTS, getAgent } from "./registry/index.js";
 import { getAgentConfig } from "./config.js";
+import { listDecks } from "./decks.js";
+import { listDataFiles } from "./salesdata.js";
 
 export interface Schedule {
   id: string;
@@ -15,6 +17,8 @@ export interface Schedule {
   phase: number;
   /** Also send the result to Phil's phone (Telegram) as a report. */
   push?: boolean;
+  /** Makes a deck from uploaded data: skipped when one was already made by hand from the same data. */
+  deck?: boolean;
 }
 
 /** Scouts and briefs on their timers. Nothing runs before its phase. */
@@ -40,6 +44,7 @@ export const SCHEDULES: Schedule[] = [
   { id: "exxon-open", agentId: "exxon", task: "Pre-market: energy holdings and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
   { id: "altman-open", agentId: "altman", task: "Pre-market: AI-era holdings and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
   { id: "armstrong-open", agentId: "armstrong", task: "Pre-market: crypto-niche stocks and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
+  { id: "stevon-weekly", agentId: "stevon", task: "Build the deck for Tuesday morning's ProEdge sales meeting. Call deck_template, then sales_data (days 8 for this week; days 15 as well when there's an earlier week to compare). If nothing was uploaded this week, make no deck: reply in two lines asking Phil to upload this week's sales data (on your page in HQ, or send the spreadsheet to Jarvis on Telegram) and press Make the deck now. Otherwise write the deck as a slides block, following the template's order when there is one: the cover (ProEdge weekly sales, with the week's dates), the headline numbers against last week, results by rep or service where the data has it, what's working and what isn't, and the focus for this week. Speaker notes on every slide for what Phil should say. Use only numbers from the data. Outside the block, give the three headlines in a few lines.", when: "weekly:mon@20:00", phase: 1, push: true, deck: true },
   { id: "munger-weekly", agentId: "munger", task: "Weekly money summary for Phil, short enough to read on his phone. Call kubera_networth: net worth now, the change this week and this month, the biggest movers and why if you can tell, and any account that stopped syncing. Then one thing to do this week. Read only; never suggest moving money without an approval.", when: "weekly:mon@07:30", phase: 2, push: true },
 ];
 
@@ -90,7 +95,7 @@ export function nextRun(when: string, now: Date, last?: number): Date | undefine
   return undefined;
 }
 
-export interface ScheduleView { id: string; agentId: string; when: string; whenText: string; summary: string; task: string; phase: number; active: boolean; push: boolean; custom: boolean; lastRun?: string; nextRun?: string }
+export interface ScheduleView { id: string; agentId: string; when: string; whenText: string; summary: string; task: string; phase: number; active: boolean; push: boolean; custom: boolean; deck: boolean; lastRun?: string; nextRun?: string }
 
 /** One plain line per built-in routine for the Schedules screen; the full instructions sit behind "details". */
 const SUMMARY: Record<string, string> = {
@@ -108,6 +113,7 @@ const SUMMARY: Record<string, string> = {
   "pentoshi-scan": "Funding rates, perps positioning and prop-firm news.",
   "buffett-weekly": "Holdings review after the close, up to three suggested changes; updates the watchlist.",
   "david-weekly": "Goals check: where each goal stands and next week's steps.",
+  "stevon-weekly": "Tuesday meeting deck from this week's sales data (a PowerPoint).",
   "munger-weekly": "Money summary: net worth, the week's change and the biggest movers.",
   "nick-weekly": "Philneeds analytics: what worked and next week's plan for Boo and ncrypt.",
   "poseidon-weekly": "Range.cool metrics, runway and the decisions that need you.",
@@ -129,10 +135,33 @@ export async function scheduleView(store: Store, now = new Date(), schedules: Sc
       id: s.id, agentId: s.agentId, when: s.when, whenText: describeWhen(s.when),
       summary: SUMMARY[s.id] ?? (s.task.length > 140 ? `${s.task.slice(0, 140).replace(/\s+\S*$/, "")}…` : s.task),
       task: s.task === "brief" ? "The morning brief: each lead's report, what's waiting on Phil, today's calendar." : s.task === "condense" ? "Tidy memory: merge duplicates and drop what's stale (when memory passes 20 items)." : s.task,
-      phase: s.phase, active, push: !!s.push || s.task === "brief", custom: s.id.startsWith("custom:"),
+      phase: s.phase, active, push: !!s.push || s.task === "brief", custom: s.id.startsWith("custom:"), deck: !!s.deck,
       lastRun: last[s.id] ? new Date(last[s.id]!).toISOString() : undefined, nextRun: n?.toISOString(),
     };
   });
+}
+
+const REPORT_TITLE: Record<string, string> = { "monica-day": "Your day", "david-weekly": "David: goals this week", "einstein-weekly": "Einstein's weekly review", "adam-monthly": "Adam: this month's goals", "stevon-weekly": "Stevon: Tuesday meeting deck" };
+
+/** One agent routine, now: the agent runs its task, the answer lands in chat, and a push routine goes to Telegram (with any deck). */
+export async function runRoutine(jarvis: Jarvis, s: Schedule, opts: { direct?: boolean } = {}) {
+  const agent = getAgent(s.agentId);
+  if (!agent || s.task === "brief" || s.task === "condense") return undefined;
+  // A deck routine on its timer skips when Phil already had a deck made by hand since the last data upload.
+  if (s.deck && !opts.direct) {
+    const lastDeck = (await listDecks(jarvis.store, agent.venture)).find((d) => d.agentId === agent.id);
+    const lastData = (await listDataFiles(jarvis.store, agent.venture))[0];
+    if (lastDeck && Date.now() - Date.parse(lastDeck.at) < 24 * 3_600_000 && (!lastData || Date.parse(lastData.at) <= Date.parse(lastDeck.at))) {
+      await jarvis.router.log(agent.id, "schedule", `Scheduled: ${s.id} · skipped, the deck was already made at ${lastDeck.at.slice(11, 16)} UTC from the latest data`);
+      return undefined;
+    }
+  }
+  const r = await jarvis.runAgent(agent, s.task, { direct: opts.direct ?? false, from: "Scheduler" });
+  if (r.blocked) return r;
+  const files = "decks" in r ? r.decks?.map((d) => ({ id: d.id, name: d.name })) : undefined;
+  await jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId, files: files?.length ? files : undefined });
+  if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: REPORT_TITLE[s.id] ?? `${agent.name} report`, text: r.text, at: new Date().toISOString(), files });
+  return r;
 }
 
 export class Scheduler {
@@ -200,12 +229,8 @@ export class Scheduler {
             await done(text.split("\n")[0]!.slice(0, 120));
           }
         } else {
-          const r = await this.jarvis.runAgent(agent, s.task, { direct: false, from: "Scheduler" });
-          if (!r.blocked) {
-            await this.jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId });
-            if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: s.id === "monica-day" ? "Your day" : s.id === "david-weekly" ? "David: goals this week" : s.id === "einstein-weekly" ? "Einstein's weekly review" : s.id === "adam-monthly" ? "Adam: this month's goals" : `${agent.name} report`, text: r.text, at: new Date().toISOString() });
-            await done(`${agent.name} reported back`, r.runId);
-          }
+          const r = await runRoutine(this.jarvis, s);
+          if (r && !r.blocked) await done(`${agent.name} reported back`, r.runId);
         }
       } catch (e) {
         await this.jarvis.router.log(agent.id, "error", `Schedule ${s.id} failed: ${(e as Error).message}`);
