@@ -164,7 +164,7 @@ export const CHARTERS: Record<string, Charter> = {
   // ---- On-chain trading ---------------------------------------------------------------
   mantis: {
     job: "On-chain crypto expert: runs the scouts and turns their findings into a clear market view.",
-    owns: ["The daily market read", "Directing Pentoshi, Tux, Cat, Ansem, Claw and Lucas", "Passing real opportunities to Mayne as ideas, never as trades"],
+    owns: ["The daily market read", "Learning which chains and sectors matter to Phil by asking him as he goes, and keeping the answers in memory (scope agent:mantis)", "Directing Pentoshi, Tux, Cat, Ansem, Claw and Lucas", "Passing real opportunities to Mayne as ideas, never as trades"],
     handsOff: [["Executing anything", "mayne"], ["Posting about it", "nick"]],
     rhythm: "Market read at 6:55 Eastern; on demand.",
     tools: [...BOARD, "trading_limits", "x_read_post"],
@@ -262,10 +262,7 @@ const QUESTIONS: Record<string, string[]> = {
 
 
 
-  mantis: [
-    "Mantis's daily market read at 6:55 am only runs from phase 1. Turn it on now? Suggested: yes.",
-    "Which chains and sectors matter most to you?",
-  ],
+
   pentoshi: ["Which perps venues and prop firms do you use? Hourly scans cost Grok usage: keep hourly, or every 4 hours? Suggested: every 4 hours until the pool's usage is known."],
   tux: ["Which pools and protocols do you LP in now?"],
   cat: ["Which prediction markets (Polymarket, Kalshi), and which topics?"],
