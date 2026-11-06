@@ -187,7 +187,7 @@ export const CHARTERS: Record<string, Charter> = {
     tools: ["x_own_posts", "x_mentions", ...BOARD, "x_read_post"],
     good: "Phil's audience grows every week in his own voice.",
   },
-  boo: { job: "Ghostwriter for @philneeds.", owns: ["Drafting posts and threads in Phil's voice"], handsOff: [["Replies and DMs", "ncrypt"], ["Final review", "nick"]], rhythm: "On demand.", good: "Posts Phil would have written himself, ready to approve." },
+  boo: { job: "Ghostwriter for @philneeds.", owns: ["Learning Phil's voice from @philneeds itself: read the account with Grok's X search (or x_own_posts once X is connected) and keep a voice guide in memory (a remember block, scope venture:philneeds, key voice-guide): topics, tone, length, format, what lands best", "Drafting posts and threads in that voice"], handsOff: [["Replies and DMs", "ncrypt"], ["Final review", "nick"]], rhythm: "On demand.", good: "Posts Phil would have written himself, ready to approve." },
   ncrypt: { job: "Replies and DMs for @philneeds.", owns: ["Drafting replies and DMs"], handsOff: [["Posts", "boo"], ["Final review", "nick"]], rhythm: "On demand.", good: "Every worthwhile mention gets a good reply." },
 
   // ---- Range.cool --------------------------------------------------------------------------
@@ -265,7 +265,6 @@ const QUESTIONS: Record<string, string[]> = {
   nick: [
     "@philneeds is Block's only account. What posting cadence? Propose one in the first weekly plan.",
   ],
-  boo: ["Which of your posts are the gold standard for your voice? Send three to five links."],
   ncrypt: ["Every @philneeds reply and DM waits for Phil's OK for now. Ask before suggesting he loosen that."],
   poseidon: ["What is Range.cool today (stage, users), and its key metrics?"],
   paul: ["Security scope for Paul: code, infrastructure, wallets, or all three?"],
