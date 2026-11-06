@@ -272,7 +272,7 @@ const QUESTIONS: Record<string, string[]> = {
   intern: ["Which community channels does Intern work in (Discord, Telegram groups, X)?"],
   justin: ["Range.cool runway today, and any raise planned?"],
   jason: ["Which repos are Range.cool's, and should Jason get read access on GitHub?"],
-  jason2: ["Cursor has no API HQ can call. Should Jason 2.0 work through you (you run Cursor, paste results back), or wait until Cursor offers one?"],
+  jason2: ["Phil's Grok bot can connect to Cursor. When phase 3 starts, ask Phil how it's set up (which bot, where it runs, how it reaches Cursor) so HQ can route Jason 2.0's work through it. Cursor's own command-line agent is the fallback."],
   devteam: ["Are there human developers, or is the dev team AI only?"],
   stella: [
       "Which mailbox is the business one?",
