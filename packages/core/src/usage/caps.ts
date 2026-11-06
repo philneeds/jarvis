@@ -52,7 +52,7 @@ export async function usageSummary(store: Store, now = new Date()): Promise<Usag
       perAgent: [...per.values()].sort((a, b) => b.runs - a.runs),
     };
   };
-  plans.push(build("claude", "Claude (Phil's plan)", "weekly, est.", (m) => m.reduce((a, r) => a + r.inputTokens + r.outputTokens, 0) / CAPS.claudeWeeklyTokens));
+  plans.push(build("claude", "Claude Max", "weekly, est.", (m) => m.reduce((a, r) => a + r.inputTokens + r.outputTokens, 0) / CAPS.claudeWeeklyTokens));
   plans.push(build("supergrok", "SuperGrok", "weekly pool, est.", (m) => m.length / CAPS.grokWeeklyRuns));
   plans.push(build("chatgpt", "ChatGPT (Health team)", "manual", () => 0));
   plans.push(build("cursor", "Cursor (Jason 2.0)", "manual", () => 0));
