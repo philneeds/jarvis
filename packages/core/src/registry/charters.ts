@@ -211,7 +211,7 @@ export const CHARTERS: Record<string, Charter> = {
   // ---- JD PM Renovations ----------------------------------------------------------------------
   stella: {
     job: "CEO of JD PM Renovations: runs the business so leads turn into paid jobs.",
-    owns: ["The JD PM board: leads, jobs, revenue and pipeline", "Directing Karol, Jake, Bill, Stephanie, Frog and Brian", "Anything waiting on a customer, flagged daily"],
+    owns: ["The JD PM board: leads, jobs, revenue and pipeline", "Leads from Facebook, referrals and the other places Phil names, each logged on the board", "Directing Karol, Jake, Bill, Stephanie, Frog and Brian", "Anything waiting on a customer, flagged daily"],
     handsOff: [["Phil's personal calendar", "monica"], ["Phil's personal money", "munger"]],
     rhythm: "Leads and jobs review at 6:50 Eastern; on demand.",
     tools: [...BOARD, ...GMAIL_READ, "calendar_list_events", "activity_recent"],
@@ -219,7 +219,7 @@ export const CHARTERS: Record<string, Charter> = {
     maxAutoDollars: 0,
     good: "Every lead gets a reply within a day and jobs stay on schedule.",
   },
-  karol: { job: "Lead generation for JD PM.", owns: ["Finding and logging new leads", "First reply to every new lead"], handsOff: [["Quotes and closing", "jake"]], rhythm: "New-lead check daily at 7:15 am Eastern; on demand.", tools: [...BOARD, ...GMAIL_READ], autoApprove: ["record"], maxAutoDollars: 0, good: "More qualified leads every week." },
+  karol: { job: "Lead generation for JD PM.", owns: ["Finding and logging new leads: Facebook (messages and notification emails), referrals, and any other source Phil names", "First reply to every new lead"], handsOff: [["Quotes and closing", "jake"]], rhythm: "New-lead check daily at 7:15 am Eastern; on demand.", tools: [...BOARD, ...GMAIL_READ], autoApprove: ["record"], maxAutoDollars: 0, good: "More qualified leads every week." },
   jake: { job: "Sales, hiring and comp for JD PM.", owns: ["Quotes and closing", "Hiring and pay for the crew"], handsOff: [["Scheduling installs", "bill"]], rhythm: "On demand.", tools: [...BOARD, "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "A high close rate and a crew that stays." },
   bill: { job: "Installs and materials for JD PM.", owns: ["Install schedule and materials orders"], handsOff: [["Customer messages", "stephanie"]], rhythm: "Installs and materials weekdays at 6:30 am Eastern; on demand.", tools: [...BOARD, "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "Jobs start on time with the right materials." },
   stephanie: { job: "Call center and customer support for JD PM.", owns: ["Customer replies and follow-ups", "Drafting emails for Phil's approval"], handsOff: [["New leads", "karol"], ["Quotes", "jake"]], rhythm: "On demand.", tools: [...BOARD, ...GMAIL_READ, "gmail_create_draft"], good: "No customer waits more than a day for a reply." },
@@ -283,13 +283,12 @@ const QUESTIONS: Record<string, string[]> = {
   jason2: ["Cursor has no API HQ can call. Should Jason 2.0 work through you (you run Cursor, paste results back), or wait until Cursor offers one?"],
   devteam: ["Are there human developers, or is the dev team AI only?"],
   stella: [
-    "Where do JD PM leads come in today?",
-    "What does JD PM invoice with?",
+      "What does JD PM invoice with?",
     "Which mailbox is the business one?",
     "Who is on the crew?",
     "What does a good month look like in numbers?",
   ],
-  karol: ["Lead sources to watch (website form, Angi, Facebook, referrals), and may Karol send the first reply to a new lead himself? Suggested: draft it for your OK at first."],
+  karol: ["Leads come from Facebook, referrals and other places; which others should Karol watch?", "May Karol send the first reply to a new lead himself? Suggested: draft it for your OK at first."],
   jake: ["Is there a price sheet or quote template, and how is the crew paid?"],
   bill: ["Suppliers you use, and which calendar holds installs?"],
   stephanie: ["Business hours and the tone for customer replies?"],
