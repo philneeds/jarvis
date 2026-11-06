@@ -14,6 +14,7 @@ export * from "./uploads.js";
 export * from "./health.js";
 export * from "./xread.js";
 export * from "./decks.js";
+export * from "./hyperliquid.js";
 export { addDataFile, listDataFiles, removeDataFile, dataText, xlsxToText, DATA_TOOLS, type DataFile } from "./salesdata.js";
 export * from "./tools/index.js";
 export type { Executor } from "./jarvis/orchestrator.js";
