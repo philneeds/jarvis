@@ -12,7 +12,7 @@ const TALL = 86;
 /**
  * One tower per lead. Height is the size of the lead's team (it doesn't jump around during the day); the small
  * number on top is runs today by that team. Colour is the team's state; lit when anyone on it needs Phil or is in
- * error. Hover or focus shows the name below; on a touchscreen the first tap shows it, the second opens.
+ * error. Names sit under the towers in their venture's colour; hover or focus shows the full line below.
  */
 export function Towers() {
   const { state } = useLive();
@@ -61,13 +61,14 @@ export function Towers() {
               <span className="tower-runs" aria-hidden="true">{runs || ""}</span>
               <i className={`tower ${lit ? "lit" : ""}`} style={{ height: Math.round(18 + ((crew.length + 1) / biggest) * (TALL - 18)) }} />
             </span>
+            <span className="tower-name" style={{ color: state.ventures[l.venture]?.color }}>{l.name.split(" ").pop()?.toUpperCase()}</span>
           </Link>
         ))}
       </div>
       <p className="m-0 text-[12px] leading-snug min-h-[2.5em]" aria-live="polite" style={{ color: cur ? "var(--ink-bright)" : "var(--muted)" }}>
         {cur
           ? <><span style={{ color: "var(--ink-strong)", fontWeight: 600 }}>{cur.l.name}</span> · {plural(cur.runs, "run")} today · team of {cur.crew.length + 1} · <span style={{ color: cur.st === "idle" ? "var(--muted)" : ST[cur.st] }}>{WORD[cur.st] ?? cur.st}</span>{touch.current ? " · tap again to open" : ""}</>
-          : `Height is team size; the number is runs today${total ? ` (${plural(total, "run")} in all)` : ""}. Hover or tap a tower for its name.`}
+          : `Height is team size; the number is runs today${total ? ` (${plural(total, "run")} in all)` : ""}. Hover or tap a tower for more.`}
       </p>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] tracking-[0.08em] uppercase">
         <span style={{ color: "var(--st-needs)" }}>■ needs you</span><span style={{ color: "var(--st-working)" }}>■ working</span><span style={{ color: "#8FA3C8" }}>■ idle</span><span style={{ color: "var(--st-error)" }}>■ error</span>
