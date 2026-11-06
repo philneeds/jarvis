@@ -103,6 +103,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tabs { display: flex; gap: 2px; }
 .tabs a, .tabs button { flex: 1; height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink); background: rgba(5, 12, 32, 0.6); position: relative; }
 .tabs a[aria-current="page"] { border-color: var(--accent); color: var(--ink-bright); background: rgba(60, 130, 255, 0.25); }
+.tabs [role="menu"] a { flex: none; height: 40px; justify-content: flex-start; padding: 0 16px; border: 0; border-bottom: 1px solid var(--line); }
 /* Search boxes bring their own Clear button. */
 input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }
 /* Small quiet buttons on a chat message (copy, ask again). */

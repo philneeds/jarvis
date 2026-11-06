@@ -76,7 +76,7 @@ export function Shell({ children, bare, fill }: { children: React.ReactNode; bar
   return (
     <div className={`grid-bg ${fill ? "h-dvh overflow-hidden" : "min-h-dvh"} flex flex-col relative`} style={{ zIndex: 1 }}>
       {!bare && (
-        <header className="flex items-center gap-3 px-4 py-2.5 border-b" style={{ borderColor: "var(--line)", background: "rgba(5,12,32,0.7)", backdropFilter: "blur(6px)" }}>
+        <header className="relative flex items-center gap-3 px-4 py-2.5 border-b" style={{ borderColor: "var(--line)", background: "rgba(5,12,32,0.7)", backdropFilter: "blur(6px)", zIndex: 40 }}>
           <Link href="/" className="flex items-center gap-2 min-w-0">
             <span className="inline-block w-3.5 h-3.5 rounded-full border-2 flex-none" style={{ borderColor: "var(--accent)", boxShadow: "0 0 8px var(--accent)" }} />
             <span className="display glow font-bold text-[15px] tracking-[0.22em] whitespace-nowrap" style={{ color: "var(--ink-strong)" }}>J.A.R.V.I.S.</span>
