@@ -8,7 +8,7 @@ import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 
 interface Passkey { id: string; label: string; createdAt: string }
-interface Connectors { google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
+interface Connectors { google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; robinhood?: { configured: boolean; connected: boolean; connectedAt?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
 
 export default function SettingsPage() {
   const { state, refresh } = useLive();
@@ -29,6 +29,9 @@ export default function SettingsPage() {
   const [kbMsg, setKbMsg] = useState<string>();
   const [ghlMsg, setGhlMsg] = useState<string>();
   const testGhl = async () => { setGhlMsg("Checking…"); try { const r = await post<{ summary: string }>("/api/connectors/ghl/test", {}); setGhlMsg(r.summary); await load(); } catch (e) { setGhlMsg((e as Error).message); } };
+  const [rhMsg, setRhMsg] = useState<string>();
+  const connectRobinhood = async () => { try { const r = await api<{ url: string }>("/api/connectors/robinhood/auth"); location.href = r.url; } catch (e) { setRhMsg((e as Error).message); } };
+  const disconnectRobinhood = async () => { if (!confirm("Disconnect Robinhood? Buffett and Munger lose the holdings until you reconnect.")) return; await post("/api/connectors/robinhood/disconnect", {}); setRhMsg(undefined); await load(); };
   const [dcMsg, setDcMsg] = useState<string>();
   const [ghMsg, setGhMsg] = useState<string>();
   const testSimple = async (path: string, set: (s: string) => void) => { set("Checking…"); try { const r = await post<{ summary: string }>(path, {}); set(r.summary); await load(); } catch (e) { set((e as Error).message); } };
@@ -133,6 +136,16 @@ export default function SettingsPage() {
                 : conn?.spotify?.configured ? <button className="btn btn-sm btn-primary ml-auto" onClick={connectSpotify}>Connect Spotify</button> : <span className="ml-auto" style={{ color: "var(--muted)" }}>set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET</span>}
             </div>
             {spMsg && <p className="m-0 pl-6" style={{ color: spMsg.endsWith("connected.") ? "var(--green)" : "var(--red)" }}>{spMsg}</p>}
+          </div>
+          <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Robinhood">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`dot ${conn?.robinhood?.connected ? (conn.robinhood.lastFetch && !conn.robinhood.lastFetch.ok ? "dot-error" : "dot-working") : "dot-idle"}`} />
+              <span><b>Robinhood</b> · Buffett and Munger read your positions, balances and orders through Robinhood's official agent access. Any order waits for your approval and can only run in your Robinhood Agentic account.</span>
+              {conn?.robinhood?.connected
+                ? <><span style={{ color: "var(--dim)" }}>connected{conn.robinhood.connectedAt ? ` · ${fmtTime(conn.robinhood.connectedAt)}` : ""}</span><button className="btn btn-sm" onClick={() => void testSimple("/api/connectors/robinhood/test", setRhMsg)}>Check now</button><button className="btn btn-sm btn-danger ml-auto" onClick={disconnectRobinhood}>Disconnect</button></>
+                : <button className="btn btn-sm btn-primary ml-auto" onClick={connectRobinhood}>Connect Robinhood</button>}
+            </div>
+            {(rhMsg || (conn?.robinhood?.lastFetch && !conn.robinhood.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: rhMsg && !/refused|error|expired|isn't connected|failed/i.test(rhMsg) ? "var(--ink)" : "var(--red)" }}>{rhMsg ?? conn?.robinhood?.lastFetch?.error}</p>}
           </div>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Kubera">
             <div className="flex flex-wrap items-center gap-3">
