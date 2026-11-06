@@ -15,11 +15,14 @@ export interface Schedule {
   when: string;
   /** Phase in which this schedule becomes active. */
   phase: number;
-  /** Also send the result to Phil's phone (Telegram) as a report. */
+  /** A deliverable for Phil himself (the daily brief, Stevon's deck): sent to him on Telegram and in chat. */
   push?: boolean;
   /** Makes a deck from uploaded data: skipped when one was already made by hand from the same data. */
   deck?: boolean;
-  /** Reports to this agent instead of Phil: the answer goes to them to absorb, and Phil only hears if he must act. */
+  /**
+   * Who the answer goes to. Default: the agent's own lead (its parent), and leads report to Jarvis, who folds it into the
+   * daily brief. Phil hears directly only from Jarvis, from Needs you, and from the few routines with push (deliverables).
+   */
   to?: string;
 }
 
@@ -27,16 +30,16 @@ export interface Schedule {
 export const SCHEDULES: Schedule[] = [
   { id: "daily-brief", agentId: "jarvis", task: "brief", when: process.env.BRIEF_AT ? `daily@${process.env.BRIEF_AT}` : "daily@07:00", phase: 0 },
   { id: "oscar-condense", agentId: "oscar", task: "condense", when: "daily@03:30", phase: 0 },
-  { id: "einstein-weekly", agentId: "einstein", task: "Weekly review for Phil, short enough to read on his phone. Call web_health for the last 7 days. Then: the three changes you'd make this week and why (errors to fix, slow or idle agents, usage, approvals Phil keeps rejecting); where each of Phil's ideas on your list stands; anything to cut, for Oscar. Put each change you want made as an approval (kind config) so Phil can say yes or no.", when: "weekly:sun@19:00", phase: 0, push: true },
-  { id: "adam-monthly", agentId: "adam", task: "Monthly goals session with Phil. Call goals_list for where his current goals stand, and look at each venture's board. Then: one line on how last month went against each goal; then propose this month's goals (one primary, up to two more), each specific and measurable with a deadline, and why each matters now. Put the proposal in one approval with payload {\"action\":\"goals.set\",\"add\":[{\"name\":\"...\",\"deadline\":\"YYYY-MM-DD\",\"primary\":true}],\"retire\":[\"<id of a goal that is done or dropped>\"]}. Phil will question or change it on the card before approving.", when: "monthly:1@08:00", phase: 0, push: true },
-  { id: "buffett-weekly", agentId: "buffett", task: "Weekly holdings review after Friday's close, short enough to read on a phone. Read the holdings (kubera_items; everything is at Robinhood). Say how each did this week, what the scouts flagged, and at most three suggested changes, each as an approval with the reason. Then keep the scouts informed: a remember block with scope venture:money and key holdings listing the tickers by sector. And add any stock Phil talked about this week (chat_recent) to the watchlist as a record with status watch.", when: "weekly:fri@16:45", phase: 2, push: true },
-  { id: "david-weekly", agentId: "david", task: "Weekly goals check: call goals_list. Any goal without benchmarks gets them first (goals.benchmarks: 3 to 6 concrete, checkable, weighted). For each goal: which benchmarks were met this week and the evidence (tick them with a goals.update approval block, done: [benchmark ids]), where it stands, the next benchmark to hit, and the one or two steps that get there next week. Flag any goal that's slipping against its deadline. Only move the bar on evidence.", when: "weekly:sun@18:00", phase: 0, push: true },
+  { id: "einstein-weekly", agentId: "einstein", task: "Weekly review for Phil, short enough to read on his phone. Call web_health for the last 7 days. Then: the three changes you'd make this week and why (errors to fix, slow or idle agents, usage, approvals Phil keeps rejecting); where each of Phil's ideas on your list stands; anything to cut, for Oscar. Put each change you want made as an approval (kind config) so Phil can say yes or no.", when: "weekly:sun@19:00", phase: 0 },
+  { id: "adam-monthly", agentId: "adam", task: "Monthly goals session with Phil. Call goals_list for where his current goals stand, and look at each venture's board. Then: one line on how last month went against each goal; then propose this month's goals (one primary, up to two more), each specific and measurable with a deadline, and why each matters now. Put the proposal in one approval with payload {\"action\":\"goals.set\",\"add\":[{\"name\":\"...\",\"deadline\":\"YYYY-MM-DD\",\"primary\":true}],\"retire\":[\"<id of a goal that is done or dropped>\"]}. Phil will question or change it on the card before approving.", when: "monthly:1@08:00", phase: 0 },
+  { id: "buffett-weekly", agentId: "buffett", task: "Weekly holdings review after Friday's close, short enough to read on a phone. Read the holdings (kubera_items; everything is at Robinhood). Say how each did this week, what the scouts flagged, and at most three suggested changes, each as an approval with the reason. Then keep the scouts informed: a remember block with scope venture:money and key holdings listing the tickers by sector. And add any stock Phil talked about this week (chat_recent) to the watchlist as a record with status watch.", when: "weekly:fri@16:45", phase: 2 },
+  { id: "david-weekly", agentId: "david", task: "Weekly goals check: call goals_list. Any goal without benchmarks gets them first (goals.benchmarks: 3 to 6 concrete, checkable, weighted). For each goal: which benchmarks were met this week and the evidence (tick them with a goals.update approval block, done: [benchmark ids]), where it stands, the next benchmark to hit, and the one or two steps that get there next week. Flag any goal that's slipping against its deadline. Only move the bar on evidence.", when: "weekly:sun@18:00", phase: 0 },
   { id: "karol-leads", agentId: "karol", task: "Morning lead check for JD PM: new leads since yesterday, each logged on the board, and a first reply drafted for every one that hasn't had one.", when: "daily@07:15", phase: 1 },
   { id: "bill-installs", agentId: "bill", task: "Today's installs and materials for JD PM: what's scheduled, what's missing, what needs ordering. Flag anything that would delay a job.", when: "weekdays@06:30", phase: 1 },
-  { id: "nick-weekly", agentId: "nick", task: "Philneeds weekly analytics: what posts worked and why (x_own_posts, x_mentions), what to post more of, and next week's plan for Boo and ncrypt.", when: "weekly:mon@09:00", phase: 2, push: true },
-  { id: "poseidon-weekly", agentId: "poseidon", task: "Range.cool weekly metrics: the key numbers, what moved and why, runway, and the decisions that need Phil.", when: "weekly:mon@08:15", phase: 3, push: true },
+  { id: "nick-weekly", agentId: "nick", task: "Philneeds weekly analytics: what posts worked and why (x_own_posts, x_mentions), what to post more of, and next week's plan for Boo and ncrypt.", when: "weekly:mon@09:00", phase: 2 },
+  { id: "poseidon-weekly", agentId: "poseidon", task: "Range.cool weekly metrics: the key numbers, what moved and why, runway, and the decisions that need Phil.", when: "weekly:mon@08:15", phase: 3 },
   { id: "oscar-inbox", agentId: "oscar", task: "Weekly inbox cleanup with Monica. For each of Phil's personal Google accounts: use gmail_senders on 'in:inbox older_than:14d' and 'category:promotions older_than:30d', then propose ONE archive plan per account as an approval (gmail.archive by query, with the match count in the body). Never trash. Keep anything from a real person or about money, travel, health or a job.", when: "weekly:sun@04:00", phase: 0 },
-  { id: "monica-day", agentId: "monica", task: "Lay out Phil's day for him to read on his phone: what's on the calendar across his accounts, conflicts, what's unscheduled, what to protect. Propose any calendar change as an approval; change nothing yourself.", when: "daily@06:45", phase: 0, push: true },
+  { id: "monica-day", agentId: "monica", task: "Lay out Phil's day for him to read on his phone: what's on the calendar across his accounts, conflicts, what's unscheduled, what to protect. Propose any calendar change as an approval; change nothing yourself.", when: "daily@06:45", phase: 0 },
   { id: "stella-leads", agentId: "stella", task: "Review new leads and open jobs for JD PM; flag anything waiting on a customer reply.", when: "daily@06:50", phase: 1 },
   { id: "mantis-markets", agentId: "mantis", task: "Market read for the day. Call hyperliquid_perps for real numbers: BTC, ETH and SOL, the biggest moves, where funding and open interest are stretched. Say what moved overnight and what the team should watch today. Use only the numbers you were given; if you don't have data on something, say so instead of guessing.", when: "daily@06:55", phase: 1 },
   { id: "ansem-scan", agentId: "ansem", task: "Scan: new memecoins and low caps worth a look, with the reason each is on the list. This goes to Mantis, not Phil.", when: "every:240", phase: 2, to: "mantis" },
@@ -48,7 +51,7 @@ export const SCHEDULES: Schedule[] = [
   { id: "armstrong-open", agentId: "armstrong", task: "Pre-market: crypto-niche stocks and catalysts today, suggested changes. This goes to Munger, not Phil.", when: "weekdays@08:30", phase: 2, to: "munger" },
   { id: "stevon-weekly", agentId: "stevon", task: "Build the deck for Tuesday morning's ProEdge sales meeting. Call deck_template, then sales_data (days 8 for this week; days 15 as well when there's an earlier week to compare). If nothing was uploaded this week, make no deck: reply in two lines asking Phil to upload this week's sales data (on your page in HQ, or send the spreadsheet to Jarvis on Telegram) and press Make the deck now. Otherwise write the deck as a slides block, following the template's order when there is one: the cover (ProEdge weekly sales, with the week's dates), the headline numbers against last week, results by rep or service where the data has it, what's working and what isn't, and the focus for this week. Speaker notes on every slide for what Phil should say. Use only numbers from the data. Outside the block, give the three headlines in a few lines.", when: "weekly:mon@20:00", phase: 1, push: true, deck: true },
   { id: "boo-voice", agentId: "boo", task: "Review the @philneeds X account (Grok's X search, or x_own_posts if X is connected): Phil's recent posts and replies, what got the most engagement, and how he writes. Update your voice guide: the topics he posts about, tone, length, format, phrases he uses and avoids, and what lands best, with two or three example posts. Save it in a remember block (scope venture:philneeds, key voice-guide), replacing the old one. Reply with a short summary of what changed.", when: "monthly:1@10:00", phase: 2 },
-  { id: "munger-weekly", agentId: "munger", task: "Weekly money summary for Phil, short enough to read on his phone. Call kubera_networth: net worth now, the change this week and this month, the biggest movers and why if you can tell, and any account that stopped syncing. Then analyse: call kubera_history (90 days) and memory_search for your earlier patterns (scope venture:money), and say what pattern you see (a recurring drain, spending creep, an account drifting, what moves net worth most), whether last week's patterns held, and one or two improvements, each with the reason and the expected effect. Save any pattern worth tracking in a remember block (scope venture:money, key money-pattern-<short name>). Read only; never suggest moving money without an approval.", when: "weekly:mon@07:30", phase: 2, push: true },
+  { id: "munger-weekly", agentId: "munger", task: "Weekly money summary for Phil, short enough to read on his phone. Call kubera_networth: net worth now, the change this week and this month, the biggest movers and why if you can tell, and any account that stopped syncing. Then analyse: call kubera_history (90 days) and memory_search for your earlier patterns (scope venture:money), and say what pattern you see (a recurring drain, spending creep, an account drifting, what moves net worth most), whether last week's patterns held, and one or two improvements, each with the reason and the expected effect. Save any pattern worth tracking in a remember block (scope venture:money, key money-pattern-<short name>). Read only; never suggest moving money without an approval.", when: "weekly:mon@07:30", phase: 2 },
 ];
 
 const LAST_RUN_KEY = "schedule.lastRun";
@@ -139,15 +142,22 @@ export async function scheduleView(store: Store, now = new Date(), schedules: Sc
       id: s.id, agentId: s.agentId, when: s.when, whenText: describeWhen(s.when),
       summary: SUMMARY[s.id] ?? (s.task.length > 140 ? `${s.task.slice(0, 140).replace(/\s+\S*$/, "")}…` : s.task),
       task: s.task === "brief" ? "The morning brief: each lead's report, what's waiting on Phil, today's calendar." : s.task === "condense" ? "Tidy memory: merge duplicates and drop what's stale (when memory passes 20 items)." : s.task,
-      phase: s.phase, active, push: !!s.push || s.task === "brief", custom: s.id.startsWith("custom:"), deck: !!s.deck, to: s.to,
+      phase: s.phase, active, push: !!s.push || s.task === "brief", custom: s.id.startsWith("custom:"), deck: !!s.deck, to: s.push || s.task === "brief" || s.task === "condense" ? undefined : s.to ?? getAgent(s.agentId)?.parent ?? "jarvis",
       lastRun: last[s.id] ? new Date(last[s.id]!).toISOString() : undefined, nextRun: n?.toISOString(),
     };
   });
 }
 
-const REPORT_TITLE: Record<string, string> = { "monica-day": "Your day", "david-weekly": "David: goals this week", "einstein-weekly": "Einstein's weekly review", "adam-monthly": "Adam: this month's goals", "stevon-weekly": "Stevon: Tuesday meeting deck" };
 
-/** One agent routine, now: the agent runs its task, the answer lands in chat, and a push routine goes to Telegram (with any deck). */
+const REPORT_TITLE: Record<string, string> = { "stevon-weekly": "Stevon: Tuesday meeting deck" };
+export const REPORT_INBOX_KEY = "reports.inbox";
+export interface QueuedReport { id: string; agentId: string; scheduleId: string; at: string; text: string }
+
+/**
+ * One agent routine, now. The answer goes up the chain: to the agent's lead (who absorbs it: memory, board, hand-offs,
+ * and an attention or approval only if Phil must act), or, for a lead, to Jarvis's inbox for the next daily brief.
+ * Only a deliverable (push) goes to Phil himself, in chat and on Telegram. The Activity log keeps every report.
+ */
 export async function runRoutine(jarvis: Jarvis, s: Schedule, opts: { direct?: boolean } = {}) {
   const agent = getAgent(s.agentId);
   if (!agent || s.task === "brief" || s.task === "condense") return undefined;
@@ -162,18 +172,24 @@ export async function runRoutine(jarvis: Jarvis, s: Schedule, opts: { direct?: b
   }
   const r = await jarvis.runAgent(agent, s.task, { direct: opts.direct ?? false, from: "Scheduler" });
   if (r.blocked) return r;
-  // A routine that reports to another agent: they absorb it (memory, board, hand-offs) and raise an attention or
-  // approval only if Phil must act. Phil's chat stays quiet; the full Activity log keeps both sides.
-  const to = s.to ? getAgent(s.to) : undefined;
+  if (s.push) {
+    const files = "decks" in r ? r.decks?.map((d) => ({ id: d.id, name: d.name })) : undefined;
+    await jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId, files: files?.length ? files : undefined });
+    bus.emitEvent({ type: "report", agentId: agent.id, title: REPORT_TITLE[s.id] ?? `${agent.name} report`, text: r.text, at: new Date().toISOString(), files });
+    return r;
+  }
+  const toId = s.to ?? agent.parent ?? "jarvis";
+  const to = toId === "jarvis" ? undefined : getAgent(toId);
   if (to) {
     await jarvis.router.log(agent.id, "run", `${agent.name} → ${to.name} (${s.id}): ${r.text.slice(0, 200)}`, r.runId, { report: r.text });
     const rr = await jarvis.runAgent(to, `${agent.name} reports to you (${s.id}):\n\n${r.text}\n\nThis is for you, not Phil: keep what matters in memory (scope venture:${to.venture}) and on the board, hand anything actionable to whoever owns it, and raise an attention or approval block only if Phil himself must act. Reply in one or two lines on what you did with it.`, { direct: false, from: agent.name, parentRunId: r.runId });
     if (!rr.blocked) await jarvis.router.log(to.id, "run", `${to.name} took ${agent.name}'s report: ${rr.text.slice(0, 200)}`, rr.runId);
     return r;
   }
-  const files = "decks" in r ? r.decks?.map((d) => ({ id: d.id, name: d.name })) : undefined;
-  await jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId, files: files?.length ? files : undefined });
-  if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: REPORT_TITLE[s.id] ?? `${agent.name} report`, text: r.text, at: new Date().toISOString(), files });
+  // A lead's report: into Jarvis's inbox, folded into the next daily brief.
+  await jarvis.router.log(agent.id, "run", `${agent.name} → Jarvis (${s.id}): ${r.text.slice(0, 200)}`, r.runId, { report: r.text });
+  const inbox = await jarvis.store.settings.get<QueuedReport[]>(REPORT_INBOX_KEY, []);
+  await jarvis.store.settings.set(REPORT_INBOX_KEY, [...inbox, { id: r.runId, agentId: agent.id, scheduleId: s.id, at: new Date().toISOString(), text: r.text.slice(0, 4000) }].slice(-40));
   return r;
 }
 

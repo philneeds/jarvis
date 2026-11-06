@@ -620,7 +620,7 @@ test("Schedules screen: plain-English timing, next run, phase, and last runs tha
   // A fresh scheduler (a restart) reads the last runs back, so it doesn't run the same window twice.
   const s2 = new Scheduler(jarvis, [{ id: "x", agentId: "stella", task: "status", when: "daily@06:50", phase: 1 }]);
   await s2.tick(new Date(2026, 10, 6, 6, 55));
-  const runs = (await store.activity.list({ limit: 200 })).filter((e) => e.kind === "run" && e.agentId === "stella");
+  const runs = (await store.activity.list({ limit: 200 })).filter((e) => e.kind === "run" && e.agentId === "stella" && !/→ Jarvis/.test(e.summary));
   assert.equal(runs.length, 1, "only the first tick ran Stella");
 });
 
@@ -645,4 +645,25 @@ test("a routine that reports to another agent stays out of Phil's chat: the reci
   assert.ok(log.some((e) => e.agentId === "munger" && /took House's report/.test(e.summary)));
   for (const id of ["marcus-open", "exxon-open", "altman-open", "armstrong-open"]) assert.equal(SCHEDULES.find((s) => s.id === id)!.to, "munger");
   for (const id of ["ansem-scan", "pentoshi-scan"]) assert.equal(SCHEDULES.find((s) => s.id === id)!.to, "mantis");
+});
+
+test("leads report to Jarvis's inbox, not Phil; the next daily brief folds them in and clears the inbox", async () => {
+  const { jarvis, store } = make();
+  const { runRoutine, SCHEDULES, REPORT_INBOX_KEY, scheduleView } = await import("../src/index.js");
+  const einstein = SCHEDULES.find((s) => s.id === "einstein-weekly")!;
+  assert.ok(!einstein.push, "weekly reviews no longer push to Phil");
+  const before = (await store.chat.list(50)).length;
+  await runRoutine(jarvis, { ...einstein, task: "Weekly review: say hello." }, { direct: true });
+  assert.equal((await store.chat.list(50)).length, before, "nothing said to Phil");
+  const inbox = await store.settings.get<{ agentId: string }[]>(REPORT_INBOX_KEY, []);
+  assert.equal(inbox.length, 1); assert.equal(inbox[0]!.agentId, "einstein");
+  const brief = await jarvis.brief();
+  assert.ok(brief.length > 20);
+  assert.equal((await store.settings.get<unknown[]>(REPORT_INBOX_KEY, [])).length, 0, "the brief consumed the inbox");
+  // Karol's morning check goes to Stella; Stella's to Jarvis; only Stevon's deck and the brief reach Phil directly.
+  const view = await scheduleView(store);
+  const to = (id: string) => view.find((s) => s.id === id)!.to;
+  assert.equal(to("karol-leads"), "stella"); assert.equal(to("stella-leads"), "jarvis"); assert.equal(to("house-open"), "munger");
+  assert.equal(to("stevon-weekly"), undefined); assert.equal(to("daily-brief"), undefined);
+  assert.deepEqual(SCHEDULES.filter((s) => s.push).map((s) => s.id), ["stevon-weekly"]);
 });

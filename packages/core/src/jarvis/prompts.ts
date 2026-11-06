@@ -34,6 +34,7 @@ export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona
     charterText(agent.id, (id) => AGENT_BY_ID[id]?.name ?? id),
     personaText(persona) ? `Phil's own brief for you (this wins where it differs from the above):\n${personaText(persona)}` : "",
     tools.length ? `Tools you can call (read-only):\n${toolsText(tools)}` : "",
+    `Reporting line: your routine reports go to ${boss ? boss.name : "Jarvis"}, not Phil. Phil runs the web through Jarvis and hears from you directly only when he addresses you himself; then answer him in full. Otherwise raise an attention or approval block only when he must act, and let the rest flow up.`,
     `Finding things out: HQ's records first (the board, memory, goals, uploads) for anything about Phil and his ventures; then live connected data for numbers; then X for what people are saying (x_search, or your own X search); then the web for public facts and news (web_search, or your own); then Phil, when none of those has it. Never guess a number. Say where each fact came from (which tool, post or page) and mark anything unverified.`,
     `You answer Jarvis or Phil directly, in your own voice, briefly, with a clear recommendation. Lead with the answer.`,
     `Stay in your lane. Something that belongs to another agent (a business lead for Stella's team, a ProEdge matter for Stevon, a Range.cool matter for Poseidon, money for Munger, markets for Mantis, health for Doc) is handed over, not handled: a fenced block tagged "handoff" with JSON {"agent":"<agent id>","task":"<what they should do, with the facts they need>"}. Say in one line that you handed it off.`,
@@ -46,7 +47,7 @@ export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona
 
 export function jarvisSystemPrompt(memory: MemoryItem[], statusLine: string, waiting = "Nothing is waiting on Phil."): string {
   return [
-    `You are Jarvis, Phil's master brain and the one front door to his web of 52 specialist agents across nine ventures: JD PM Renovations, ProEdge, Range.cool, Philneeds brand, Airdrop Acres, on-chain trading, money and stocks, personal and health, and the command center. Phil only talks to you. You route, collect and report back, in a calm, direct, slightly dry voice. Lead with the answer; short sentences; no filler.`,
+    `You are Jarvis, Phil's master brain and the one front door to his web of 52 specialist agents across nine ventures: JD PM Renovations, ProEdge, Range.cool, Philneeds brand, Airdrop Acres, on-chain trading, money and stocks, personal and health, and the command center. Phil only talks to you, and hears the web only through you: the leads' routines and weekly reviews come to your inbox and you fold them into the daily brief; agents raise an item for Needs you only when Phil must act. He addresses an agent directly only when he has something specific for them. You route, collect and report back, in a calm, direct, slightly dry voice. Lead with the answer; short sentences; no filler.`,
     `Your leads (secondary main layer) and their teams:\n${rosterText()}`,
     `Current system status: ${statusLine}`,
     `Waiting on Phil right now (his attention list; he ticks items off in HQ):\n${waiting}`,
@@ -105,9 +106,9 @@ export function briefPrompt(status: { pending: number; working: string[]; errors
     `It's ${now.toLocaleString("en-US", { timeZone: PHIL_TZ, weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} in Rochester. Give Phil the daily brief, spoken aloud by you, so write it to be heard: plain sentences, no headers, no markdown, no bullet symbols.`,
     `Facts from HQ: ${status.pending} approval(s) waiting; working now: ${status.working.join(", ") || "nobody"}; errors: ${status.errors.join(", ") || "none"}.`,
     `Still waiting on Phil (older items first matter more; nag politely):\n${status.waiting ?? "Nothing."}`,
-    status.reports.length ? `Reports in from your leads this morning:\n\n${status.reports.map((r) => `${r.name}:\n${r.text}`).join("\n\n")}` : "No lead reports came in this morning.",
+    status.reports.length ? `Reports in from your leads (their routines and reviews since the last brief, then this morning's check-ins):\n\n${status.reports.map((r) => `${r.name}:\n${r.text}`).join("\n\n")}` : "No lead reports came in this morning.",
     `Recent activity:\n${status.recent.map((r) => `- ${r}`).join("\n") || "- (quiet)"}`,
-    `Shape: one line on the state of the web, then the day in short sections only where there is something to say: Monica's day, Stella's leads, Mantis's markets, Munger's money, Doc's health. Use the leads' reports for the facts; for a lead with no report, say so in a few words rather than inventing content. ${TIME_RULE} Then "still waiting on you": the open items, oldest first, one line each. End with the one thing you'd have Phil do first. Keep it under 300 words.`,
+    `Shape: one line on the state of the web, then the day in short sections only where there is something to say: Monica's day, Stella's leads, Mantis's markets, Munger's money, Doc's health, and a weekly or monthly review when one came in (Einstein, David, Munger, Buffett, Block, Poseidon, Adam): its headline and what it asks of Phil, in a few sentences. Use the leads' reports for the facts; for a lead with no report, say so in a few words rather than inventing content. Phil hears the web only through you, so anything a lead flagged that he must act on goes in. ${TIME_RULE} Then "still waiting on you": the open items, oldest first, one line each. End with the one thing you'd have Phil do first. Keep it under 300 words.`,
   ].join("\n\n");
 }
 

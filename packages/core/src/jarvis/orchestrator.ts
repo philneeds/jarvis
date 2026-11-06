@@ -798,12 +798,16 @@ export class Jarvis {
       ]);
       return r.blocked ? null : { name: a.name, text: r.text.slice(0, 1500) };
     }))).filter((r): r is { name: string; text: string } => !!r);
+    // Reports the leads sent up since the last brief (their routines and weekly reviews), then cleared.
+    const inbox = await this.store.settings.get<{ id: string; agentId: string; scheduleId: string; at: string; text: string }[]>("reports.inbox", []);
+    const queued = inbox.map((q) => ({ name: `${getAgent(q.agentId)?.name ?? q.agentId} (${q.scheduleId}, ${q.at.slice(0, 16).replace("T", " ")})`, text: q.text.slice(0, 2500) }));
+    if (inbox.length) await this.store.settings.set("reports.inbox", []);
     const prompt = briefPrompt({
       pending: (await this.store.approvals.list("pending")).length,
       working: states.filter((x) => x.status === "working").map((x) => x.id),
       errors: states.filter((x) => x.status === "error").map((x) => x.id),
       recent,
-      reports,
+      reports: [...queued, ...reports],
       waiting: await this.attentionText(12),
     }, now);
     const memory = await this.store.memory.list();
