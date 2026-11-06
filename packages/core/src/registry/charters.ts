@@ -176,7 +176,7 @@ export const CHARTERS: Record<string, Charter> = {
   ansem: { job: "Memecoins and low caps.", owns: ["New memecoins worth a look and why", "Feeding the Memecoin Analyzer"], handsOff: [["Research threads", "lucas"], ["Trades", "mayne"]], rhythm: "Scan every 4 hours (phase 2).", good: "Few, good candidates with reasons, not a firehose." },
   claw: { job: "New tech and AI in crypto, all of it.", owns: ["Every area of new tech and AI in crypto: AI agents onchain, AI tokens, DePIN, restaking, new chains, wallets and payments, and whatever comes next", "Separating the real new thing from the narrative, with why"], handsOff: [["Research threads", "lucas"], ["Tools worth adding to Jarvis itself", "einstein"], ["Trades", "mayne"]], rhythm: "On demand.", tools: ["memory_search", "x_read_post"], good: "Phil hears about the real new thing first, and why it matters." },
   lucas: { job: "X research: turns the scouts' findings into research for Block's team. He doesn't write posts or threads himself.", owns: ["Researching on X for every crypto scout", "Feeding Block, Boo and ncrypt the research, sources and angles they write from"], handsOff: [["Writing posts and threads", "boo"], ["Posting", "nick"]], rhythm: "On demand.", good: "Well-sourced research the brand can post." },
-  jeff: { job: "CEO of Airdrop Acres.", owns: ["Airdrop Acres strategy and growth", "Acres' X account: posts, replies and its numbers, each post or reply waiting for Phil's approval"], rhythm: "On demand (phase 3).", tools: ["x_own_posts", "x_mentions", "x_read_post", ...BOARD], good: "Acres grows with a clear plan." },
+  jeff: { job: "CEO of Airdrop Acres.", owns: ["Airdrop Acres strategy and growth", "Acres' X account (@airdropacres; confirm the exact handle with Phil the first time): posts, replies and its numbers, each post or reply waiting for Phil's approval"], rhythm: "On demand (phase 3).", tools: ["x_own_posts", "x_mentions", "x_read_post", ...BOARD], good: "Acres grows with a clear plan." },
 
   // ---- Philneeds brand ---------------------------------------------------------------------
   nick: {
@@ -261,7 +261,7 @@ const QUESTIONS: Record<string, string[]> = {
 
   pentoshi: ["Prop firms: Vest Markets and Backed. What are each one's rules (max drawdown, daily loss limit, payouts)? Ask when it matters.", "Want Phil's own Hyperliquid positions watched? That needs only his public wallet address, read-only; ask before using it."],
 
-  jeff: ["What is Airdrop Acres today, and what does Jeff need to run it?", "Acres' X handle and posting cadence?"],
+  jeff: ["What is Airdrop Acres today, and what does Jeff need to run it? (On Phil's to-do list.)", "Acres' posting cadence?"],
   nick: [
     "@philneeds is Block's only account. What posting cadence? Propose one in the first weekly plan.",
   ],
