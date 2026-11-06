@@ -563,3 +563,11 @@ test("Watchlist: a scout's own idea waits for Phil and lands on the Money board;
   assert.ok(CHARTERS.buffett!.tools!.includes("chat_recent"));
   assert.ok(CHARTERS.house!.owns.some((o) => /watchlist\.add/.test(o)));
 });
+
+test("Ask as they go: an agent's open questions are in its instructions, to ask one at a time when it matters", async () => {
+  const { agentSystemPrompt, getAgent, SCHEDULES } = await import("../src/index.js");
+  const sys = agentSystemPrompt(getAgent("stella")!, []);
+  assert.match(sys, /Still to learn from Phil \(ask as you go: one short question when it actually matters/);
+  assert.match(sys, /Which mailbox is the business one\?/);
+  assert.equal(SCHEDULES.find((s) => s.id === "ansem-scan")!.when, "every:240");
+});

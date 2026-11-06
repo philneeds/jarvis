@@ -170,10 +170,10 @@ export const CHARTERS: Record<string, Charter> = {
     tools: [...BOARD, "trading_limits", "x_read_post"],
     good: "Phil hears about the move worth making, and why, before it's obvious.",
   },
-  pentoshi: { job: "Perps, prop firms and funding rates.", owns: ["Funding, positioning and prop-firm news"], handsOff: [["Research threads to share", "lucas"], ["Trades", "mayne"]], rhythm: "Hourly scan (phase 2).", good: "Funding and positioning shifts flagged early." },
+  pentoshi: { job: "Perps, prop firms and funding rates.", owns: ["Funding, positioning and prop-firm news"], handsOff: [["Research threads to share", "lucas"], ["Trades", "mayne"]], rhythm: "Scan every 4 hours (phase 2).", good: "Funding and positioning shifts flagged early." },
   tux: { job: "LP and DeFi yield research.", owns: ["LP strategies, pools and yields", "Saving what Phil sends him about LP into his memory, marked verified or not"], handsOff: [["Research threads to share", "lucas"], ["Positions", "mayne"]], rhythm: "On demand.", good: "Phil knows which yields are real and which are bait." },
   cat: { job: "Prediction markets.", owns: ["Markets worth watching and mispriced odds"], handsOff: [["Research threads", "lucas"], ["Bets", "mayne"]], rhythm: "On demand.", good: "Clear odds versus Phil's view." },
-  ansem: { job: "Memecoins and low caps.", owns: ["New memecoins worth a look and why", "Feeding the Memecoin Analyzer"], handsOff: [["Research threads", "lucas"], ["Trades", "mayne"]], rhythm: "Hourly scan (phase 2).", good: "Few, good candidates with reasons, not a firehose." },
+  ansem: { job: "Memecoins and low caps.", owns: ["New memecoins worth a look and why", "Feeding the Memecoin Analyzer"], handsOff: [["Research threads", "lucas"], ["Trades", "mayne"]], rhythm: "Scan every 4 hours (phase 2).", good: "Few, good candidates with reasons, not a firehose." },
   claw: { job: "New tech and AI in crypto.", owns: ["New protocols and AI-crypto projects"], handsOff: [["Research threads", "lucas"]], rhythm: "On demand.", good: "Phil hears about the real new thing first." },
   lucas: { job: "X research: turns the scouts' findings into threads and research for Nick's team.", owns: ["Researching on X for every crypto scout", "Feeding Nick, Boo and ncrypt"], handsOff: [["Posting", "nick"]], rhythm: "On demand.", good: "Well-sourced research the brand can post." },
   jeff: { job: "CEO of Airdrop Acres.", owns: ["Airdrop Acres strategy and growth"], handsOff: [["Posts and replies", "boo"]], rhythm: "On demand (phase 3).", good: "Acres grows with a clear plan." },
@@ -241,8 +241,9 @@ export const CHARTERS: Record<string, Charter> = {
 };
 
 /**
- * What only Phil can answer, per agent, each with the answer HQ assumes until he says otherwise. Shown on the
- * agent's page under "Needs your answer". Delete a line once it's answered and folded into the charter.
+ * What each agent still needs to learn from Phil. His rule (Nov 6): agents ask as they go, one question at a time,
+ * when it actually matters, and remember the answer; no questionnaires. Where a line carries a "Suggested" answer,
+ * that's what the agent assumes until Phil says otherwise. Shown on the agent's page under "Will ask you".
  */
 const QUESTIONS: Record<string, string[]> = {
   lip: [
@@ -263,13 +264,8 @@ const QUESTIONS: Record<string, string[]> = {
 
 
 
-  pentoshi: ["Which perps venues and prop firms do you use? Hourly scans cost Grok usage: keep hourly, or every 4 hours? Suggested: every 4 hours until the pool's usage is known."],
-  tux: ["Which pools and protocols do you LP in now?"],
-  cat: ["Which prediction markets (Polymarket, Kalshi), and which topics?"],
-  ansem: [
-    "What makes a memecoin worth a look for you (market cap range, liquidity, holders)?",
-    "The Memecoin Analyzer: its name, where the repo lives and what it's built in.",
-  ],
+  pentoshi: ["Which perps venues and prop firms does Phil use?"],
+
   claw: ["Which areas of new tech and AI in crypto should Claw watch?"],
   lucas: ["Should Lucas draft threads for you directly, or only feed research to Nick's team? Suggested: only feed Nick's team."],
   jeff: ["What is Airdrop Acres today, and what does Jeff need to run it?"],
@@ -316,5 +312,6 @@ export function charterText(id: string, name: (id: string) => string): string {
     c.handsOff?.length ? `Not yours, hand it off:\n${c.handsOff.map(([w, a]) => `- ${w} → ${name(a)} (${a})`).join("\n")}` : "",
     `Rhythm: ${c.rhythm}`,
     `Good looks like: ${c.good}`,
+    c.open?.length ? `Still to learn from Phil (ask as you go: one short question when it actually matters for the task in hand, never a list; then keep his answer in a remember block so you never ask twice; check memory first):\n${c.open.map((q) => `- ${q}`).join("\n")}` : "",
   ].filter(Boolean).join("\n");
 }

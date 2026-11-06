@@ -84,8 +84,8 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
               <dt className="text-[10px] tracking-[0.14em] uppercase self-center" style={{ color: "var(--muted)" }}>Good looks like</dt><dd className="m-0">{charter.good}</dd>
             </dl>
             {charter.open && charter.open.length > 0 && (
-              <div className="border-l-2 pl-3 flex flex-col gap-1" style={{ borderColor: "var(--amber)" }}>
-                <span className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--amber)" }}>Needs your answer</span>
+              <div className="border-l-2 pl-3 flex flex-col gap-1" style={{ borderColor: "var(--line)" }}>
+                <span className="text-[10px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>Will ask you as it comes up</span>
                 <ul className="m-0 pl-4 text-[12px] leading-relaxed">{charter.open.map((q) => <li key={q}>{q}</li>)}</ul>
               </div>
             )}
