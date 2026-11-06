@@ -206,7 +206,7 @@ export const CHARTERS: Record<string, Charter> = {
   justin: { job: "Fundraising and runway for Range.cool.", owns: ["Runway, raise plans and investor updates"], rhythm: "On demand (phase 3).", tools: BOARD, good: "Range.cool never gets surprised by runway." },
   jason: { job: "CTO and core dev for Range.cool, backed by Jason 2.0 on Cursor.", owns: ["Architecture and code", "The dev team"], rhythm: "On demand (phase 3).", tools: ["memory_search"], good: "Shipped, working software." },
   jason2: { job: "Robot CTO on Cursor: Jason's second brain that builds and reviews alongside him.", owns: ["Code builds and reviews in Cursor"], rhythm: "On demand (phase 3).", good: "Fewer bugs reach production." },
-  devteam: { job: "Jason's developers.", owns: ["Building what Jason assigns"], rhythm: "On demand (phase 3).", good: "Tickets close." },
+  devteam: { job: "Jason's developers: AI coding agents only, no human developers.", owns: ["Building what Jason assigns, each change reviewed by Jason before it ships"], rhythm: "On demand (phase 3).", good: "Tickets close." },
 
   // ---- JD PM Renovations ----------------------------------------------------------------------
   stella: {
@@ -273,7 +273,6 @@ const QUESTIONS: Record<string, string[]> = {
   justin: ["Range.cool runway today, and any raise planned?"],
   jason: ["Which repos are Range.cool's, and should Jason get read access on GitHub?"],
   jason2: ["Phil's Grok bot can connect to Cursor. When phase 3 starts, ask Phil how it's set up (which bot, where it runs, how it reaches Cursor) so HQ can route Jason 2.0's work through it. Cursor's own command-line agent is the fallback."],
-  devteam: ["Are there human developers, or is the dev team AI only?"],
   stella: [
       "Which mailbox is the business one?",
     "Who is on the crew?",

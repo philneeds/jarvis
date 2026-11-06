@@ -152,7 +152,7 @@ export const AGENTS: AgentDef[] = [
   { id: "justin", name: "Justin", short: "Fundraising & runway", layer: 2, parent: "poseidon", venture: "range", model: "claude-sonnet", phase: 3, priority: "room", desc: "Everything to do with fundraising and runway." },
   { id: "jason", name: "Jason", short: "CTO & core dev", layer: 2, parent: "poseidon", venture: "range", serves: ["lab"], model: "claude-opus", phase: 3, priority: "room", desc: "CTO and core developer behind everything at Range.cool. Runs on Claude Code and has his own team of devs." },
   { id: "jason2", name: "Jason 2.0", short: "Robot CTO, secondary brain", layer: 3, parent: "jason", links: ["devteam"], venture: "range", serves: ["lab"], model: "cursor", phase: 3, priority: "room", desc: "The Terminator version of Jason. Runs in Cursor as Jason's secondary brain: builds alongside him, reviews his code and catches what he misses." },
-  { id: "devteam", name: "Dev team", short: "Jason's developers", layer: 3, parent: "jason", venture: "range", model: "claude-opus", phase: 3, priority: "room", desc: "Jason's own team of developer agents for Range.cool, on Claude Code." },
+  { id: "devteam", name: "Dev team", short: "Jason's developers", layer: 3, parent: "jason", venture: "range", model: "claude-opus", phase: 3, priority: "room", desc: "Jason's own team of AI developer agents for Range.cool, on Claude Code. No human developers." },
 
   // ---- JD PM Renovations -------------------------------------------------
   {
