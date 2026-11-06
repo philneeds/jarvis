@@ -5,7 +5,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
-import { memoryStore, Jarvis, getAgent, normalizeDeck, renderDeck, parseTemplate, setTemplate, getTemplate, listDecks, deckFile, addDataFile, listDataFiles, removeDataFile, dataText, extractBlocks, SCHEDULES } from "../src/index.js";
+import { memoryStore, Jarvis, getAgent, normalizeDeck, renderDeck, parseTemplate, setTemplate, getTemplate, listDecks, deckFile, addDataFile, listDataFiles, removeDataFile, dataText, extractBlocks, SCHEDULES, ModelRouter, mockProvider } from "../src/index.js";
 
 process.env.JARVIS_UPLOAD_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "jarvis-decks-"));
 
@@ -67,7 +67,7 @@ test("sales data: CSV and Excel are read into text, Stevon builds the deck, and 
   assert.equal(r.when, "weekly:mon@20:00");
   assert.ok(r.push);
 
-  const j = new Jarvis({ store });
+  const j = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
   const out = await j.runAgent(getAgent("stevon")!, "Build the deck for Tuesday's meeting.", { direct: true });
   assert.equal(out.decks?.length, 1);
   assert.match(out.text, /\[Deck ready: ProEdge weekly sales\]/);

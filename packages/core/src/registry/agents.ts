@@ -171,5 +171,5 @@ export const AGENTS: AgentDef[] = [
   { id: "salescoach", name: "Sales Coach", short: "Sales optimizer & trainer", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Sales optimizer and sales improvement trainer." },
   { id: "scheduler", name: "Scheduler", short: "Team schedule optimizer", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Schedule optimizer and maker for managing the team." },
   { id: "emailai", name: "Email AI", short: "Email automation & info", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Email automation and information." },
-  { id: "mindset", name: "Mindset Coach", short: "Mindset coaching", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Mindset coach for the ProEdge team.", note: "Taken from the whiteboard to make Stevon's fourth sub-agent. Confirm or rename." },
+  { id: "mindset", name: "Mindset Coach", short: "Mindset coaching", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Mindset coach for the ProEdge team." },
 ];
