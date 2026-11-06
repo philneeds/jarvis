@@ -19,6 +19,8 @@ export interface Schedule {
   push?: boolean;
   /** Makes a deck from uploaded data: skipped when one was already made by hand from the same data. */
   deck?: boolean;
+  /** Reports to this agent instead of Phil: the answer goes to them to absorb, and Phil only hears if he must act. */
+  to?: string;
 }
 
 /** Scouts and briefs on their timers. Nothing runs before its phase. */
@@ -37,13 +39,13 @@ export const SCHEDULES: Schedule[] = [
   { id: "monica-day", agentId: "monica", task: "Lay out Phil's day for him to read on his phone: what's on the calendar across his accounts, conflicts, what's unscheduled, what to protect. Propose any calendar change as an approval; change nothing yourself.", when: "daily@06:45", phase: 0, push: true },
   { id: "stella-leads", agentId: "stella", task: "Review new leads and open jobs for JD PM; flag anything waiting on a customer reply.", when: "daily@06:50", phase: 1 },
   { id: "mantis-markets", agentId: "mantis", task: "Market read for the day. Call hyperliquid_perps for real numbers: BTC, ETH and SOL, the biggest moves, where funding and open interest are stretched. Say what moved overnight and what the team should watch today. Use only the numbers you were given; if you don't have data on something, say so instead of guessing.", when: "daily@06:55", phase: 1 },
-  { id: "ansem-scan", agentId: "ansem", task: "Scan: new memecoins and low caps worth a look, with the reason each is on the list.", when: "every:240", phase: 2 },
-  { id: "pentoshi-scan", agentId: "pentoshi", task: "Scan Hyperliquid with hyperliquid_perps: what changed since your last scan in funding (both extremes), open interest and the biggest moves, and what it says about positioning. Keep it to what's worth Phil's attention, with the numbers; say \"nothing notable\" when that's the truth. Add what traders on X are saying about the biggest moves (your own X search), with handles. Then any news from Phil's prop firms (Vest Markets, Backed). Save this scan's key numbers in a remember block (scope agent:pentoshi, key last-scan) so the next scan can compare.", when: "every:240", phase: 2 },
-  { id: "marcus-open", agentId: "marcus", task: "Pre-market: tech and infra holdings, catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
-  { id: "house-open", agentId: "house", task: "Pre-market: biotech holdings, catalysts and approvals today, and what the biotech Discord said overnight (discord_recent, quoted as chat, not fact). Suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
-  { id: "exxon-open", agentId: "exxon", task: "Pre-market: energy holdings and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
-  { id: "altman-open", agentId: "altman", task: "Pre-market: AI-era holdings and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
-  { id: "armstrong-open", agentId: "armstrong", task: "Pre-market: crypto-niche stocks and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
+  { id: "ansem-scan", agentId: "ansem", task: "Scan: new memecoins and low caps worth a look, with the reason each is on the list. This goes to Mantis, not Phil.", when: "every:240", phase: 2, to: "mantis" },
+  { id: "pentoshi-scan", agentId: "pentoshi", task: "Scan Hyperliquid with hyperliquid_perps: what changed since your last scan in funding (both extremes), open interest and the biggest moves, and what it says about positioning. Keep it to what's worth Phil's attention, with the numbers; say \"nothing notable\" when that's the truth. Add what traders on X are saying about the biggest moves (your own X search), with handles. Then any news from Phil's prop firms (Vest Markets, Backed). Save this scan's key numbers in a remember block (scope agent:pentoshi, key last-scan) so the next scan can compare.", when: "every:240", phase: 2, to: "mantis" },
+  { id: "marcus-open", agentId: "marcus", task: "Pre-market: tech and infra holdings, catalysts today, suggested changes. This goes to Munger, not Phil.", when: "weekdays@08:30", phase: 2, to: "munger" },
+  { id: "house-open", agentId: "house", task: "Pre-market: biotech holdings, catalysts and approvals today, and what the biotech Discord said overnight (discord_recent, quoted as chat, not fact). Suggested changes. This goes to Munger, not Phil.", when: "weekdays@08:30", phase: 2, to: "munger" },
+  { id: "exxon-open", agentId: "exxon", task: "Pre-market: energy holdings and catalysts today, suggested changes. This goes to Munger, not Phil.", when: "weekdays@08:30", phase: 2, to: "munger" },
+  { id: "altman-open", agentId: "altman", task: "Pre-market: AI-era holdings and catalysts today, suggested changes. This goes to Munger, not Phil.", when: "weekdays@08:30", phase: 2, to: "munger" },
+  { id: "armstrong-open", agentId: "armstrong", task: "Pre-market: crypto-niche stocks and catalysts today, suggested changes. This goes to Munger, not Phil.", when: "weekdays@08:30", phase: 2, to: "munger" },
   { id: "stevon-weekly", agentId: "stevon", task: "Build the deck for Tuesday morning's ProEdge sales meeting. Call deck_template, then sales_data (days 8 for this week; days 15 as well when there's an earlier week to compare). If nothing was uploaded this week, make no deck: reply in two lines asking Phil to upload this week's sales data (on your page in HQ, or send the spreadsheet to Jarvis on Telegram) and press Make the deck now. Otherwise write the deck as a slides block, following the template's order when there is one: the cover (ProEdge weekly sales, with the week's dates), the headline numbers against last week, results by rep or service where the data has it, what's working and what isn't, and the focus for this week. Speaker notes on every slide for what Phil should say. Use only numbers from the data. Outside the block, give the three headlines in a few lines.", when: "weekly:mon@20:00", phase: 1, push: true, deck: true },
   { id: "boo-voice", agentId: "boo", task: "Review the @philneeds X account (Grok's X search, or x_own_posts if X is connected): Phil's recent posts and replies, what got the most engagement, and how he writes. Update your voice guide: the topics he posts about, tone, length, format, phrases he uses and avoids, and what lands best, with two or three example posts. Save it in a remember block (scope venture:philneeds, key voice-guide), replacing the old one. Reply with a short summary of what changed.", when: "monthly:1@10:00", phase: 2 },
   { id: "munger-weekly", agentId: "munger", task: "Weekly money summary for Phil, short enough to read on his phone. Call kubera_networth: net worth now, the change this week and this month, the biggest movers and why if you can tell, and any account that stopped syncing. Then analyse: call kubera_history (90 days) and memory_search for your earlier patterns (scope venture:money), and say what pattern you see (a recurring drain, spending creep, an account drifting, what moves net worth most), whether last week's patterns held, and one or two improvements, each with the reason and the expected effect. Save any pattern worth tracking in a remember block (scope venture:money, key money-pattern-<short name>). Read only; never suggest moving money without an approval.", when: "weekly:mon@07:30", phase: 2, push: true },
@@ -96,7 +98,7 @@ export function nextRun(when: string, now: Date, last?: number): Date | undefine
   return undefined;
 }
 
-export interface ScheduleView { id: string; agentId: string; when: string; whenText: string; summary: string; task: string; phase: number; active: boolean; push: boolean; custom: boolean; deck: boolean; lastRun?: string; nextRun?: string }
+export interface ScheduleView { id: string; agentId: string; when: string; whenText: string; summary: string; task: string; phase: number; active: boolean; push: boolean; custom: boolean; deck: boolean; to?: string; lastRun?: string; nextRun?: string }
 
 /** One plain line per built-in routine for the Schedules screen; the full instructions sit behind "details". */
 const SUMMARY: Record<string, string> = {
@@ -137,7 +139,7 @@ export async function scheduleView(store: Store, now = new Date(), schedules: Sc
       id: s.id, agentId: s.agentId, when: s.when, whenText: describeWhen(s.when),
       summary: SUMMARY[s.id] ?? (s.task.length > 140 ? `${s.task.slice(0, 140).replace(/\s+\S*$/, "")}…` : s.task),
       task: s.task === "brief" ? "The morning brief: each lead's report, what's waiting on Phil, today's calendar." : s.task === "condense" ? "Tidy memory: merge duplicates and drop what's stale (when memory passes 20 items)." : s.task,
-      phase: s.phase, active, push: !!s.push || s.task === "brief", custom: s.id.startsWith("custom:"), deck: !!s.deck,
+      phase: s.phase, active, push: !!s.push || s.task === "brief", custom: s.id.startsWith("custom:"), deck: !!s.deck, to: s.to,
       lastRun: last[s.id] ? new Date(last[s.id]!).toISOString() : undefined, nextRun: n?.toISOString(),
     };
   });
@@ -160,6 +162,15 @@ export async function runRoutine(jarvis: Jarvis, s: Schedule, opts: { direct?: b
   }
   const r = await jarvis.runAgent(agent, s.task, { direct: opts.direct ?? false, from: "Scheduler" });
   if (r.blocked) return r;
+  // A routine that reports to another agent: they absorb it (memory, board, hand-offs) and raise an attention or
+  // approval only if Phil must act. Phil's chat stays quiet; the full Activity log keeps both sides.
+  const to = s.to ? getAgent(s.to) : undefined;
+  if (to) {
+    await jarvis.router.log(agent.id, "run", `${agent.name} → ${to.name} (${s.id}): ${r.text.slice(0, 200)}`, r.runId, { report: r.text });
+    const rr = await jarvis.runAgent(to, `${agent.name} reports to you (${s.id}):\n\n${r.text}\n\nThis is for you, not Phil: keep what matters in memory (scope venture:${to.venture}) and on the board, hand anything actionable to whoever owns it, and raise an attention or approval block only if Phil himself must act. Reply in one or two lines on what you did with it.`, { direct: false, from: agent.name, parentRunId: r.runId });
+    if (!rr.blocked) await jarvis.router.log(to.id, "run", `${to.name} took ${agent.name}'s report: ${rr.text.slice(0, 200)}`, rr.runId);
+    return r;
+  }
   const files = "decks" in r ? r.decks?.map((d) => ({ id: d.id, name: d.name })) : undefined;
   await jarvis.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId, files: files?.length ? files : undefined });
   if (s.push) bus.emitEvent({ type: "report", agentId: agent.id, title: REPORT_TITLE[s.id] ?? `${agent.name} report`, text: r.text, at: new Date().toISOString(), files });

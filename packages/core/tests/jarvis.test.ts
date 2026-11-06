@@ -630,3 +630,19 @@ test("every built-in routine has a plain one-line summary for the Schedules scre
   const view = await scheduleView(store);
   for (const s of SCHEDULES) { const v = view.find((x) => x.id === s.id)!; assert.ok(v.summary.length > 10 && v.summary.length <= 120, `${s.id}: ${v.summary}`); }
 });
+
+test("a routine that reports to another agent stays out of Phil's chat: the recipient absorbs it and the Activity log keeps both sides", async () => {
+  const { jarvis, store } = make();
+  const { runRoutine, SCHEDULES } = await import("../src/index.js");
+  const house = SCHEDULES.find((s) => s.id === "house-open")!;
+  assert.equal(house.to, "munger");
+  const before = (await store.chat.list(50)).length;
+  const r = await runRoutine(jarvis, house, { direct: true });
+  assert.ok(r && !r.blocked);
+  assert.equal((await store.chat.list(50)).length, before, "nothing said to Phil");
+  const log = await store.activity.list({ limit: 20 });
+  assert.ok(log.some((e) => e.agentId === "house" && /House → Charlie Munger \(house-open\)/.test(e.summary)));
+  assert.ok(log.some((e) => e.agentId === "munger" && /took House's report/.test(e.summary)));
+  for (const id of ["marcus-open", "exxon-open", "altman-open", "armstrong-open"]) assert.equal(SCHEDULES.find((s) => s.id === id)!.to, "munger");
+  for (const id of ["ansem-scan", "pentoshi-scan"]) assert.equal(SCHEDULES.find((s) => s.id === id)!.to, "mantis");
+});

@@ -52,6 +52,7 @@ export default function SchedulesPage() {
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
                   <b style={{ color: "var(--ink-bright)" }}>{s.whenText}</b>
                   {s.push && <span className="px-1.5 border text-[10px] tracking-[0.12em] uppercase" style={{ borderColor: "var(--accent-soft)", color: "var(--accent)" }}>to Telegram</span>}
+                  {s.to && <span className="px-1.5 border text-[10px] tracking-[0.12em] uppercase" style={{ borderColor: "var(--line)", color: "var(--muted)" }} title="Reports to this agent, not you">→ {agent(s.to)?.name ?? s.to}</span>}
                   {s.custom && <span className="px-1.5 border text-[10px] tracking-[0.12em] uppercase" style={{ borderColor: "var(--line)", color: "var(--muted)" }}>your schedule</span>}
                   {!s.active && <span className="px-1.5 border text-[10px] tracking-[0.12em] uppercase" style={{ borderColor: "var(--line)", color: "var(--muted)" }}>starts in phase {s.phase}</span>}
                   <span className="ml-auto text-[11px]" style={{ color: "var(--dim)" }}>
