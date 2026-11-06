@@ -97,7 +97,7 @@ export function AgentWeb({ initial }: { initial?: string }) {
   const pos = web.pos;
 
   const links = useMemo(() => shown.filter((a) => a.parent && pos[a.parent]).map((a) => [a.parent!, a.id] as const), [shown, pos]);
-  const cross = useMemo(() => { const seen = new Set<string>(); const out: [string, string][] = []; shown.forEach((a) => (a.links ?? []).forEach((o) => { if (!pos[o]) return; const k = [a.id, o].sort().join("|"); if (!seen.has(k)) { seen.add(k); out.push([a.id, o]); } })); return out; }, [shown, pos]);
+  const cross = useMemo(() => { const seen = new Set<string>(); const out: [string, string][] = []; shown.forEach((a) => [...(a.links ?? []), ...(a.alsoReportsTo ?? [])].forEach((o) => { if (!pos[o]) return; const k = [a.id, o].sort().join("|"); if (!seen.has(k)) { seen.add(k); out.push([a.id, o]); } })); return out; }, [shown, pos]);
   const ql = q.trim().toLowerCase();
   const match = (a: AgentLive) => !ql || a.name.toLowerCase().includes(ql) || a.short.toLowerCase().includes(ql) || a.id.includes(ql);
   const hits = ql ? shown.filter(match) : [];
@@ -214,7 +214,7 @@ export function AgentWeb({ initial }: { initial?: string }) {
   const a = sel ? byId[sel] : undefined;
   const act = async (fn: () => Promise<unknown>) => { setBusy(true); setMsg(undefined); try { const r = (await fn()) as { message?: string | { text: string } }; setMsg(typeof r?.message === "string" ? r.message : r?.message?.text); await refresh(); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); } };
   const team = a ? agents.filter((x) => x.parent === a.id) : [];
-  const ww = a ? cross.filter(([x, y]) => x === a.id || y === a.id).map(([x, y]) => (x === a.id ? y : x)) : [];
+  const ww = a ? cross.filter(([x, y]) => x === a.id || y === a.id).map(([x, y]) => (x === a.id ? y : x)).filter((o) => !a.alsoReportsTo?.includes(o) && !byId[o]?.alsoReportsTo?.includes(a.id)) : [];
   const choose = (id: string) => { setSel(id); setMsg(undefined); if (!pos[id]) setMaxLayer(3); focus(id); };
   const vw = map.w / view.s, vh = map.h / view.s;
   const pressed = { borderColor: "var(--accent)", background: "rgba(60,130,255,0.25)", color: "var(--ink-bright)" };
@@ -303,7 +303,7 @@ export function AgentWeb({ initial }: { initial?: string }) {
             {a.lastError && <p className="m-0 text-[11px]" style={{ color: "var(--red)" }}>{a.lastError.slice(0, 300)}</p>}
             <dl className="m-0 grid gap-3">
               <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Last run</dt><dd className="m-0 text-[12px]">{timeAgo(a.lastRunAt)}</dd></div>
-              {a.parent && <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Reports to</dt><dd className="m-0"><button className="btn btn-sm" onClick={() => choose(a.parent!)}>{byId[a.parent]?.name}</button></dd></div>}
+              {a.parent && <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Reports to</dt><dd className="m-0 flex flex-wrap gap-1.5">{[a.parent, ...(a.alsoReportsTo ?? [])].map((p) => <button key={p} className="btn btn-sm" onClick={() => choose(p)}>{byId[p]?.name}</button>)}</dd></div>}
               {team.length > 0 && <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Team ({team.length})</dt><dd className="m-0 flex flex-wrap gap-1.5">{team.map((t) => <button key={t.id} className="btn btn-sm" onClick={() => choose(t.id)}>{t.name}</button>)}</dd></div>}
               {ww.length > 0 && <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Also works with</dt><dd className="m-0 flex flex-wrap gap-1.5">{ww.map((t) => <button key={t} className="btn btn-sm" onClick={() => choose(t)}>{byId[t]?.name}</button>)}</dd></div>}
               {a.serves && a.serves.length > 0 && <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Also works for</dt><dd className="m-0 flex flex-wrap gap-1.5">{a.serves.map((v) => <span key={v} className="text-[11px] px-2 py-0.5 border rounded-full" style={{ color: state?.ventures[v]?.color, borderColor: state?.ventures[v]?.color }}>{state?.ventures[v]?.label}</span>)}</dd></div>}

@@ -66,7 +66,7 @@ export function rosterText(): string {
   const lines: string[] = [];
   const job = (a: AgentDef) => CHARTERS[a.id]?.job ?? a.short;
   const walk = (a: AgentDef, depth: number) => {
-    for (const c of children(a.id)) { lines.push(`${"  ".repeat(depth)}- ${c.name} [@${c.id}]: ${job(c)}`); walk(c, depth + 1); }
+    for (const c of children(a.id)) { lines.push(`${"  ".repeat(depth)}- ${c.name} [@${c.id}]: ${job(c)}${c.alsoReportsTo?.includes("jarvis") ? " (also reports to you directly)" : ""}`); walk(c, depth + 1); }
   };
   for (const lead of leads()) {
     lines.push(`- ${lead.name} [@${lead.id}] — ${job(lead)} Venture: ${VENTURES[lead.venture].label}.`);

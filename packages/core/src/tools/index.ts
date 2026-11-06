@@ -138,7 +138,7 @@ export function buildTools(): ToolDef[] {
       async handler({ name }) {
         const q = name.toLowerCase();
         const hits = AGENTS.filter((a) => a.id.includes(q) || a.name.toLowerCase().includes(q)).slice(0, 5);
-        return hits.length ? hits.map((a) => `${a.name} (@${a.id}) — ${a.short}. ${a.desc} Venture: ${a.venture}. Reports to: ${a.parent ?? "Phil"}.`).join("\n") : "No such agent.";
+        return hits.length ? hits.map((a) => `${a.name} (@${a.id}) — ${a.short}. ${a.desc} Venture: ${a.venture}. Reports to: ${[a.parent ?? "Phil", ...(a.alsoReportsTo ?? [])].join(", ")}.`).join("\n") : "No such agent.";
       },
     }),
   ];

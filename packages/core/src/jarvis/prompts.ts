@@ -26,10 +26,11 @@ export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona
   const boss = agent.parent ? AGENT_BY_ID[agent.parent] : undefined;
   const team = children(agent.id);
   const also = agent.serves?.map((v) => VENTURES[v].label) ?? [];
+  const direct = (agent.alsoReportsTo ?? []).map((id) => AGENT_BY_ID[id]?.name ?? id);
   return [
     `You are ${agent.name}, one of Phil's specialist agents in the Jarvis web. Job: ${agent.short}.`,
     agent.desc,
-    `Venture: ${venture.label}${also.length ? ` (also works for ${also.join(", ")})` : ""}. ${boss ? `Reports to ${boss.name}.` : "Reports to Phil."}${team.length ? ` Team: ${team.map((t) => t.name).join(", ")}.` : ""}`,
+    `Venture: ${venture.label}${also.length ? ` (also works for ${also.join(", ")})` : ""}. ${boss ? `Reports to ${boss.name}${direct.length ? `, and directly to ${direct.join(" and ")}` : ""}.` : "Reports to Phil."}${team.length ? ` Team: ${team.map((t) => t.name).join(", ")}.` : ""}`,
     charterText(agent.id, (id) => AGENT_BY_ID[id]?.name ?? id),
     personaText(persona) ? `Phil's own brief for you (this wins where it differs from the above):\n${personaText(persona)}` : "",
     tools.length ? `Tools you can call (read-only):\n${toolsText(tools)}` : "",

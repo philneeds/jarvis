@@ -26,6 +26,8 @@ export interface AgentDef {
   layer: Layer;
   /** Who it reports to. */
   parent?: string;
+  /** Anyone else it reports to directly, besides its parent. */
+  alsoReportsTo?: string[];
   /** Who it also works with (cross-branch links). */
   links?: string[];
   venture: VentureId;
@@ -136,7 +138,7 @@ export const AGENTS: AgentDef[] = [
   },
   { id: "boo", name: "Boo", short: "Ghostwriter", layer: 3, parent: "nick", venture: "philneeds", serves: ["range", "acres"], model: "grok", phase: 2, priority: "room", desc: "Ghostwriter. Drafts and (after Phil's approval) posts for the X account: Philneeds, Range.cool and Acres." },
   { id: "ncrypt", name: "ncrypt", short: "Replies & DMs", layer: 3, parent: "nick", links: ["boo"], venture: "philneeds", serves: ["range", "acres"], model: "grok", phase: 2, priority: "room", desc: "All responses and DM prep on Telegram and X. Works closely with Boo for Philneeds, Range.cool and Acres." },
-  { id: "jeff", name: "Jeff", short: "CEO, Airdrop Acres", layer: 2, parent: "mantis", venture: "acres", model: "grok", phase: 3, priority: "room", desc: "CEO and jack of all trades managing Airdrop Acres. Especially strong at community growth, expansion and distribution." },
+  { id: "jeff", name: "Jeff", short: "CEO, Airdrop Acres", layer: 2, parent: "mantis", alsoReportsTo: ["jarvis"], venture: "acres", model: "grok", phase: 3, priority: "room", desc: "CEO and jack of all trades managing Airdrop Acres. Especially strong at community growth, expansion and distribution." },
 
   // ---- Range.cool --------------------------------------------------------
   {
