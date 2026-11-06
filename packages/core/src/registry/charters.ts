@@ -247,13 +247,11 @@ export const CHARTERS: Record<string, Charter> = {
  */
 const QUESTIONS: Record<string, string[]> = {
   lip: [
-    "Spotify: does your account have Premium? Spotify now only lets personal developer apps work for Premium accounts.",
     "Should playlists Lip makes be private by default, with public ones waiting for your OK? Suggested: yes (already set).",
   ],
 
 
   joi: [
-    "Higgsfield: wait for the browser AI's report on API pricing before buying. Suggested: no monthly plan unless you'll use the app yourself; fund the API balance only.",
     "Every generation that spends credits comes to you as an approval first. Suggested: yes (already set).",
   ],
 
@@ -290,12 +288,11 @@ const QUESTIONS: Record<string, string[]> = {
     "Which mailbox is the business one?",
     "Who is on the crew?",
     "What does a good month look like in numbers?",
-    "Her 6:50 am review only runs from phase 1. Turn it on now? Suggested: yes.",
   ],
   karol: ["Lead sources to watch (website form, Angi, Facebook, referrals), and may Karol send the first reply to a new lead himself? Suggested: draft it for your OK at first."],
   jake: ["Is there a price sheet or quote template, and how is the crew paid?"],
   bill: ["Suppliers you use, and which calendar holds installs?"],
-  stephanie: ["Business hours and the tone for customer replies. Later: should she answer the phone (Einstein is looking at Grok's phone calls)?"],
+  stephanie: ["Business hours and the tone for customer replies?"],
   frog: ["Which CRM does JD PM use (same answer as Stella's)?"],
   brian: ["JD PM's bank and target margin per job?"],
   stevon: [
