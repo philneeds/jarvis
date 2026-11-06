@@ -224,7 +224,7 @@ export const CHARTERS: Record<string, Charter> = {
   bill: { job: "Installs and materials for JD PM.", owns: ["Install schedule and materials orders"], handsOff: [["Customer messages", "stephanie"]], rhythm: "Installs and materials weekdays at 6:30 am Eastern; on demand.", tools: [...BOARD, "calendar_list_events"], autoApprove: ["record"], maxAutoDollars: 0, good: "Jobs start on time with the right materials." },
   stephanie: { job: "Call center and customer support for JD PM.", owns: ["Customer replies and follow-ups", "Drafting emails for Phil's approval"], handsOff: [["New leads", "karol"], ["Quotes", "jake"]], rhythm: "On demand.", tools: [...BOARD, ...GMAIL_READ, "gmail_create_draft"], good: "No customer waits more than a day for a reply." },
   frog: { job: "CRM, tools and tech for JD PM.", owns: ["The CRM and every JD PM tool working"], rhythm: "On demand.", tools: [...BOARD, "web_status"], good: "The CRM is the single source of truth." },
-  brian: { job: "CFO for JD PM only.", owns: ["JD PM invoices, costs and margins"], handsOff: [["Phil's personal money", "munger"]], rhythm: "On demand only; no scheduled report.", tools: [...BOARD, ...GMAIL_READ], good: "Every job's margin is known and invoices go out on time." },
+  brian: { job: "CFO for JD PM only.", owns: ["JD PM invoices (sent from GoHighLevel), costs and margins"], handsOff: [["Phil's personal money", "munger"]], rhythm: "On demand only; no scheduled report.", tools: [...BOARD, ...GMAIL_READ], good: "Every job's margin is known and invoices go out on time." },
 
   // ---- ProEdge -------------------------------------------------------------------------------------
   stevon: {
@@ -283,8 +283,7 @@ const QUESTIONS: Record<string, string[]> = {
   jason2: ["Cursor has no API HQ can call. Should Jason 2.0 work through you (you run Cursor, paste results back), or wait until Cursor offers one?"],
   devteam: ["Are there human developers, or is the dev team AI only?"],
   stella: [
-      "What does JD PM invoice with?",
-    "Which mailbox is the business one?",
+      "Which mailbox is the business one?",
     "Who is on the crew?",
     "What does a good month look like in numbers?",
   ],
@@ -292,8 +291,8 @@ const QUESTIONS: Record<string, string[]> = {
   jake: ["Is there a price sheet or quote template, and how is the crew paid?"],
   bill: ["Suppliers you use, and which calendar holds installs?"],
   stephanie: ["Business hours and the tone for customer replies?"],
-  frog: ["Which CRM does JD PM use (same answer as Stella's)?"],
-  brian: ["JD PM's bank and target margin per job?"],
+  frog: ["Invoices go out from GoHighLevel. Is GoHighLevel JD PM's CRM too, and should HQ connect to it (GoHighLevel has an API)? Phil will give more context later."],
+  brian: ["Invoices are in GoHighLevel; Phil will give more context later. JD PM's bank and target margin per job?"],
   stevon: [
     "What is ProEdge, who is on the team, and what are its key numbers? The sales coach, scheduler, email AI and mindset coach are set up from that answer.",
     "Send the presentation template you use for Tuesday's meeting (upload the .pptx on Stevon's page), so the deck follows its order and look.",
