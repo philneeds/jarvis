@@ -175,7 +175,7 @@ export const CHARTERS: Record<string, Charter> = {
   cat: { job: "Prediction markets.", owns: ["Markets worth watching and mispriced odds"], handsOff: [["Research threads", "lucas"], ["Bets", "mayne"]], rhythm: "On demand.", good: "Clear odds versus Phil's view." },
   ansem: { job: "Memecoins and low caps.", owns: ["New memecoins worth a look and why", "Feeding the Memecoin Analyzer"], handsOff: [["Research threads", "lucas"], ["Trades", "mayne"]], rhythm: "Scan every 4 hours (phase 2).", good: "Few, good candidates with reasons, not a firehose." },
   claw: { job: "New tech and AI in crypto, all of it.", owns: ["Every area of new tech and AI in crypto: AI agents onchain, AI tokens, DePIN, restaking, new chains, wallets and payments, and whatever comes next", "Separating the real new thing from the narrative, with why"], handsOff: [["Research threads", "lucas"], ["Tools worth adding to Jarvis itself", "einstein"], ["Trades", "mayne"]], rhythm: "On demand.", tools: ["memory_search", "x_read_post"], good: "Phil hears about the real new thing first, and why it matters." },
-  lucas: { job: "X research: turns the scouts' findings into threads and research for Block's team.", owns: ["Researching on X for every crypto scout", "Feeding Block, Boo and ncrypt"], handsOff: [["Posting", "nick"]], rhythm: "On demand.", good: "Well-sourced research the brand can post." },
+  lucas: { job: "X research: turns the scouts' findings into research for Block's team. He doesn't write posts or threads himself.", owns: ["Researching on X for every crypto scout", "Feeding Block, Boo and ncrypt the research, sources and angles they write from"], handsOff: [["Writing posts and threads", "boo"], ["Posting", "nick"]], rhythm: "On demand.", good: "Well-sourced research the brand can post." },
   jeff: { job: "CEO of Airdrop Acres.", owns: ["Airdrop Acres strategy and growth"], handsOff: [["Posts and replies", "boo"]], rhythm: "On demand (phase 3).", good: "Acres grows with a clear plan." },
 
   // ---- Philneeds brand ---------------------------------------------------------------------
@@ -261,7 +261,6 @@ const QUESTIONS: Record<string, string[]> = {
 
   pentoshi: ["Venues: Hyperliquid, Vest Markets and Backed. Phil also uses a few prop firms: which ones, and what are each one's rules (drawdown, daily loss, payout)? Ask when one comes up.", "Want Phil's own Hyperliquid positions watched? That needs only his public wallet address, read-only; ask before using it."],
 
-  lucas: ["Should Lucas draft threads for you directly, or only feed research to Block's team? Suggested: only feed Block's team."],
   jeff: ["What is Airdrop Acres today, and what does Jeff need to run it?"],
   nick: [
     "Which X accounts does Block manage (handles), and what cadence per brand?",
