@@ -120,13 +120,15 @@ export class ModelRouter {
 
     const chain = this.providers[model.provider as "claude" | "grok"] ?? [];
     const errors: string[] = [];
+    // Grok can't call HQ's tools (it gets their names only), so HQ runs the ones that need no input and hands over the results.
+    const prefetched = model.provider === "grok" && opts.tools?.length && opts.toolContext ? await prefetchTools(opts.tools, opts.toolContext) : "";
     for (const p of chain) {
       const avail = await p.available();
       if (!avail.ok) { errors.push(`${p.id}: ${avail.reason}`); continue; }
       try {
         const sees = model.provider === "claude";
         const n = opts.images?.length ?? 0;
-        const prompt = n && !sees ? `${opts.prompt}\n\n(Phil attached ${n} image${n > 1 ? "s" : ""} you can't see. Say so, and hand anything visual to Joi.)` : opts.prompt;
+        const prompt = (n && !sees ? `${opts.prompt}\n\n(Phil attached ${n} image${n > 1 ? "s" : ""} you can't see. Say so, and hand anything visual to Joi.)` : opts.prompt) + prefetched;
         const res = await p.run({ agent, model, system: opts.system, prompt, runId, onDelta: opts.onDelta, signal: opts.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext, images: sees && n ? opts.images : undefined });
         const finishedAt = new Date().toISOString();
         await this.store.runs.update(runId, { status: "done", output: res.text, provider: res.provider, modelId: res.modelId, finishedAt, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd });
@@ -164,4 +166,22 @@ export class ModelRouter {
     bus.emitEvent({ type: "activity", entry });
     return entry;
   }
+}
+
+/**
+ * For agents whose model can't call HQ's tools (Grok): run each tool that needs no input, briefly, and return the
+ * results as a block for the prompt. Tools that need input (a search word, a link) are left to the model's own search.
+ */
+export async function prefetchTools(tools: ToolDef[], ctx: ToolContext, timeoutMs = 15_000): Promise<string> {
+  const { z } = await import("zod");
+  const runnable = tools.filter((t) => z.object(t.schema).safeParse({}).success).slice(0, 5);
+  if (!runnable.length) return "";
+  const out = await Promise.all(runnable.map(async (t) => {
+    try {
+      const r = await Promise.race([t.handler({}, ctx), new Promise<string>((_, rej) => setTimeout(() => rej(new Error("took too long")), timeoutMs))]);
+      return `### ${t.name}\n${String(r).slice(0, 6000)}`;
+    } catch (e) { return `### ${t.name}\n(couldn't fetch: ${(e as Error).message})`; }
+  }));
+  const needInput = tools.filter((t) => !runnable.includes(t)).map((t) => t.name);
+  return `\n\n---\nYou can't call HQ's tools from here, so HQ already ran these for you just now. Use these numbers, and say where a number came from.${needInput.length ? ` (${needInput.join(", ")} need input and weren't run; use your own web and X search instead.)` : ""}\n\n${out.join("\n\n")}`;
 }
