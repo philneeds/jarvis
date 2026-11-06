@@ -6,13 +6,13 @@ import { useLive } from "@/lib/live";
 
 const ST: Record<string, string> = { working: "var(--st-working)", waiting: "var(--st-needs)", idle: "var(--st-idle)", error: "var(--st-error)", paused: "var(--st-paused)" };
 const WORD: Record<string, string> = { working: "working", waiting: "needs you", idle: "idle", error: "error", paused: "paused" };
-/** Tallest tower, in px, inside the 96px plot (the rest is headroom). */
-const TALL = 88;
+/** Tallest tower, in px, inside the 104px plot (the rest is room for the run count). */
+const TALL = 86;
 
 /**
- * One tower per lead. Height is one real measure: runs today by the lead's whole team (the lead and everyone
- * under it), scaled to the busiest team. Colour is the team's state; lit when anyone on it needs Phil or is in
- * error. Hover or focus shows the name and count below; on a touchscreen the first tap shows it, the second opens.
+ * One tower per lead. Height is the size of the lead's team (it doesn't jump around during the day); the small
+ * number on top is runs today by that team. Colour is the team's state; lit when anyone on it needs Phil or is in
+ * error. Hover or focus shows the name below; on a touchscreen the first tap shows it, the second opens.
  */
 export function Towers() {
   const { state } = useLive();
@@ -32,7 +32,7 @@ export function Towers() {
     const st = err ? "error" : needs ? "waiting" : l.status;
     return { l, crew, runs, st, lit: needs || err };
   });
-  const max = Math.max(1, ...rows.map((r) => r.runs));
+  const biggest = Math.max(1, ...rows.map((r) => r.crew.length + 1));
   const total = rows.reduce((n, r) => n + r.runs, 0);
   const cur = rows.find((r) => r.l.id === active);
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -57,15 +57,17 @@ export function Towers() {
               if (touch.current && activeRef.current !== l.id) { e.preventDefault(); show(l.id); }
             }}
           >
-            <span className="tower-plot"><i className={`tower ${lit ? "lit" : ""}`} style={{ height: runs ? Math.max(6, Math.round((runs / max) * TALL)) : 3 }} /></span>
-            <span className="tower-name">{l.name.split(" ").pop()?.toUpperCase()}</span>
+            <span className="tower-plot">
+              <span className="tower-runs" aria-hidden="true">{runs || ""}</span>
+              <i className={`tower ${lit ? "lit" : ""}`} style={{ height: Math.round(18 + ((crew.length + 1) / biggest) * (TALL - 18)) }} />
+            </span>
           </Link>
         ))}
       </div>
       <p className="m-0 text-[12px] leading-snug min-h-[2.5em]" aria-live="polite" style={{ color: cur ? "var(--ink-bright)" : "var(--muted)" }}>
         {cur
           ? <><span style={{ color: "var(--ink-strong)", fontWeight: 600 }}>{cur.l.name}</span> · {plural(cur.runs, "run")} today · team of {cur.crew.length + 1} · <span style={{ color: cur.st === "idle" ? "var(--muted)" : ST[cur.st] }}>{WORD[cur.st] ?? cur.st}</span>{touch.current ? " · tap again to open" : ""}</>
-          : total ? `Height is runs today by each lead's team: ${plural(total, "run")} in all.` : "No runs yet today. Height is runs today by each lead's team."}
+          : `Height is team size; the number is runs today${total ? ` (${plural(total, "run")} in all)` : ""}. Hover or tap a tower for its name.`}
       </p>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] tracking-[0.08em] uppercase">
         <span style={{ color: "var(--st-needs)" }}>■ needs you</span><span style={{ color: "var(--st-working)" }}>■ working</span><span style={{ color: "#8FA3C8" }}>■ idle</span><span style={{ color: "var(--st-error)" }}>■ error</span>

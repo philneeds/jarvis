@@ -145,15 +145,15 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; a
 
 /* Towers: one per lead; the plot holds the bars on a shared baseline, names hang below it, rotated to read upward. */
 .towers { display: flex; gap: 3px; }
-.towers-skeleton { height: 210px; }
+.towers-skeleton { height: 170px; }
 .tower-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; color: inherit; }
 .tower-col:focus-visible { outline-offset: 1px; }
-.tower-plot { align-self: stretch; height: 96px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--accent-soft); }
+.tower-plot { align-self: stretch; height: 104px; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; border-bottom: 1px solid var(--accent-soft); }
+.tower-runs { font-size: 10px; line-height: 1; text-align: center; color: var(--muted); padding-bottom: 3px; font-variant-numeric: tabular-nums; min-height: 13px; }
+.tower-col.on .tower-runs { color: #fff; }
 .tower { display: block; width: 100%; border: 1px solid var(--c); border-bottom: 0; background-color: rgba(10, 30, 80, 0.55); background-image: radial-gradient(circle, var(--c) 0.9px, transparent 1.4px); background-size: 5px 7px; transition: height 0.4s ease, box-shadow 0.15s; }
 .tower.lit { background-color: color-mix(in srgb, var(--c) 25%, transparent); box-shadow: 0 0 14px var(--c); }
 .tower-col.on .tower { background-color: color-mix(in srgb, var(--c) 35%, rgba(10, 30, 80, 0.55)); box-shadow: 0 0 12px var(--c); }
-.tower-name { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; line-height: 1; letter-spacing: 0.06em; font-weight: 600; color: var(--ink); white-space: nowrap; }
-.tower-col.on .tower-name { color: #fff; text-shadow: 0 0 8px var(--c); }
 @media (prefers-reduced-motion: reduce) { .tower { transition: none; } }
 
 .node { cursor: pointer; }

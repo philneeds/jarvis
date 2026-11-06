@@ -27,9 +27,8 @@ const LABEL: Record<string, string> = { to: "To", account: "From", subject: "Sub
 export type ApprovalsTab = "pending" | "decided";
 
 /** Every draft waiting on Phil (and, under Decided, what he did with the rest). Moved out of the old Approvals page so Needs you can show it as its Approve section, unchanged. */
-export function ApprovalsPanel({ tab, onTab, id = "approve" }: { tab: ApprovalsTab; onTab: (t: ApprovalsTab) => void; id?: string }) {
+export function ApprovalsPanel({ tab, id = "approve" }: { tab: ApprovalsTab; id?: string }) {
   const { state, pending, setPending } = useLive();
-  const setTab = onTab;
   const [decided, setDecided] = useState<Approval[]>([]);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
@@ -81,15 +80,10 @@ export function ApprovalsPanel({ tab, onTab, id = "approve" }: { tab: ApprovalsT
 
   return (
     <section id={id} aria-labelledby={`${id}-title`} className="flex flex-col gap-4 scroll-mt-20">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h2 id={`${id}-title`} className="display font-bold text-lg tracking-[0.2em] m-0" style={{ color: pending.length > 0 ? "var(--amber)" : "var(--ink-bright)" }}>APPROVE</h2>
-        <span className="text-[12px] whitespace-nowrap" style={{ color: "var(--muted)" }}>{pending.length} waiting</span>
-        <div className="tabs ml-auto" style={{ width: 200 }} role="group" aria-label="Approvals: waiting or decided">
-          <button aria-pressed={tab === "pending"} onClick={() => setTab("pending")} style={tab === "pending" ? { borderColor: "var(--accent)" } : undefined}>Waiting</button>
-          <button aria-pressed={tab === "decided"} onClick={() => setTab("decided")} style={tab === "decided" ? { borderColor: "var(--accent)" } : undefined}>Decided</button>
-        </div>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 id={`${id}-title`} className="sr-only">{tab === "pending" ? "To approve" : "Decided"}</h2>
+        <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>{tab === "pending" ? "Nothing goes out until you press the button that names it." : "What you approved, edited or rejected."}</p>
       </div>
-      <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>Drafts an agent wants to send, post or spend. Nothing goes out until you press the button that names it. Edit changes the text and keeps it waiting; More shows what the agent saw and lets you ask them about it.</p>
       {error && <div className="card text-[12px]" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{error}</div>}
       {tab === "decided" && decided.length > 0 && (
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filter decisions">
@@ -105,7 +99,7 @@ export function ApprovalsPanel({ tab, onTab, id = "approve" }: { tab: ApprovalsT
         </div>
       )}
       {tab === "decided" && decided.length > 0 && filtered.length === 0 && <div className="card text-center py-6" style={{ color: "var(--muted)" }}>No decisions match these filters.</div>}
-      {list.length === 0 && (tab === "pending" || decided.length === 0) && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>{tab === "pending" ? "Nothing to approve. When an agent wants to send, post or spend, the draft lands here first." : "No decisions yet. Drafts you approve, edit or reject are kept here."}</div>}
+      {list.length === 0 && (tab === "pending" || decided.length === 0) && <p className="m-0 text-[13px]" style={{ color: "var(--muted)" }}>{tab === "pending" ? "Nothing to approve." : "No decisions yet."}</p>}
       {list.map((a) => {
         const v = venture(a.agentId);
         const act = action(a);

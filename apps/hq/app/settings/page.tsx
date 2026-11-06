@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DisplayCard } from "@/components/DisplayCard";
 import { startRegistration } from "@simplewebauthn/browser";
 import { Shell } from "@/components/Shell";
 import { useLive } from "@/lib/live";
@@ -69,6 +70,7 @@ export default function SettingsPage() {
       <div className="max-w-3xl w-full mx-auto p-4 flex flex-col gap-4">
         <h1 className="display font-bold text-2xl tracking-[0.2em] m-0" style={{ color: "var(--ink-strong)" }}>SETTINGS</h1>
 
+        <DisplayCard />
         <section className="card flex flex-col gap-3" aria-label="Security">
           <span className="label">Security · passkeys</span>
           <p className="m-0 text-[12px]">HQ can move money, so add a passkey on each phone and laptop you use. The password stays as the fallback. Domain: <code>{rpID || "…"}</code>.</p>

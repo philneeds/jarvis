@@ -6,9 +6,9 @@ import { api, post, put, fmtTime, timeAgo } from "@/lib/api";
 import type { AttentionItem } from "@/lib/types";
 
 /** Things Phil has to do himself. Raised by agents (or by Phil), they wait here until ticked off. The To do section of Needs you. */
-export function TodoPanel({ id = "todo" }: { id?: string }) {
+export function TodoPanel({ id = "todo", showDone = false }: { id?: string; showDone?: boolean }) {
   const { state, attention } = useLive();
-  const [tab, setTab] = useState<"open" | "done">("open");
+  const tab: "open" | "done" = showDone ? "done" : "open";
   const [done, setDone] = useState<AttentionItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -45,23 +45,16 @@ export function TodoPanel({ id = "todo" }: { id?: string }) {
 
   return (
     <section id={id} aria-labelledby={`${id}-title`} className="flex flex-col gap-4 scroll-mt-20">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h2 id={`${id}-title`} className="display font-bold text-lg tracking-[0.2em] m-0" style={{ color: open.length > 0 ? "var(--amber)" : "var(--ink-bright)" }}>TO DO</h2>
-        <span className="text-[12px] whitespace-nowrap" style={{ color: "var(--muted)" }}>{open.length} open{snoozed.length ? ` · ${snoozed.length} snoozed` : ""}</span>
-        <div className="tabs ml-auto" style={{ width: 200 }} role="group" aria-label="To do: waiting or done">
-          <button aria-pressed={tab === "open"} onClick={() => setTab("open")} style={tab === "open" ? { borderColor: "var(--accent)" } : undefined}>Waiting</button>
-          <button aria-pressed={tab === "done"} onClick={() => setTab("done")} style={tab === "done" ? { borderColor: "var(--accent)" } : undefined}>Done</button>
-        </div>
-      </div>
-      <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>Things only you can do. Agents put them here instead of burying them in a reply; they stay until you tick them off. Oldest first. Jarvis reads the open ones in the morning brief.</p>
+      <h2 id={`${id}-title`} className="sr-only">{tab === "open" ? "To do" : "Done"}</h2>
+      <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>{tab === "open" ? `Things only you can do, oldest first.${snoozed.length ? ` ${snoozed.length} snoozed.` : ""}` : "What you've ticked off."}</p>
 
-      <form onSubmit={add} className="card flex flex-wrap gap-2 items-end">
+      {tab === "open" && <form onSubmit={add} className="card flex flex-wrap gap-2 items-end">
         <label className="flex flex-col gap-1 flex-1 min-w-48 text-[10px] tracking-[0.12em] uppercase" style={{ color: "var(--muted)" }}>Add one yourself<input className="input h-9" placeholder="What needs doing" value={title} onChange={(e) => setTitle(e.target.value)} /></label>
         <label className="flex flex-col gap-1 flex-1 min-w-48 text-[10px] tracking-[0.12em] uppercase" style={{ color: "var(--muted)" }}>Why / details<input className="input h-9" value={why} onChange={(e) => setWhy(e.target.value)} /></label>
         <button className="btn btn-sm btn-primary h-9" disabled={!title.trim()}>Add</button>
-      </form>
+      </form>}
 
-      {list.length === 0 && <div className="card text-center py-10" style={{ color: "var(--muted)" }}>{tab === "open" ? "Nothing to do. When an agent needs something only you can do, it lands here." : "Nothing done yet. Items you tick off are kept here."}</div>}
+      {list.length === 0 && <p className="m-0 text-[13px]" style={{ color: "var(--muted)" }}>{tab === "open" ? "Nothing to do." : "Nothing done yet."}</p>}
       {list.map((i) => {
         const age = Math.floor((Date.now() - Date.parse(i.at)) / 86400_000);
         return (

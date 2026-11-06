@@ -63,6 +63,17 @@ export function Objective() {
     );
   }
 
+  // No goals yet: one line to set the first, not a big empty card.
+  if (!goals.length) {
+    return (
+      <form onSubmit={add} className="flex gap-2 w-full" aria-label="Set your main goal">
+        <input className="input h-10 flex-1 min-w-0" placeholder="Set your main goal" aria-label="Your main goal" value={name} maxLength={160} onChange={(e) => setName(e.target.value)} />
+        <button className="btn btn-sm btn-primary h-10" disabled={!name.trim()}>Set</button>
+        {err && <span className="text-[12px] self-center" style={{ color: "var(--red)" }}>{err}</span>}
+      </form>
+    );
+  }
+
   return (
     <section className="panel-strong p-4 flex flex-col gap-2" aria-label="Primary objective">
       <div className="flex items-center justify-between gap-2 text-[11px] tracking-[0.18em] uppercase">

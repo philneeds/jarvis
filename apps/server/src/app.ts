@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -457,6 +457,26 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     if (!f) return c.json({ error: "not found" }, 404);
     const ascii = f.name.replace(/[^\x20-\x7e]+/g, "_").replace(/"/g, "'");
     return new Response(new Uint8Array(f.data), { headers: { "content-type": f.mime, "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(f.name)}`, "cache-control": "private, max-age=3600" } });
+  });
+
+  // The picture shown when the home screen's display is off (Phil's own; Joi's skyline until he sets one).
+  api.get("/display", async (c) => c.json({ background: await jarvis.store.settings.get<string | null>("display.background", null) }));
+  api.post("/display/background", async (c) => {
+    const type = c.req.header("content-type") ?? "";
+    if (!imageMimeOk(type.split(";")[0]!.trim().toLowerCase())) return c.json({ error: "send a JPEG, PNG or WebP image" }, 415);
+    try {
+      const id = await saveImage(Buffer.from(await c.req.arrayBuffer()), type, MAX_FILE_BYTES);
+      const old = await jarvis.store.settings.get<string | null>("display.background", null);
+      await jarvis.store.settings.set("display.background", id);
+      if (old) await removeFile(old);
+      return c.json({ background: id });
+    } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
+  api.delete("/display/background", async (c) => {
+    const old = await jarvis.store.settings.get<string | null>("display.background", null);
+    await jarvis.store.settings.set("display.background", null);
+    if (old) await removeFile(old);
+    return c.json({ background: null });
   });
 
   api.get("/apple-health", async (c) => c.json({ ...(await healthStatus(jarvis.store)), summary: await healthSummary(jarvis.store, 3) }));

@@ -105,7 +105,7 @@ export default function AgentSettingsPage({ params }: { params: Promise<{ id: st
           ))}
         </section>
 
-        {routines.filter((s) => s.deck).map((s) => <DeckCard key={s.id} venture={agent.venture} routineId={s.id} agentName={agent.name} when={s.whenText.replace(/^Mondays/, "Monday nights").replace(/^(\w)/, (c) => c.toLowerCase())} />)}
+        {routines.filter((s) => s.deck).map((s) => <DeckCard key={s.id} venture={agent.venture} routineId={s.id} agentName={agent.name} when={s.whenText.replace(/^Mondays at (\d{1,2}:\d{2} pm)/, "Monday nights at $1").replace(/^(Daily|Weekdays|Every)/, (w) => w.toLowerCase())} />)}
 
         <section className="card flex flex-col gap-3" aria-label="Persona">
           <div className="flex items-center gap-3">

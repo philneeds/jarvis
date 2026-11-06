@@ -70,7 +70,7 @@ export function DeckCard({ venture, routineId, agentName, when }: { venture: str
 
       <div className="flex items-center gap-2 text-[12px]">
         <span style={{ color: "var(--ink-strong)" }}>Template</span>
-        <span className="truncate" style={{ color: "var(--muted)" }}>{tpl ? <>{tpl.name} · {tpl.slides} slides · <a href={`/api/files/${tpl.fileId}`} style={{ color: "var(--accent)" }}>download</a></> : "none yet; decks use a clean default"}</span>
+        <span className="min-w-0" style={{ color: "var(--muted)" }}>{tpl ? <>{tpl.name} · {tpl.slides} slides · <a href={`/api/files/${tpl.fileId}`} style={{ color: "var(--accent)" }}>download</a></> : "none yet; decks use a clean default"}</span>
         <button className="btn btn-sm ml-auto shrink-0" onClick={() => tplInput.current?.click()}>{tpl ? "Replace" : "Upload .pptx"}</button>
         <input ref={tplInput} type="file" hidden accept=".pptx" onChange={(e) => { void upload(e.target.files, "template"); e.target.value = ""; }} />
       </div>

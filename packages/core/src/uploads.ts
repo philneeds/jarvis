@@ -19,11 +19,11 @@ const dir = () => process.env.JARVIS_UPLOAD_DIR || path.join("data", "uploads");
 
 export function imageMimeOk(mime: string): boolean { return mime in EXT; }
 
-export async function saveImage(buf: Buffer, mime: string): Promise<string> {
+export async function saveImage(buf: Buffer, mime: string, maxBytes = MAX_IMAGE_BYTES): Promise<string> {
   const m = mime.split(";")[0]!.trim().toLowerCase();
   if (!imageMimeOk(m)) throw new Error("only JPEG, PNG, WebP or GIF images");
   if (!buf.length) throw new Error("empty image");
-  if (buf.length > MAX_IMAGE_BYTES) throw new Error("image is over 5 MB");
+  if (buf.length > maxBytes) throw new Error(`image is over ${Math.round(maxBytes / 1048576)} MB`);
   const id = `${randomUUID()}.${EXT[m]}`;
   await fs.mkdir(dir(), { recursive: true });
   await fs.writeFile(path.join(dir(), id), buf);
