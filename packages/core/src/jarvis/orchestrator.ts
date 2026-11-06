@@ -783,8 +783,14 @@ export class Jarvis {
     const states = await this.store.agentState.all();
     const recent = (await this.store.activity.list({ limit: 15 })).map((e) => `${e.at.slice(0, 16)} ${e.summary}`);
     const now = new Date();
-    // Leads with data access report first (Monica's calendar, Stella's mailbox, Mantis's markets…), in parallel, time-boxed.
-    const leadIds = ["monica", "stella", "mantis", "munger", "doc"];
+    // Reports the leads sent up since the last brief (their routines and weekly reviews), then cleared.
+    const inbox = await this.store.settings.get<{ id: string; agentId: string; scheduleId: string; at: string; text: string }[]>("reports.inbox", []);
+    const queued = inbox.map((q) => ({ name: `${getAgent(q.agentId)?.name ?? q.agentId} (${q.scheduleId}, ${q.at.slice(0, 16).replace("T", " ")})`, text: q.text.slice(0, 2500) }));
+    if (inbox.length) await this.store.settings.set("reports.inbox", []);
+    // Leads with data access check in live (Monica's calendar, Stella's mailbox, Mantis's markets…), in parallel,
+    // time-boxed. A lead whose routine already reported in the last three hours isn't asked again.
+    const fresh = new Set(inbox.filter((q) => now.getTime() - Date.parse(q.at) < 3 * 3_600_000).map((q) => q.agentId));
+    const leadIds = ["monica", "stella", "mantis", "munger", "doc"].filter((id) => !fresh.has(id));
     const reporters: AgentDef[] = [];
     for (const id of leadIds) {
       const a = getAgent(id)!;
@@ -798,10 +804,6 @@ export class Jarvis {
       ]);
       return r.blocked ? null : { name: a.name, text: r.text.slice(0, 1500) };
     }))).filter((r): r is { name: string; text: string } => !!r);
-    // Reports the leads sent up since the last brief (their routines and weekly reviews), then cleared.
-    const inbox = await this.store.settings.get<{ id: string; agentId: string; scheduleId: string; at: string; text: string }[]>("reports.inbox", []);
-    const queued = inbox.map((q) => ({ name: `${getAgent(q.agentId)?.name ?? q.agentId} (${q.scheduleId}, ${q.at.slice(0, 16).replace("T", " ")})`, text: q.text.slice(0, 2500) }));
-    if (inbox.length) await this.store.settings.set("reports.inbox", []);
     const prompt = briefPrompt({
       pending: (await this.store.approvals.list("pending")).length,
       working: states.filter((x) => x.status === "working").map((x) => x.id),

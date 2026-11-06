@@ -657,8 +657,13 @@ test("leads report to Jarvis's inbox, not Phil; the next daily brief folds them 
   assert.equal((await store.chat.list(50)).length, before, "nothing said to Phil");
   const inbox = await store.settings.get<{ agentId: string }[]>(REPORT_INBOX_KEY, []);
   assert.equal(inbox.length, 1); assert.equal(inbox[0]!.agentId, "einstein");
+  // Monica's day just reported: the brief uses it instead of asking her again.
+  await runRoutine(jarvis, { ...SCHEDULES.find((s) => s.id === "monica-day")!, task: "Lay out the day: say hello." }, { direct: true });
+  const monicaRuns = async () => (await store.activity.list({ agentId: "monica", limit: 100 })).filter((e) => e.kind === "run" && !/→ Jarvis/.test(e.summary)).length;
+  const monicaRunsBefore = await monicaRuns();
   const brief = await jarvis.brief();
   assert.ok(brief.length > 20);
+  assert.equal(await monicaRuns(), monicaRunsBefore, "no second Monica run for the brief");
   assert.equal((await store.settings.get<unknown[]>(REPORT_INBOX_KEY, [])).length, 0, "the brief consumed the inbox");
   // Karol's morning check goes to Stella; Stella's to Jarvis; only Stevon's deck and the brief reach Phil directly.
   const view = await scheduleView(store);
