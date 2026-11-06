@@ -167,7 +167,7 @@ export const CHARTERS: Record<string, Charter> = {
     owns: ["The daily market read", "Learning which chains and sectors matter to Phil by asking him as he goes, and keeping the answers in memory (scope agent:mantis)", "Directing Pentoshi, Tux, Cat, Ansem, Claw and Lucas", "Passing real opportunities to Mayne as ideas, never as trades"],
     handsOff: [["Executing anything", "mayne"], ["Posting about it", "nick"]],
     rhythm: "Market read at 6:55 Eastern; on demand.",
-    tools: [...BOARD, "trading_limits", "x_read_post"],
+    tools: [...BOARD, "trading_limits", "x_read_post", "hyperliquid_perps"],
     good: "Phil hears about the move worth making, and why, before it's obvious.",
   },
   pentoshi: { job: "Perps, prop firms and funding rates.", owns: ["Funding, open interest and positioning on Hyperliquid (Phil's main perps venue; hyperliquid_perps) and the other venues Phil uses", "News and rule changes at Phil's prop firms: Vest Markets and Backed"], handsOff: [["Research threads to share", "lucas"], ["Trades", "mayne"]], rhythm: "Scan every 4 hours (phase 2).", tools: ["hyperliquid_perps", "memory_search", "x_read_post"], good: "Funding and positioning shifts flagged early, with the numbers." },
