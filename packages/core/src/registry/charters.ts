@@ -132,11 +132,11 @@ export const CHARTERS: Record<string, Charter> = {
   // ---- Money & stocks -----------------------------------------------------------------
   munger: {
     job: "Financial backbone: Phil's assets, net worth, cash flow, deposits and withdrawals across everything.",
-    owns: ["Net worth and cash position, read from Kubera (kubera_networth, kubera_items) to start; more accounts and trackers come later", "Money in and out of every venture and account", "The weekly money summary Phil actually reads", "Overseeing Buffett (stocks) and Mayne (on-chain fund)"],
+    owns: ["Net worth and cash position, read from Kubera (kubera_networth, kubera_items, kubera_history) to start; more accounts and trackers come later", "Money in and out of every venture and account", "Analysing the money, not just reporting it: spotting patterns (recurring drains, spending creep, accounts that drift, what moves net worth most) and remembering them so each week builds on the last", "Suggesting improvements, each with the reason and the expected effect", "The weekly money summary Phil actually reads", "Overseeing Buffett (stocks) and Mayne (on-chain fund)"],
     handsOff: [["Stock picks and holdings reviews", "buffett"], ["On-chain positions and trades", "mayne"], ["JD PM books", "brian"], ["Range.cool runway", "justin"]],
     rhythm: "Weekly money summary Mondays at 7:30 am Eastern, to Telegram and HQ; on demand.",
-    tools: ["kubera_networth", "kubera_items", ...BOARD, "trading_limits"],
-    good: "Phil knows his number every week and nothing moves without him.",
+    tools: ["kubera_networth", "kubera_items", "kubera_history", ...BOARD, "trading_limits"],
+    good: "Phil knows his number every week, sees the patterns behind it, and gets one or two changes worth making. Nothing moves without him.",
   },
   buffett: {
     job: "Stock CFO and risk advisor: reviews the holdings and decides what the stock scouts' ideas are worth.",
@@ -255,9 +255,6 @@ const QUESTIONS: Record<string, string[]> = {
     "Every generation that spends credits comes to you as an approval first. Suggested: yes (already set).",
   ],
 
-  munger: [
-    "Weekly money summary Mondays at 7:30 am. OK? Suggested: yes.",
-  ],
 
 
 

@@ -35,6 +35,10 @@ test("Kubera: signed like the Kubera API v3, cached, read-only, and a daily snap
   assert.match(later, /Biggest moves this week: ESL Money Maker 3703 \+\$1,297/);
   assert.deepEqual(days, [86_000, 87_297], "one Money-board reading per day");
   assert.match(await k.tools().find((t) => t.name === "kubera_items")!.handler({ query: "esl" }, { store, agentId: "munger" }), /Asset · ESL Money Maker 3703: \$42,297 · via Plaid/);
+  const hist = await k.tools().find((t) => t.name === "kubera_history")!.handler({ days: 30 }, { store, agentId: "munger" });
+  assert.match(hist, /Net worth from 2026-11-02 to 2026-11-09 \(2 daily snapshots\): \$86,000 → \$87,297 \(\+\$1,297\)/);
+  assert.match(hist, /Change by account over the period: ESL Money Maker 3703 \+\$1,297/);
+  assert.match(hist, /Biggest single days: 2026-11-09 \+\$1,297/);
   assert.ok(calls.every((c) => !/item/.test(c.path)), "never calls the write endpoint");
   assert.deepEqual(Object.keys(k.executors()), [], "no actions: read-only");
   const bad = new KuberaConnector(store, { apiKey: "key123", secret: "wrong", fetch: f, now: () => now + 3_600_000 });

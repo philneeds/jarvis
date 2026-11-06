@@ -45,7 +45,7 @@ export const SCHEDULES: Schedule[] = [
   { id: "altman-open", agentId: "altman", task: "Pre-market: AI-era holdings and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
   { id: "armstrong-open", agentId: "armstrong", task: "Pre-market: crypto-niche stocks and catalysts today, suggested changes for Buffett.", when: "weekdays@08:30", phase: 2 },
   { id: "stevon-weekly", agentId: "stevon", task: "Build the deck for Tuesday morning's ProEdge sales meeting. Call deck_template, then sales_data (days 8 for this week; days 15 as well when there's an earlier week to compare). If nothing was uploaded this week, make no deck: reply in two lines asking Phil to upload this week's sales data (on your page in HQ, or send the spreadsheet to Jarvis on Telegram) and press Make the deck now. Otherwise write the deck as a slides block, following the template's order when there is one: the cover (ProEdge weekly sales, with the week's dates), the headline numbers against last week, results by rep or service where the data has it, what's working and what isn't, and the focus for this week. Speaker notes on every slide for what Phil should say. Use only numbers from the data. Outside the block, give the three headlines in a few lines.", when: "weekly:mon@20:00", phase: 1, push: true, deck: true },
-  { id: "munger-weekly", agentId: "munger", task: "Weekly money summary for Phil, short enough to read on his phone. Call kubera_networth: net worth now, the change this week and this month, the biggest movers and why if you can tell, and any account that stopped syncing. Then one thing to do this week. Read only; never suggest moving money without an approval.", when: "weekly:mon@07:30", phase: 2, push: true },
+  { id: "munger-weekly", agentId: "munger", task: "Weekly money summary for Phil, short enough to read on his phone. Call kubera_networth: net worth now, the change this week and this month, the biggest movers and why if you can tell, and any account that stopped syncing. Then analyse: call kubera_history (90 days) and memory_search for your earlier patterns (scope venture:money), and say what pattern you see (a recurring drain, spending creep, an account drifting, what moves net worth most), whether last week's patterns held, and one or two improvements, each with the reason and the expected effect. Save any pattern worth tracking in a remember block (scope venture:money, key money-pattern-<short name>). Read only; never suggest moving money without an approval.", when: "weekly:mon@07:30", phase: 2, push: true },
 ];
 
 const LAST_RUN_KEY = "schedule.lastRun";
@@ -114,7 +114,7 @@ const SUMMARY: Record<string, string> = {
   "buffett-weekly": "Holdings review after the close, up to three suggested changes; updates the watchlist.",
   "david-weekly": "Goals check: where each goal stands and next week's steps.",
   "stevon-weekly": "Tuesday meeting deck from this week's sales data (a PowerPoint).",
-  "munger-weekly": "Money summary: net worth, the week's change and the biggest movers.",
+  "munger-weekly": "Money summary: net worth, what changed, the patterns behind it, and one or two improvements.",
   "nick-weekly": "Philneeds analytics: what worked and next week's plan for Boo and ncrypt.",
   "poseidon-weekly": "Range.cool metrics, runway and the decisions that need you.",
   "marcus-open": "Pre-market notes on tech and infrastructure stocks, for Buffett.",

@@ -144,10 +144,30 @@ export class KuberaConnector {
     return rows.length ? rows.slice(0, 80).join("\n") : q ? `Nothing in Kubera matches "${query}".` : "Kubera returned no assets or debts.";
   }
 
+  /** Net worth over time from the daily snapshots, plus each account's change over the period, for spotting patterns. */
+  async historyText(days = 90): Promise<string> {
+    const hist = (await this.store.settings.get<Snapshot[]>(HISTORY_KEY, [])).filter((h) => h.day >= easternDay(this.now() - days * 86_400_000));
+    if (hist.length < 2) return `Only ${hist.length} daily snapshot${hist.length === 1 ? "" : "s"} so far; the history fills in one day at a time once Kubera is connected.`;
+    // Weekly points keep it short: the last snapshot of each ISO week, plus today.
+    const weekly = hist.filter((h, i) => i === hist.length - 1 || new Date(`${hist[i + 1]!.day}T12:00:00Z`).getUTCDay() === 1);
+    const first = hist[0]!, last = hist[hist.length - 1]!;
+    const lines = [
+      `Net worth from ${first.day} to ${last.day} (${hist.length} daily snapshots): ${money(first.netWorth)} → ${money(last.netWorth)} (${last.netWorth - first.netWorth >= 0 ? "+" : ""}${money(last.netWorth - first.netWorth)}).`,
+      `Weekly: ${weekly.map((h) => `${h.day} ${money(h.netWorth)} (assets ${money(h.assets)}, debts ${money(h.debts)})`).join("; ")}.`,
+    ];
+    const moves = Object.keys({ ...first.items, ...last.items }).map((k) => [k, (last.items[k] ?? 0) - (first.items[k] ?? 0)] as const).filter(([, d]) => Math.abs(d) >= 1).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+    if (moves.length) lines.push(`Change by account over the period: ${moves.slice(0, 15).map(([k, d]) => `${k} ${d >= 0 ? "+" : ""}${money(d)}`).join(", ")}.`);
+    const daily = hist.slice(1).map((h, i) => ({ day: h.day, d: h.netWorth - hist[i]!.netWorth }));
+    const big = [...daily].sort((a, b) => Math.abs(b.d) - Math.abs(a.d)).slice(0, 5);
+    lines.push(`Biggest single days: ${big.map((x) => `${x.day} ${x.d >= 0 ? "+" : ""}${money(x.d)}`).join(", ")}.`);
+    return lines.join("\n");
+  }
+
   tools(): ToolDef[] {
     const portfolio = z.string().max(80).optional().describe("Kubera portfolio name, if Phil has more than one");
     return [
       defineTool({ name: "kubera_networth", description: "Phil's net worth from Kubera (read-only): total, assets, debts, change over the last week and month, the biggest movers, and accounts that stopped syncing.", schema: { portfolio }, handler: async (a) => { try { return await this.summary(a.portfolio); } catch (e) { return `Kubera: ${(e as Error).message}`; } } }),
+      defineTool({ name: "kubera_history", description: "Phil's net worth over time from the daily Kubera snapshots (read-only): weekly points, each account's change over the period, and the biggest single days. For spotting patterns.", schema: { days: z.number().int().min(7).max(400).optional() }, handler: async (a) => { try { return await this.historyText(a.days ?? 90); } catch (e) { return `Kubera: ${(e as Error).message}`; } } }),
       defineTool({ name: "kubera_items", description: "Phil's assets and debts in Kubera (read-only), largest first, optionally filtered by a word (an account, a ticker, a bank).", schema: { query: z.string().max(80).optional(), portfolio }, handler: async (a) => { try { return await this.itemsText(a.query, a.portfolio); } catch (e) { return `Kubera: ${(e as Error).message}`; } } }),
     ];
   }
@@ -156,6 +176,6 @@ export class KuberaConnector {
   executors(): Record<string, Executor> { return {}; }
 
   static promptHint(): string {
-    return "Kubera is connected, read-only: kubera_networth for the total and what changed, kubera_items for accounts and holdings. Quote amounts as Kubera reports them and say when an account hasn't synced. Nothing can be moved or changed through it.";
+    return "Kubera is connected, read-only: kubera_networth for the total and what changed, kubera_items for accounts and holdings, kubera_history for the trend over weeks and months. Quote amounts as Kubera reports them and say when an account hasn't synced. Nothing can be moved or changed through it.";
   }
 }
