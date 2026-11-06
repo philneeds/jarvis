@@ -39,10 +39,37 @@ test("GoHighLevel: read-only calls with the v2 headers; contacts, conversations,
   assert.match(await t("ghl_invoices").handler({ status: "sent" }, ctx), /1 invoice \(sent\), \$2,100 still due\.\n\[i1\] #17 Lopez kitchen · Ana Lopez · \$4,200 total, \$2,100 due · sent · due 2026-11-20/);
   assert.match(await t("ghl_appointments").handler({ days: 7 }, ctx), /Nov 10, 8:00 AM–12:00 PM · Install: Lopez kitchen · confirmed · 12 Elm St/);
   assert.ok(calls.every((c) => c.method === "GET" || c.path === "/contacts/search"), "nothing writes");
-  assert.deepEqual(Object.keys(g.executors()), []);
+  assert.deepEqual(Object.keys(g.executors()), ["ghl.message"], "the one write is a reply, and only after approval");
   const n = calls.length; await t("ghl_pipeline").handler({}, ctx); assert.equal(calls.length, n, "cached for a minute");
   assert.equal((await g.status()).lastFetch?.ok, true);
   const bad = new GoHighLevelConnector(store, { apiKey: "wrong", locationId: "loc1", fetch: f, now: () => now });
   assert.match(await bad.tools()[0]!.handler({}, ctx), /GoHighLevel: GoHighLevel refused the key \(Invalid JWT\)/);
   for (const id of ["stella", "karol", "stephanie", "brian"]) assert.ok(CHARTERS[id]!.tools!.some((x) => x.startsWith("ghl_")), `${id} reads GoHighLevel`);
+});
+
+test("a GoHighLevel reply waits for Phil, then goes out through the API on approval", async () => {
+  const store = memoryStore(); await store.init();
+  const sent: { path: string; version: string; body: Record<string, unknown> }[] = [];
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = new URL(String(url)); const h = init?.headers as Record<string, string>;
+    if (u.pathname === "/contacts/c1") return Response.json({ contact: { id: "c1", contactName: "Ana Lopez", phone: "+15855550100" } });
+    if (u.pathname === "/contacts/c1/notes") return Response.json({ notes: [] });
+    if (u.pathname === "/conversations/messages" && init?.method === "POST") { sent.push({ path: u.pathname, version: h.version, body: JSON.parse(String(init.body)) }); return Response.json({ conversationId: "v1", messageId: "m9" }); }
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  const { Jarvis } = await import("../src/index.js");
+  const jarvis = new Jarvis({ store });
+  const g = new GoHighLevelConnector(store, { apiKey: "pit-abc", locationId: "loc1", fetch: f });
+  jarvis.addConnector(g, GoHighLevelConnector.promptHint());
+  const a = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Reply to Ana", body: "Hi Ana, the quote is on its way tomorrow. Stephanie, JD PM", payload: { action: "ghl.message", contactId: "c1", type: "SMS" } });
+  assert.equal(a.status, "pending", "a customer message waits for Phil");
+  assert.equal((a.payload as { to?: string }).to, "Ana Lopez (+15855550100)", "the card names the person");
+  assert.match(a.effect ?? "", /Sends this SMS to Ana Lopez/);
+  assert.equal(sent.length, 0);
+  const done = await jarvis.decide(a.id, "approved", "ok");
+  assert.equal(done?.status, "approved");
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0]!.body, { type: "SMS", contactId: "c1", message: "Hi Ana, the quote is on its way tomorrow. Stephanie, JD PM" });
+  assert.equal(sent[0]!.version, "2021-04-15");
+  assert.match(done?.note ?? "", /Sent to Ana Lopez \(\+15855550100\) via GoHighLevel \(SMS\), message m9/);
 });

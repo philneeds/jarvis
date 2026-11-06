@@ -147,7 +147,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="GoHighLevel">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.ghl?.lastFetch?.ok ? "dot-working" : conn?.ghl?.lastFetch ? "dot-error" : "dot-idle"}`} />
-              <span><b>GoHighLevel</b> · Stella's team reads JD PM's contacts, conversations, pipeline, invoices and appointments, read-only.</span>
+              <span><b>GoHighLevel</b> · Stella's team reads JD PM's contacts, conversations, pipeline, invoices and appointments; replies go out only after you approve them (add the conversations/message.write scope for that).</span>
               {conn?.ghl?.configured
                 ? <><span style={{ color: "var(--dim)" }}>{conn.ghl.lastFetch ? `${conn.ghl.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.ghl.lastFetch.at)}` : "not read yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testGhl()}>Check now</button></>
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GHL_API_KEY (a read-only Private Integration token) and GHL_LOCATION_ID</span>}

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Store } from "../store/types.js";
 import { defineTool, type ToolDef } from "../tools/index.js";
-import type { Executor } from "../jarvis/orchestrator.js";
+import type { Describer, Executor } from "../jarvis/orchestrator.js";
 
 /**
  * GoHighLevel for JD PM (read-only): contacts, conversations, the pipeline, invoices and appointments, from the
@@ -9,7 +9,8 @@ import type { Executor } from "../jarvis/orchestrator.js";
  *   GHL_API_KEY       a Private Integration token (Sub-account Settings > Private Integrations), read-only scopes:
  *                     contacts, conversations, conversations/message, opportunities, invoices, calendars/events, locations
  *   GHL_LOCATION_ID   the sub-account id (Settings > Business Profile)
- * Nothing here writes to GoHighLevel. Replies and new records come later, as approvals.
+ * The one write: a reply to a customer (SMS, email, WhatsApp, Facebook or Instagram message), only after Phil approves
+ * it in Needs you. That needs the conversations/message.write scope on the token.
  */
 export interface GhlOptions { apiKey: string; locationId: string; fetch?: typeof fetch; now?: () => number; baseUrl?: string }
 
@@ -177,10 +178,48 @@ export class GoHighLevelConnector {
     ];
   }
 
-  /** Read-only for now: nothing to approve. */
-  executors(): Record<string, Executor> { return {}; }
+  /** Send one message to a contact through GoHighLevel (SMS, Email, WhatsApp, FB, IG). Only ever called after Phil approves. */
+  async sendMessage(p: { contactId: string; type: string; message: string; subject?: string; html?: string }): Promise<{ conversationId?: string; messageId?: string }> {
+    const type = String(p.type).toUpperCase() === "EMAIL" ? "Email" : String(p.type).toUpperCase();
+    if (!["SMS", "EMAIL", "WHATSAPP", "FB", "IG"].includes(type.toUpperCase())) throw new Error(`can't send a "${p.type}" message; use SMS, Email, WhatsApp, FB or IG`);
+    const body: Record<string, unknown> = { type, contactId: p.contactId, message: p.message };
+    if (type === "Email") { body.subject = p.subject ?? "From JD PM Renovations"; if (p.html) body.html = p.html; }
+    const res = await this.f(`${this.opts.baseUrl ?? "https://services.leadconnectorhq.com"}/conversations/messages`, { method: "POST", headers: { authorization: `Bearer ${this.opts.apiKey}`, version: "2021-04-15", accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body) });
+    const j = (await res.json().catch(() => ({}))) as { conversationId?: string; messageId?: string; message?: string | string[] };
+    const msg = Array.isArray(j.message) ? j.message.join("; ") : j.message;
+    if (res.status === 401 || res.status === 403) throw new Error(`GoHighLevel refused to send (${res.status}${msg ? `: ${msg}` : ""}). The token needs the conversations/message.write scope.`);
+    if (!res.ok) throw new Error(`GoHighLevel couldn't send (${res.status}${msg ? `: ${msg}` : ""})`);
+    this.cache.clear();
+    return { conversationId: j.conversationId, messageId: j.messageId };
+  }
+
+  /** The one action: a reply to a customer, carried out once Phil approves it. */
+  executors(): Record<string, Executor> {
+    return {
+      "ghl.message": async (a) => {
+        const p = (a.payload ?? {}) as { contactId?: unknown; type?: unknown; message?: unknown; subject?: unknown; html?: unknown; to?: unknown };
+        if (typeof p.contactId !== "string" || !p.contactId) throw new Error("ghl.message needs the contactId (from ghl_contacts or ghl_conversations)");
+        const message = typeof p.message === "string" && p.message.trim() ? p.message.trim() : a.body.trim();
+        if (!message) throw new Error("ghl.message needs the message text");
+        const r = await this.sendMessage({ contactId: p.contactId, type: typeof p.type === "string" ? p.type : "SMS", message, subject: typeof p.subject === "string" ? p.subject : undefined, html: typeof p.html === "string" ? p.html : undefined });
+        return `Sent${typeof p.to === "string" ? ` to ${p.to}` : ""} via GoHighLevel (${typeof p.type === "string" ? p.type : "SMS"})${r.messageId ? `, message ${r.messageId}` : ""}.`;
+      },
+    };
+  }
+
+  describe(): Record<string, Describer> {
+    return {
+      "ghl.message": (p) => `Sends this ${String(p.type ?? "SMS")} to ${String(p.to ?? `contact ${String(p.contactId ?? "?")}`)} through GoHighLevel, from JD PM's number or mailbox there. It goes out the moment you approve.`,
+    };
+  }
+
+  /** Fill in the contact's name so Phil's card says who it goes to. */
+  async normalize(payload: Record<string, unknown>): Promise<Record<string, unknown> | void> {
+    if (payload.action !== "ghl.message" || typeof payload.contactId !== "string" || typeof payload.to === "string") return;
+    try { const { contact } = await this.contact(payload.contactId); if (contact) return { ...payload, to: `${name(contact)}${contact.phone && String(payload.type ?? "SMS").toUpperCase() !== "EMAIL" ? ` (${contact.phone})` : contact.email && String(payload.type ?? "").toUpperCase() === "EMAIL" ? ` (${contact.email})` : ""}` }; } catch { /* the card shows the id */ }
+  }
 
   static promptHint(): string {
-    return "GoHighLevel is connected for JD PM, read-only: ghl_contacts and ghl_contact for customers and leads, ghl_conversations and ghl_messages for what they said (texts, calls, email, Facebook), ghl_pipeline for the deals by stage, ghl_invoices for billing, ghl_appointments for what's booked. It is the record for JD PM: check it before the board or Gmail. Replying inside GoHighLevel isn't wired yet: draft the reply for Phil to send, or send by email with an approval.";
+    return "GoHighLevel is connected for JD PM: ghl_contacts and ghl_contact for customers and leads, ghl_conversations and ghl_messages for what they said (texts, calls, email, Facebook), ghl_pipeline for the deals by stage, ghl_invoices for billing, ghl_appointments for what's booked. It is the record for JD PM: check it before the board or Gmail. To reply to a customer inside GoHighLevel (text, email, WhatsApp, Facebook or Instagram message), put the exact text in an approval block with \"kind\":\"send\" and \"payload\":{\"action\":\"ghl.message\",\"contactId\":\"<id>\",\"type\":\"SMS|Email|WhatsApp|FB|IG\",\"message\":\"...\",\"subject\":\"<email only>\"}; it goes out only when Phil approves. Nothing else in GoHighLevel can be changed.";
   }
 }
