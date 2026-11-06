@@ -194,9 +194,52 @@ export class GoHighLevelConnector {
     return { conversationId: j.conversationId, messageId: j.messageId };
   }
 
-  /** The one action: a reply to a customer, carried out once Phil approves it. */
+  private async post<T>(path: string, body: unknown, method: "POST" | "PUT" = "POST"): Promise<T> {
+    const res = await this.f(`${this.opts.baseUrl ?? "https://services.leadconnectorhq.com"}${path}`, { method, headers: { authorization: `Bearer ${this.opts.apiKey}`, version: "2021-07-28", accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body) });
+    const j = (await res.json().catch(() => ({}))) as T & { message?: string | string[]; meta?: { contactId?: string } };
+    const msg = Array.isArray(j.message) ? j.message.join("; ") : j.message;
+    if (res.status === 401 || res.status === 403) throw new Error(`GoHighLevel refused (${res.status}${msg ? `: ${msg}` : ""}). The token needs the write scope for this.`);
+    if (!res.ok) throw new Error(`GoHighLevel said no (${res.status}${msg ? `: ${msg}` : ""})${j.meta?.contactId ? `; existing contact ${j.meta.contactId}` : ""}`);
+    this.cache.clear();
+    return j;
+  }
+
+  /** Writes, each carried out only once Phil approves: a reply, a new contact, a note, a new deal, a deal moved. */
   executors(): Record<string, Executor> {
+    const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
     return {
+      "ghl.contact.create": async (a) => {
+        const p = (a.payload ?? {}) as Record<string, unknown>;
+        const firstName = str(p.firstName) || str(p.name).split(" ")[0] || "", lastName = str(p.lastName) || str(p.name).split(" ").slice(1).join(" ");
+        if (!firstName && !str(p.phone) && !str(p.email)) throw new Error("ghl.contact.create needs a name, phone or email");
+        const body: Record<string, unknown> = { locationId: this.opts.locationId, firstName, lastName, phone: str(p.phone) || undefined, email: str(p.email) || undefined, source: str(p.source) || undefined, tags: Array.isArray(p.tags) ? p.tags.map(String).slice(0, 10) : undefined, address1: str(p.address) || undefined, city: str(p.city) || undefined };
+        const r = await this.post<{ contact?: { id?: string } }>("/contacts/", body);
+        return `Created ${[firstName, lastName].filter(Boolean).join(" ") || "the contact"} in GoHighLevel${r.contact?.id ? ` (${r.contact.id})` : ""}.`;
+      },
+      "ghl.note": async (a) => {
+        const p = (a.payload ?? {}) as Record<string, unknown>;
+        if (!str(p.contactId)) throw new Error("ghl.note needs the contactId");
+        const body = str(p.body) || a.body.trim();
+        if (!body) throw new Error("ghl.note needs the note text");
+        await this.post(`/contacts/${encodeURIComponent(str(p.contactId))}/notes`, { body: body.slice(0, 5000) });
+        return `Note added to ${str(p.to) || `contact ${str(p.contactId)}`} in GoHighLevel.`;
+      },
+      "ghl.deal.create": async (a) => {
+        const p = (a.payload ?? {}) as Record<string, unknown>;
+        const name = str(p.name) || a.title;
+        const { pipelineId, stageId } = await this.resolveStage(str(p.pipeline), str(p.stage));
+        const r = await this.post<{ opportunity?: { id?: string } }>("/opportunities/", { pipelineId, locationId: this.opts.locationId, name, pipelineStageId: stageId, status: "open", contactId: str(p.contactId) || undefined, monetaryValue: typeof p.value === "number" ? p.value : undefined });
+        return `Deal "${name}" created in GoHighLevel at ${str(p.stage) || "the first stage"}${r.opportunity?.id ? ` (${r.opportunity.id})` : ""}.`;
+      },
+      "ghl.deal.move": async (a) => {
+        const p = (a.payload ?? {}) as Record<string, unknown>;
+        if (!str(p.opportunityId)) throw new Error("ghl.deal.move needs the opportunityId (from ghl_pipeline)");
+        const { stageId } = await this.resolveStage(str(p.pipeline), str(p.stage));
+        const body: Record<string, unknown> = { pipelineStageId: stageId };
+        if (["won", "lost", "abandoned", "open"].includes(str(p.status))) body.status = str(p.status);
+        await this.post(`/opportunities/${encodeURIComponent(str(p.opportunityId))}`, body, "PUT");
+        return `Moved ${str(p.name) || `deal ${str(p.opportunityId)}`} to ${str(p.stage)}${body.status ? ` (${String(body.status)})` : ""} in GoHighLevel.`;
+      },
       "ghl.message": async (a) => {
         const p = (a.payload ?? {}) as { contactId?: unknown; type?: unknown; message?: unknown; subject?: unknown; html?: unknown; to?: unknown };
         if (typeof p.contactId !== "string" || !p.contactId) throw new Error("ghl.message needs the contactId (from ghl_contacts or ghl_conversations)");
@@ -208,19 +251,33 @@ export class GoHighLevelConnector {
     };
   }
 
+  /** A stage by name (and pipeline by name when there's more than one), so agents can say "Quoted" instead of an id. */
+  private async resolveStage(pipeline: string, stage: string): Promise<{ pipelineId: string; stageId: string }> {
+    const pipes = await this.pipelines();
+    if (!pipes.length) throw new Error("GoHighLevel has no pipelines");
+    const pipe = (pipeline ? pipes.find((p) => p.name.toLowerCase() === pipeline.toLowerCase() || p.id === pipeline) : undefined) ?? (pipes.length === 1 ? pipes[0] : undefined) ?? pipes.find((p) => (p.stages ?? []).some((s) => s.name.toLowerCase() === stage.toLowerCase())) ?? pipes[0]!;
+    const st = stage ? (pipe.stages ?? []).find((s) => s.name.toLowerCase() === stage.toLowerCase() || s.id === stage) : (pipe.stages ?? [])[0];
+    if (!st) throw new Error(`No stage "${stage}" in ${pipe.name}; stages are ${(pipe.stages ?? []).map((s) => s.name).join(", ")}`);
+    return { pipelineId: pipe.id, stageId: st.id };
+  }
+
   describe(): Record<string, Describer> {
     return {
       "ghl.message": (p) => `Sends this ${String(p.type ?? "SMS")} to ${String(p.to ?? `contact ${String(p.contactId ?? "?")}`)} through GoHighLevel, from JD PM's number or mailbox there. It goes out the moment you approve.`,
+      "ghl.contact.create": (p) => `Creates ${String(p.name ?? [p.firstName, p.lastName].filter(Boolean).join(" ") ?? "a contact")}${p.phone ? ` (${String(p.phone)})` : p.email ? ` (${String(p.email)})` : ""} as a contact in JD PM's GoHighLevel${p.source ? `, source ${String(p.source)}` : ""}. Nothing is sent to them.`,
+      "ghl.note": (p) => `Adds a note to ${String(p.to ?? `contact ${String(p.contactId ?? "?")}`)} in GoHighLevel. Only your team sees it.`,
+      "ghl.deal.create": (p) => `Creates the deal "${String(p.name ?? "")}" in JD PM's pipeline${p.stage ? ` at ${String(p.stage)}` : ""}${typeof p.value === "number" ? `, worth $${Number(p.value).toLocaleString("en-US")}` : ""}. Nothing is sent to the customer.`,
+      "ghl.deal.move": (p) => `Moves ${String(p.name ?? `deal ${String(p.opportunityId ?? "?")}`)} to ${String(p.stage ?? "?")}${p.status ? ` and marks it ${String(p.status)}` : ""} in JD PM's pipeline. Nothing is sent to the customer.`,
     };
   }
 
   /** Fill in the contact's name so Phil's card says who it goes to. */
   async normalize(payload: Record<string, unknown>): Promise<Record<string, unknown> | void> {
-    if (payload.action !== "ghl.message" || typeof payload.contactId !== "string" || typeof payload.to === "string") return;
+    if (!["ghl.message", "ghl.note"].includes(String(payload.action)) || typeof payload.contactId !== "string" || typeof payload.to === "string") return;
     try { const { contact } = await this.contact(payload.contactId); if (contact) return { ...payload, to: `${name(contact)}${contact.phone && String(payload.type ?? "SMS").toUpperCase() !== "EMAIL" ? ` (${contact.phone})` : contact.email && String(payload.type ?? "").toUpperCase() === "EMAIL" ? ` (${contact.email})` : ""}` }; } catch { /* the card shows the id */ }
   }
 
   static promptHint(): string {
-    return "GoHighLevel is connected for JD PM: ghl_contacts and ghl_contact for customers and leads, ghl_conversations and ghl_messages for what they said (texts, calls, email, Facebook), ghl_pipeline for the deals by stage, ghl_invoices for billing, ghl_appointments for what's booked. It is the record for JD PM: check it before the board or Gmail. To reply to a customer inside GoHighLevel (text, email, WhatsApp, Facebook or Instagram message), put the exact text in an approval block with \"kind\":\"send\" and \"payload\":{\"action\":\"ghl.message\",\"contactId\":\"<id>\",\"type\":\"SMS|Email|WhatsApp|FB|IG\",\"message\":\"...\",\"subject\":\"<email only>\"}; it goes out only when Phil approves. Nothing else in GoHighLevel can be changed.";
+    return "GoHighLevel is connected for JD PM: ghl_contacts and ghl_contact for customers and leads, ghl_conversations and ghl_messages for what they said (texts, calls, email, Facebook), ghl_pipeline for the deals by stage, ghl_invoices for billing, ghl_appointments for what's booked. It is the record for JD PM: check it before the board or Gmail. To reply to a customer inside GoHighLevel (text, email, WhatsApp, Facebook or Instagram message), put the exact text in an approval block with \"kind\":\"send\" and \"payload\":{\"action\":\"ghl.message\",\"contactId\":\"<id>\",\"type\":\"SMS|Email|WhatsApp|FB|IG\",\"message\":\"...\",\"subject\":\"<email only>\"}; it goes out only when Phil approves. Other changes, each an approval block with \"kind\":\"other\": a new contact {\"action\":\"ghl.contact.create\",\"name\":\"...\",\"phone\":\"...\",\"email\":\"...\",\"source\":\"Facebook|referral|...\"}; a note {\"action\":\"ghl.note\",\"contactId\":\"<id>\",\"body\":\"...\"}; a new deal {\"action\":\"ghl.deal.create\",\"name\":\"...\",\"contactId\":\"<id>\",\"stage\":\"<stage name>\",\"value\":<dollars>}; a deal moved {\"action\":\"ghl.deal.move\",\"opportunityId\":\"<id from ghl_pipeline>\",\"name\":\"...\",\"stage\":\"<stage name>\",\"status\":\"open|won|lost\"}. Say in the body why.";
   }
 }

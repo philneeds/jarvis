@@ -1,4 +1,5 @@
 import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent, saveImage, addDataFile, setTemplate, deckFile } from "@jarvis/core";
+import { transcribe as transcribeDefault, synthesize as synthesizeDefault, transcriptionProvider } from "./speech.js";
 
 /**
  * Two-way Telegram: Phil talks to Jarvis from his phone, and approvals arrive with Approve / Reject buttons.
@@ -6,13 +7,15 @@ import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent, saveImage,
  *   TELEGRAM_CHAT_ID     Phil's chat id; every other sender is ignored
  * Long polling, no public webhook needed.
  */
-export interface TelegramOptions { token: string; chatId: string; fetch?: typeof fetch; pollTimeout?: number }
+export interface TelegramOptions { token: string; chatId: string; fetch?: typeof fetch; pollTimeout?: number; transcribe?: (audio: Buffer, mime: string) => Promise<string>; synthesize?: (text: string) => Promise<Buffer | undefined> }
 
 export class TelegramBot {
   private f: typeof fetch;
   private offset = 0;
   private running = false;
   private off?: () => void;
+  /** Phil's messages that came in as voice notes: the replies to those go back as audio too (when a voice is set up). */
+  private voiceAsked = new Set<string>();
   constructor(private jarvis: Jarvis, private opts: TelegramOptions) { this.f = opts.fetch ?? fetch; }
 
   static fromEnv(jarvis: Jarvis): TelegramBot | undefined {
@@ -26,6 +29,19 @@ export class TelegramBot {
 
   async send(text: string, extra: Record<string, unknown> = {}) {
     for (let i = 0; i < text.length; i += 3900) await this.api("sendMessage", { chat_id: this.opts.chatId, text: text.slice(i, i + 3900), ...(i + 3900 >= text.length ? extra : {}) }).catch(() => undefined);
+  }
+
+  /** Jarvis's reply as audio, after the text, for a question that came in as a voice note. */
+  async sendSpoken(text: string) {
+    try {
+      const audio = await (this.opts.synthesize ?? synthesizeDefault)(text.replace(/[*_`#>]/g, ""));
+      if (!audio) return;
+      const form = new FormData();
+      form.append("chat_id", this.opts.chatId);
+      form.append("audio", new Blob([new Uint8Array(audio)], { type: "audio/mpeg" }), "jarvis.mp3");
+      form.append("title", "Jarvis");
+      await this.f(`https://api.telegram.org/bot${this.opts.token}/sendAudio`, { method: "POST", body: form });
+    } catch { /* the text already went */ }
   }
 
   /** Send files (decks) as Telegram documents. */
@@ -46,7 +62,7 @@ export class TelegramBot {
       if (e.type === "chat.message" && e.message.channel === "telegram" && e.message.role !== "phil") {
         const o = e.message;
         const who = o.role === "jarvis" ? "Jarvis" : o.role === "system" ? "HQ" : getAgent(o.agentId ?? "")?.name ?? o.agentId ?? "Agent";
-        void this.send(`${who}: ${o.text}`).then(() => this.sendFiles(o.files));
+        void this.send(`${who}: ${o.text}`).then(() => this.sendFiles(o.files)).then(() => { if (o.replyTo && this.voiceAsked.has(o.replyTo) && o.kind !== "ack") return this.sendSpoken(o.text); });
       }
       if (e.type === "report") void this.send(`${e.title} · ${e.agentId === "jarvis" ? "Jarvis" : getAgent(e.agentId)?.name ?? e.agentId}\n\n${e.text}`).then(() => this.sendFiles(e.files));
       if (e.type === "approval.new") void this.announce(e.approval);
@@ -119,8 +135,23 @@ export class TelegramBot {
     if (!msg) return;
     const imageFile = msg.photo?.length ? msg.photo[msg.photo.length - 1]!.file_id : msg.document?.mime_type?.startsWith("image/") ? msg.document.file_id : undefined;
     const doc = !imageFile && msg.document ? msg.document : undefined;
-    if (!msg.text && !imageFile && !doc) return;
+    const voice = msg.voice ?? msg.audio;
+    if (!msg.text && !imageFile && !doc && !voice) return;
     if (String(msg.chat.id) !== this.opts.chatId) { await this.api("sendMessage", { chat_id: msg.chat.id, text: "This is Phil's Jarvis. Not for you." }).catch(() => undefined); return; }
+    if (voice) {
+      // A voice note: transcribed, shown back so Phil can see what was heard, then handled like a typed message.
+      if (!transcriptionProvider() && !this.opts.transcribe) { await this.send("I can't hear voice notes yet: the server needs a transcription key (ElevenLabs, OpenAI or Groq). Type it for now."); return; }
+      try {
+        const { data } = await this.download(voice.file_id);
+        const heard = await (this.opts.transcribe ?? transcribeDefault)(data, voice.mime_type ?? "audio/ogg");
+        if (!heard) { await this.send("I couldn't make out that voice note."); return; }
+        await this.send(`Heard: "${heard}"`);
+        const text = msg.caption ? `${heard}\n\n${msg.caption}` : heard;
+        const r = await this.jarvis.submit(text, { channel: "telegram" });
+        if (r.message?.id) this.voiceAsked.add(r.message.id);
+      } catch (e) { await this.send(`I couldn't take that voice note: ${(e as Error).message}`); }
+      return;
+    }
     if (doc) {
       // A spreadsheet is this week's ProEdge sales data for Stevon's deck; a PowerPoint is the deck template.
       const name = doc.file_name ?? "upload";
@@ -153,6 +184,6 @@ export class TelegramBot {
 
 export interface Update {
   update_id: number;
-  message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string; caption?: string; photo?: { file_id: string; width: number; height: number; file_size?: number }[]; document?: { file_id: string; mime_type?: string; file_size?: number; file_name?: string } };
+  message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string; caption?: string; photo?: { file_id: string; width: number; height: number; file_size?: number }[]; document?: { file_id: string; mime_type?: string; file_size?: number; file_name?: string }; voice?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; audio?: { file_id: string; mime_type?: string; duration?: number; file_size?: number } };
   callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number } } };
 }

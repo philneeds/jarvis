@@ -29,6 +29,10 @@ export default function SettingsPage() {
   const [kbMsg, setKbMsg] = useState<string>();
   const [ghlMsg, setGhlMsg] = useState<string>();
   const testGhl = async () => { setGhlMsg("Checking…"); try { const r = await post<{ summary: string }>("/api/connectors/ghl/test", {}); setGhlMsg(r.summary); await load(); } catch (e) { setGhlMsg((e as Error).message); } };
+  const [bk, setBk] = useState<{ last: { at: string; ok: boolean; file?: string; bytes?: number; drive?: string; error?: string; kept?: number } | null; dir: string; drive: boolean; healthcheck: boolean } | null>(null);
+  const [bkMsg, setBkMsg] = useState<string>();
+  useEffect(() => { api<typeof bk>("/api/backup").then(setBk).catch(() => undefined); }, []);
+  const backupNow = async () => { setBkMsg("Backing up…"); try { const r = await post<{ result: string }>("/api/backup", {}); setBkMsg(r.result); setBk(await api<typeof bk>("/api/backup")); } catch (e) { setBkMsg((e as Error).message); } };
   const [rhMsg, setRhMsg] = useState<string>();
   const connectRobinhood = async () => { try { const r = await api<{ url: string }>("/api/connectors/robinhood/auth"); location.href = r.url; } catch (e) { setRhMsg((e as Error).message); } };
   const disconnectRobinhood = async () => { if (!confirm("Disconnect Robinhood? Buffett and Munger lose the holdings until you reconnect.")) return; await post("/api/connectors/robinhood/disconnect", {}); setRhMsg(undefined); await load(); };
@@ -91,6 +95,19 @@ export default function SettingsPage() {
           {msg && <p className="m-0 text-[12px]" style={{ color: msg.startsWith("Passkey added") ? "var(--green)" : "var(--red)" }}>{msg}</p>}
         </section>
 
+        <section className="card flex flex-col gap-3" aria-label="Backups">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="label">Backups and downtime alert</span>
+            <button className="btn btn-sm ml-auto" onClick={() => void backupNow()}>Back up now</button>
+          </div>
+          <div className="flex flex-col gap-1 text-[12px]">
+            <div className="flex items-center gap-2"><span className={`dot ${bk?.last?.ok ? "dot-working" : bk?.last ? "dot-error" : "dot-idle"}`} /><span><b>Nightly backup</b> at 3:15 am to <code>{bk?.dir ?? "/var/backups/jarvis"}</code>, kept 14 days.</span><span style={{ color: "var(--muted)" }}>{bk?.last ? `${bk.last.ok ? "last" : "FAILED"} ${fmtTime(bk.last.at)}${bk.last.bytes ? ` · ${Math.round(bk.last.bytes / 1024)} KB` : ""}${bk.last.kept ? ` · ${bk.last.kept} kept` : ""}` : "none yet"}</span></div>
+            <div className="flex items-center gap-2 pl-5"><span><b>Google Drive copy</b> into a "Jarvis backups" folder.</span><span style={{ color: "var(--muted)" }}>{bk?.drive ? (bk.last?.drive === "uploaded" ? "working" : bk.last?.drive && bk.last.drive !== "skipped" ? bk.last.drive : "runs with the next backup; reconnect Google once so HQ may create the folder") : "connect Google above to enable"}</span></div>
+            <div className="flex items-center gap-2"><span className={`dot ${bk?.healthcheck ? "dot-working" : "dot-idle"}`} /><span><b>Downtime alert</b> · HQ pings a check every 5 minutes; when pings stop, that service messages you.</span><span style={{ color: "var(--muted)" }}>{bk?.healthcheck ? "on" : "set HEALTHCHECK_URL (a free healthchecks.io check with a Telegram alert)"}</span></div>
+            {bk?.last?.error && <p className="m-0 pl-5" style={{ color: "var(--red)" }}>{bk.last.error}</p>}
+            {bkMsg && <p className="m-0 pl-5" style={{ color: /FAILED|error/i.test(bkMsg) ? "var(--red)" : "var(--ink)" }}>{bkMsg}</p>}
+          </div>
+        </section>
         <section className="card flex flex-col gap-3" aria-label="Build phase">
           <span className="label">Build phase</span>
           <p className="m-0 text-[12px]">Each phase starts only after the previous one is used daily for a week. Current: <b>Phase {phase}</b>.</p>

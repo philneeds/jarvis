@@ -78,6 +78,8 @@ export class Jarvis {
   private describers = new Map<string, Describer>();
   /** Extra tools from connectors, by name. */
   readonly connectorTools = new Map<string, import("../tools/index.js").ToolDef>();
+  /** Housekeeping the scheduler runs by name (the server registers "backup"); each returns a one-line result for the log. */
+  readonly tasks = new Map<string, () => Promise<string>>();
   private promptHints: string[] = [];
 
   constructor(opts: JarvisOptions) {

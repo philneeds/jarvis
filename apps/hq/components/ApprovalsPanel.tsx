@@ -12,17 +12,17 @@ const KIND: Record<string, string> = { send: "var(--red)", post: "var(--sky, #5C
 const ACTION_LABEL: Record<string, string> = {
   "gmail.send": "Send email", "gmail.archive": "Archive", "gmail.label": "Add label", "gmail.trash": "Move to trash",
   "calendar.create": "Add to calendar", "calendar.update": "Change event", "calendar.delete": "Remove event",
-  "x.post": "Post to X", "x.reply": "Post reply", "x.dm": "Send DM", "ghl.message": "Send via GoHighLevel", "robinhood.call": "Run on Robinhood",
+  "x.post": "Post to X", "x.reply": "Post reply", "x.dm": "Send DM", "ghl.message": "Send via GoHighLevel", "ghl.contact.create": "Create contact", "ghl.note": "Add note", "ghl.deal.create": "Create deal", "ghl.deal.move": "Move deal", "robinhood.call": "Run on Robinhood",
   "trade.execute": "Place trade", "trade.close": "Close position", "strategy.enable": "Enable strategy", "memory.replace": "Apply",
 };
 /** Which payload fields are worth a line at the top, in order. */
 const HEADLINE: Record<string, string[]> = {
   "gmail.send": ["to", "account", "subject"], "gmail.archive": ["account", "query", "max"], "gmail.label": ["account", "label", "query"], "gmail.trash": ["account", "query", "max"],
   "calendar.create": ["start", "end", "account"], "calendar.update": ["start", "end", "account"], "calendar.delete": ["title", "account"],
-  "x.post": ["account"], "x.reply": ["account", "replyTo"], "x.dm": ["account", "to"], "ghl.message": ["to", "type", "subject"], "robinhood.call": ["tool"],
+  "x.post": ["account"], "x.reply": ["account", "replyTo"], "x.dm": ["account", "to"], "ghl.message": ["to", "type", "subject"], "ghl.contact.create": ["name", "phone", "email", "source"], "ghl.note": ["to"], "ghl.deal.create": ["name", "stage", "value"], "ghl.deal.move": ["name", "stage", "status"], "robinhood.call": ["tool"],
   "trade.execute": ["symbol", "side", "sizeUsd", "strategy"], "trade.close": ["positionId", "pnlUsd"], "strategy.enable": ["name", "backtestReturn", "winRate", "maxDrawdown", "paperDays"],
 };
-const LABEL: Record<string, string> = { to: "To", account: "From", subject: "Subject", query: "Matching", max: "Up to", label: "Label", start: "Start", end: "End", title: "Event", replyTo: "Reply to", sizeUsd: "Size $", pnlUsd: "P&L $", positionId: "Position", backtestReturn: "Backtest", winRate: "Win rate", maxDrawdown: "Max drawdown", paperDays: "Paper days", symbol: "Symbol", side: "Side", strategy: "Strategy", name: "Name", type: "Channel", tool: "Tool" };
+const LABEL: Record<string, string> = { to: "To", account: "From", subject: "Subject", query: "Matching", max: "Up to", label: "Label", start: "Start", end: "End", title: "Event", replyTo: "Reply to", sizeUsd: "Size $", pnlUsd: "P&L $", positionId: "Position", backtestReturn: "Backtest", winRate: "Win rate", maxDrawdown: "Max drawdown", paperDays: "Paper days", symbol: "Symbol", side: "Side", strategy: "Strategy", name: "Name", type: "Channel", tool: "Tool", phone: "Phone", email: "Email", source: "Source", stage: "Stage", value: "Value $", status: "Status" };
 
 export type ApprovalsTab = "pending" | "decided";
 

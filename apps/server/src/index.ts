@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { DiscordConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, XConnector, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
+import { DiscordConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, XConnector, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
 import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
 import { authEnabled, isAuthedRequest } from "./auth.js";
@@ -77,6 +77,18 @@ injectWebSocket(server);
 const telegram = TelegramBot.fromEnv(jarvis);
 if (telegram) { telegram.start(); console.log("Telegram bot polling"); }
 
+// Nightly backup (03:15): the database to BACKUP_DIR, a copy to Google Drive when Google is connected.
+jarvis.tasks.set("backup", async () => {
+  const drive = google ? { upload: (name: string, data: Buffer, mime: string) => google.driveUpload(name, data, mime), prune: (days: number) => google.drivePrune(days) } : undefined;
+  const r = await runBackup(store, { drive });
+  return r.ok ? `backup ${r.file} (${Math.round((r.bytes ?? 0) / 1024)} KB, ${r.kept} kept, Drive ${r.drive})` : `backup FAILED: ${r.error}`;
+});
+// Downtime alert: a dead-man's switch. With HEALTHCHECK_URL set (healthchecks.io or similar), HQ pings it every five
+// minutes; when the pings stop (server down, process dead, network gone) that service messages Phil.
+if (process.env.HEALTHCHECK_URL) {
+  const ping = () => fetch(process.env.HEALTHCHECK_URL!, { method: "GET", signal: AbortSignal.timeout(8000) }).catch(() => undefined);
+  void ping(); setInterval(() => void ping(), 5 * 60_000);
+}
 const scheduler = new Scheduler(jarvis);
 if (process.env.SCHEDULER !== "0") scheduler.start();
 

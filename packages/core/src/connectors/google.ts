@@ -28,6 +28,7 @@ export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar",
   "https://www.googleapis.com/auth/gmail.modify",   // read, draft, send, archive, label, trash (never permanent delete)
   "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/drive.file",      // only files HQ itself creates: the nightly backup copy
 ];
 
 const ACCOUNTS_KEY = "google.accounts";
@@ -138,6 +139,39 @@ export class GoogleConnector {
     const next: Tokens = { ...t, access_token: j.access_token, expires_at: this.now() + (j.expires_in - 60) * 1000 };
     await this.saveAccounts((await this.accounts()).map((a) => (a.email === t.email && a.connectedAt === t.connectedAt ? next : a)));
     return next.access_token;
+  }
+
+  /** Drive, for the nightly backup copy: the "Jarvis backups" folder in the first connected account, created if missing. */
+  async driveFolder(account?: string): Promise<string> {
+    const q = encodeURIComponent("name = 'Jarvis backups' and mimeType = 'application/vnd.google-apps.folder' and trashed = false");
+    const found = await this.api<{ files?: { id: string }[] }>(account, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&spaces=drive`);
+    if (found.files?.[0]) return found.files[0].id;
+    const made = await this.api<{ id: string }>(account, "https://www.googleapis.com/drive/v3/files?fields=id", { method: "POST", body: JSON.stringify({ name: "Jarvis backups", mimeType: "application/vnd.google-apps.folder" }) });
+    return made.id;
+  }
+  async driveUpload(name: string, data: Buffer, mime: string, account?: string): Promise<string> {
+    const folder = await this.driveFolder(account);
+    const token = await this.accessToken(account);
+    const boundary = `jarvis${Date.now()}`;
+    const meta = JSON.stringify({ name, parents: [folder] });
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\ncontent-type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\ncontent-type: ${mime}\r\n\r\n`),
+      data,
+      Buffer.from(`\r\n--${boundary}--`),
+    ]);
+    const res = await this.f("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": `multipart/related; boundary=${boundary}` }, body: new Uint8Array(body) });
+    if (res.status === 403) throw new Error("Google refused: reconnect Google under Settings to allow the Drive backup folder.");
+    if (!res.ok) throw new Error(`Drive upload failed: ${res.status} ${(await res.text()).slice(0, 200)}`);
+    return ((await res.json()) as { id: string }).id;
+  }
+  async drivePrune(keepDays: number, account?: string): Promise<number> {
+    const folder = await this.driveFolder(account);
+    const q = encodeURIComponent(`'${folder}' in parents and name contains 'jarvis-' and trashed = false`);
+    const r = await this.api<{ files?: { id: string; name: string; createdTime?: string }[] }>(account, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,createdTime)&pageSize=200`);
+    const cutoff = this.now() - keepDays * 86_400_000;
+    let n = 0;
+    for (const f of r.files ?? []) if (f.createdTime && Date.parse(f.createdTime) < cutoff) { await this.api(account, `https://www.googleapis.com/drive/v3/files/${f.id}`, { method: "DELETE" }); n++; }
+    return n;
   }
 
   private allowed?: string[]; // set per tool call; see tools()

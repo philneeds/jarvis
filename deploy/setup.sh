@@ -111,6 +111,10 @@ fi
 log "Build"
 sudo -u "$APP_USER" -H bash -lc "cd $APP_DIR && pnpm install --frozen-lockfile --prod=false >/dev/null && pnpm --filter @jarvis/core build >/dev/null && set -a && . ./.env && set +a && pnpm --filter @jarvis/core db:migrate && pnpm --filter @jarvis/server build >/dev/null && pnpm --filter @jarvis/hq build >/dev/null"
 
+# Nightly backups land here; the app user must be able to write it.
+mkdir -p /var/backups/jarvis && chown "$APP_USER:$APP_USER" /var/backups/jarvis && chmod 750 /var/backups/jarvis
+grep -q '^BACKUP_DIR=' "$APP_DIR/.env" || echo 'BACKUP_DIR=/var/backups/jarvis' >> "$APP_DIR/.env"
+
 log "Services"
 cat > /etc/systemd/system/jarvis-server.service <<EOF
 [Unit]

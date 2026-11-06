@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -438,6 +438,15 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.post("/connectors/kubera/test", async (c) => {
     if (!connectors.kubera) return c.json({ error: "KUBERA_API_KEY and KUBERA_SECRET aren't set" }, 400);
     try { return c.json({ ok: true, summary: await connectors.kubera.summary() }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
+  });
+  // Backups: the last run, and run one now.
+  api.get("/backup", async (c) => c.json({ last: await backupStatus(jarvis.store), dir: process.env.BACKUP_DIR ?? "/var/backups/jarvis", drive: !!connectors.google, healthcheck: !!process.env.HEALTHCHECK_URL }));
+  api.post("/backup", async (c) => {
+    const fn = jarvis.tasks.get("backup");
+    if (!fn) return c.json({ error: "backups aren't set up on this server" }, 400);
+    const line = await fn();
+    await jarvis.router.log("jarvis", "system", `Phil ran a backup: ${line}`);
+    return c.json({ result: line, last: await backupStatus(jarvis.store) });
   });
   // What came up the chain: every routine report and hand-over of the last few days, for the Reports screen.
   api.get("/reports", async (c) => c.json({ reports: await recentReports(jarvis.store, Math.min(168, Math.max(1, Number(c.req.query("hours") ?? 72)))) }));

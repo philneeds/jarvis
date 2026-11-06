@@ -39,7 +39,7 @@ test("GoHighLevel: read-only calls with the v2 headers; contacts, conversations,
   assert.match(await t("ghl_invoices").handler({ status: "sent" }, ctx), /1 invoice \(sent\), \$2,100 still due\.\n\[i1\] #17 Lopez kitchen · Ana Lopez · \$4,200 total, \$2,100 due · sent · due 2026-11-20/);
   assert.match(await t("ghl_appointments").handler({ days: 7 }, ctx), /Nov 10, 8:00 AM–12:00 PM · Install: Lopez kitchen · confirmed · 12 Elm St/);
   assert.ok(calls.every((c) => c.method === "GET" || c.path === "/contacts/search"), "nothing writes");
-  assert.deepEqual(Object.keys(g.executors()), ["ghl.message"], "the one write is a reply, and only after approval");
+  assert.deepEqual(Object.keys(g.executors()), ["ghl.contact.create", "ghl.note", "ghl.deal.create", "ghl.deal.move", "ghl.message"], "every write waits for approval");
   const n = calls.length; await t("ghl_pipeline").handler({}, ctx); assert.equal(calls.length, n, "cached for a minute");
   assert.equal((await g.status()).lastFetch?.ok, true);
   const bad = new GoHighLevelConnector(store, { apiKey: "wrong", locationId: "loc1", fetch: f, now: () => now });
@@ -74,4 +74,42 @@ test("a GoHighLevel reply waits for Phil, then goes out through the API on appro
   assert.match(done?.note ?? "", /Sent to Ana Lopez \(\+15855550100\) via GoHighLevel \(SMS\), message m9/);
   await g.sendMessage({ contactId: "c1", type: "whatsapp", message: "hi" });
   assert.equal(sent[1]!.body.type, "WhatsApp", "channel names are sent the way GoHighLevel spells them");
+});
+
+test("GoHighLevel writes wait for Phil (even for agents that auto-approve records) and then create a contact, add a note, create and move a deal", async () => {
+  const store = memoryStore(); await store.init();
+  const writes: { method: string; path: string; body: Record<string, unknown> }[] = [];
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = new URL(String(url)); const m = init?.method ?? "GET";
+    if (u.pathname === "/contacts/c1") return Response.json({ contact: { id: "c1", contactName: "Ana Lopez", phone: "+1585" } });
+    if (u.pathname === "/contacts/c1/notes" && m === "GET") return Response.json({ notes: [] });
+    if (u.pathname === "/opportunities/pipelines") return Response.json({ pipelines: [{ id: "p1", name: "Jobs", stages: [{ id: "s1", name: "New lead" }, { id: "s2", name: "Quoted" }] }] });
+    if (m === "POST" || m === "PUT") { writes.push({ method: m, path: u.pathname, body: JSON.parse(String(init?.body)) }); return Response.json(u.pathname === "/contacts/" ? { contact: { id: "c9" } } : { opportunity: { id: "o9" } }); }
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  const { Jarvis } = await import("../src/index.js");
+  const jarvis = new Jarvis({ store });
+  const g = new GoHighLevelConnector(store, { apiKey: "pit-abc", locationId: "loc1", fetch: f });
+  jarvis.addConnector(g, GoHighLevelConnector.promptHint());
+  const ask = (agentId: string, title: string, payload: Record<string, unknown>) => jarvis.requestApproval({ agentId, kind: "other", title, body: "why", payload });
+  const c = await ask("karol", "New lead: Bob Smith", { action: "ghl.contact.create", name: "Bob Smith", phone: "+15855550199", source: "Facebook", tags: ["bath"] });
+  assert.equal(c.status, "pending", "Karol auto-approves records, but a GoHighLevel write still waits");
+  assert.match(c.effect ?? "", /Creates Bob Smith \(\+15855550199\) as a contact.*source Facebook/);
+  assert.equal(writes.length, 0);
+  await jarvis.decide(c.id, "approved", "ok");
+  assert.deepEqual(writes[0], { method: "POST", path: "/contacts/", body: { locationId: "loc1", firstName: "Bob", lastName: "Smith", phone: "+15855550199", source: "Facebook", tags: ["bath"] } });
+  const n = await ask("stephanie", "Note on Ana", { action: "ghl.note", contactId: "c1", body: "Wants the install after Thanksgiving" });
+  assert.equal((n.payload as { to?: string }).to, "Ana Lopez (+1585)", "the card names the contact");
+  await jarvis.decide(n.id, "approved", "ok");
+  assert.deepEqual(writes[1], { method: "POST", path: "/contacts/c1/notes", body: { body: "Wants the install after Thanksgiving" } });
+  const d = await ask("jake", "Quote sent", { action: "ghl.deal.create", name: "Lopez kitchen", contactId: "c1", stage: "Quoted", value: 4200 });
+  await jarvis.decide(d.id, "approved", "ok");
+  assert.deepEqual(writes[2], { method: "POST", path: "/opportunities/", body: { pipelineId: "p1", locationId: "loc1", name: "Lopez kitchen", pipelineStageId: "s2", status: "open", contactId: "c1", monetaryValue: 4200 } });
+  const mv = await ask("jake", "Won", { action: "ghl.deal.move", opportunityId: "o9", name: "Lopez kitchen", stage: "Quoted", status: "won" });
+  const done = await jarvis.decide(mv.id, "approved", "ok");
+  assert.deepEqual(writes[3], { method: "PUT", path: "/opportunities/o9", body: { pipelineStageId: "s2", status: "won" } });
+  assert.match(done?.note ?? "", /Moved Lopez kitchen to Quoted \(won\)/);
+  const bad = await ask("jake", "Nope", { action: "ghl.deal.move", opportunityId: "o9", stage: "Installed" });
+  const failed = await jarvis.decide(bad.id, "approved", "ok");
+  assert.match(failed?.note ?? "", /No stage "Installed" in Jobs; stages are New lead, Quoted/);
 });

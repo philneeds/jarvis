@@ -117,3 +117,36 @@ test("a spreadsheet sent on Telegram becomes ProEdge sales data; the deck comes 
   assert.match(((doc!.body as FormData).get("document") as File).name, /\.pptx$/);
   bot.stop();
 });
+
+test("a voice note on Telegram is transcribed, shown back, answered, and the answer is spoken back too", async () => {
+  const store = memoryStore();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
+  const sent: { method: string; body: unknown }[] = [];
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url);
+    if (u.includes("/file/bot")) return new Response(Buffer.alloc(2000, 1));
+    const method = u.split("/").pop()!;
+    sent.push({ method, body: init?.body instanceof FormData ? init.body : JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ ok: true, result: method === "getFile" ? { file_path: "voice/file_7.oga" } : [] }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  let heardMime = "";
+  const bot = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f, pollTimeout: 0, transcribe: async (_a, mime) => { heardMime = mime; return "what is on today"; }, synthesize: async (text) => Buffer.from(`mp3:${text.slice(0, 20)}`) });
+  bot.start();
+  await bot.handle({ update_id: 1, message: { message_id: 1, chat: { id: 42 }, voice: { file_id: "v1", mime_type: "audio/ogg", duration: 3 } } });
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(heardMime, "audio/ogg");
+  const texts = sent.filter((s) => s.method === "sendMessage").map((s) => String((s.body as { text: string }).text));
+  assert.ok(texts.some((t) => t === 'Heard: "what is on today"'), "Phil sees what was heard");
+  assert.ok(texts.some((t) => /^Jarvis: /.test(t)), "Jarvis answered in text");
+  const audio = sent.find((s) => s.method === "sendAudio");
+  assert.ok(audio, "and the answer went back as audio");
+  assert.equal(((audio!.body as FormData).get("audio") as File).name, "jarvis.mp3");
+  assert.equal((await store.chat.list(10)).find((m) => m.role === "phil")?.text, "what is on today");
+  bot.stop();
+  // Without any transcription set up, a voice note gets a clear answer instead of silence.
+  const sent2: string[] = [];
+  const f2 = (async (url: string | URL | Request, init?: RequestInit) => { if (String(url).endsWith("sendMessage")) sent2.push(JSON.parse(String(init?.body)).text); return new Response(JSON.stringify({ ok: true, result: [] }), { headers: { "content-type": "application/json" } }); }) as typeof fetch;
+  const bare = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f2, pollTimeout: 0 });
+  await bare.handle({ update_id: 2, message: { message_id: 2, chat: { id: 42 }, voice: { file_id: "v2" } } });
+  assert.match(sent2[0] ?? "", /can't hear voice notes yet/);
+});
