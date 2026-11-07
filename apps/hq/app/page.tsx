@@ -36,6 +36,8 @@ const COLS = "lg:grid-cols-[240px_minmax(0,1fr)_240px] xl:grid-cols-[300px_minma
 export default function HomePage() {
   const { state, pending, attention, activity, messages, send: submit } = useLive();
   const [on, setOn] = useState(true);
+  // Minimal: the clock, the orb and the conversation, nothing else. Remembered per device, like Display off.
+  const [minimal, setMinimal] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
@@ -68,7 +70,7 @@ export default function HomePage() {
   const [background, setBackground] = useState<string | null>(null);
 
   useEffect(() => {
-    try { setOn(localStorage.getItem("hq.display") !== "off"); setSince(localStorage.getItem("hq.lastSeen") ?? undefined); } catch { /* ignore */ }
+    try { setOn(localStorage.getItem("hq.display") !== "off"); setMinimal(localStorage.getItem("hq.layout") === "minimal"); setSince(localStorage.getItem("hq.lastSeen") ?? undefined); } catch { /* ignore */ }
     const mark = () => { try { localStorage.setItem("hq.lastSeen", new Date().toISOString()); } catch { /* ignore */ } };
     window.addEventListener("pagehide", mark);
     api<{ metrics: { key: string; label: string; unit?: string; latest?: number }[] }>("/api/ventures/money").then((r) => setMoney(r.metrics.filter((m) => m.latest !== undefined).slice(0, 3).map((m) => ({ key: m.label, value: m.unit === "$" ? `$${m.latest!.toLocaleString("en-US", { maximumFractionDigits: 0 })}` : String(m.latest) })))).catch(() => undefined);
@@ -77,6 +79,7 @@ export default function HomePage() {
     return () => window.removeEventListener("pagehide", mark);
   }, []);
   const toggle = () => { setOn(!on); try { localStorage.setItem("hq.display", on ? "off" : "on"); } catch { /* ignore */ } };
+  const toggleMinimal = () => { setMinimal(!minimal); try { localStorage.setItem("hq.layout", minimal ? "full" : "minimal"); } catch { /* ignore */ } };
 
   const lastJarvis = [...messages].reverse().find((m) => m.role === "jarvis" && m.kind !== "ack");
   const errors = state?.agents.filter((a) => a.status === "error") ?? [];
@@ -208,6 +211,9 @@ export default function HomePage() {
               <Clock since={since} />
             </div>
 
+            {minimal ? (
+              <div className="flex-1 flex flex-col items-center justify-center py-6">{core}</div>
+            ) : (
             <div className={`grid gap-6 ${COLS} lg:items-start`}>
               <div data-col="left" className="flex flex-col gap-5 order-2 lg:order-1 min-w-0">
                 <section aria-label="Needs your attention" className="flex flex-col gap-2">
@@ -255,14 +261,20 @@ export default function HomePage() {
                 <Towers />
               </div>
             </div>
+            )}
 
             <div className={`grid gap-4 ${COLS} items-end mt-auto`}>
               <div className="flex items-center gap-3 order-2 lg:order-1">
-                <div className="w-11 h-11 rounded-full border-2 flex items-center justify-center" style={{ borderColor: "var(--accent)", boxShadow: "0 0 12px rgba(124,196,255,0.6)" }}><span className="display font-bold text-lg" style={{ color: "var(--ink-strong)" }}>P</span></div>
-                <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.12em]"><span style={{ color: "var(--ink-strong)" }}>PHIL</span><span style={{ color: "var(--muted)" }}>RECOVERY — · DOC</span></div>
+                {!minimal && <>
+                  <div className="w-11 h-11 rounded-full border-2 flex items-center justify-center" style={{ borderColor: "var(--accent)", boxShadow: "0 0 12px rgba(124,196,255,0.6)" }}><span className="display font-bold text-lg" style={{ color: "var(--ink-strong)" }}>P</span></div>
+                  <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.12em]"><span style={{ color: "var(--ink-strong)" }}>PHIL</span><span style={{ color: "var(--muted)" }}>RECOVERY — · DOC</span></div>
+                </>}
               </div>
-              <div className="order-1 lg:order-2 w-full max-w-2xl justify-self-center min-w-0"><Objective /></div>
-              <div className="order-3 flex lg:justify-end"><button className="btn btn-sm" onClick={toggle}>{power}Display off</button></div>
+              <div className="order-1 lg:order-2 w-full max-w-2xl justify-self-center min-w-0">{!minimal && <Objective />}</div>
+              <div className="order-3 flex gap-2 lg:justify-end">
+                <button className="btn btn-sm" onClick={toggleMinimal} aria-pressed={minimal} title={minimal ? "Bring back the panels, towers and goals" : "Just the clock, the orb and the conversation"}>{minimal ? "Full" : "Minimal"}</button>
+                <button className="btn btn-sm" onClick={toggle}>{power}Display off</button>
+              </div>
             </div>
           </>
         ) : (
