@@ -849,3 +849,15 @@ test("Jarvis pulls an X account into an agent's brain himself: timeline when X a
   const { agentSystemPrompt, getAgent } = await import("../src/index.js");
   assert.match(agentSystemPrompt(getAgent("house")!, await store.memory.list("agent:house")), /sized small into the print/);
 });
+
+test("a pull request in Phil's words is recognised before any model plans it", () => {
+  const p = Jarvis.pullRequest;
+  assert.deepEqual(p("have Lucas pull the last 25 posts from @houseofsweeps and file them in House's brain"), { handle: "houseofsweeps", to: "house", max: 25 });
+  assert.deepEqual(p("pull @houseofsweeps's tweets for House's context"), { handle: "houseofsweeps", to: "house", max: 25 });
+  assert.equal(p("pull @houseofsweeps's tweets for House"), undefined); // no brain named: the planner decides
+  assert.deepEqual(p("get the last 10 tweets from @degenspartan into Ansem's memory"), { handle: "degenspartan", to: "ansem", max: 10 });
+  assert.equal(p("what did @houseofsweeps say today"), undefined);
+  assert.equal(p("have @lucas pull @a and @b for House's brain"), undefined);
+  assert.equal(p("pull @houseofsweeps into nobody's brain"), undefined);
+  assert.equal(p("add to House's brain: watch the ESMO abstracts"), undefined);
+});

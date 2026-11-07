@@ -288,6 +288,18 @@ export class Jarvis {
     const imageIds = this.convo.getStore()?.images ?? [];
     const byVoice = this.convo.getStore()?.voice ? "\n\n(Phil said this as a voice note; it was transcribed, so an odd word may be a mishearing. Don't say you can't tell how it arrived.)" : "";
     const planText = (imageIds.length ? `${userText}\n\n(Phil attached ${imageIds.length} image${imageIds.length > 1 ? "s" : ""}. Anything about how something looks goes to Joi; the image goes with the task.)` : userText) + byVoice;
+    // "pull the last 25 posts from @x into House's brain", "have Lucas file @x's tweets in House's memory": the pull is
+    // HQ's own, decided here rather than by the planner, so no model can route it to a research run that may not finish.
+    const direct = Jarvis.pullRequest(userText);
+    if (direct) {
+      const to = getAgent(direct.to) ?? findAgent(direct.to);
+      if (to) {
+        out.push(await this.say({ role: "jarvis", text: `Pulling @${direct.handle}'s recent posts for ${to.name} now; a moment.`, kind: "ack" }));
+        out.push(await this.say({ role: "jarvis", text: (await this.importX(direct.handle, to.id, direct.max)).text, kind: "final" }));
+        return out;
+      }
+    }
+
     const planRun = await this.router.run(jarvis, { system, prompt: planPrompt(planText, recent), direct: true, maxTurns: 1, images: await imageInputs(imageIds) });
     if (planRun.blocked) {
       out.push(await this.say({ role: "jarvis", text: `I can't think right now: ${planRun.blocked}`, kind: "final" }));
@@ -750,6 +762,18 @@ export class Jarvis {
    * HQ's own timeline reader first, else a "from:handle" search through Grok. Each post is one memory item keyed by
    * its id, so a second pull adds only what's new. Returns what Jarvis tells Phil.
    */
+  /** A message asking for an X account's posts in an agent's brain: the handle, the receiver and how many. */
+  static pullRequest(text: string): { handle: string; to: string; max: number } | undefined {
+    if (!/\b(pull|import|grab|get|file|fetch|load|add|put|save)\b/i.test(text) || !/\b(brain|memory|context)\b/i.test(text)) return undefined;
+    const handles = [...text.matchAll(/(?:^|[^\w@/])@([A-Za-z0-9_]{2,15})\b/g)].map((m) => m[1]!).filter((h) => !getAgent(h.toLowerCase()));
+    if (handles.length !== 1) return undefined;
+    // The receiver: "House's brain", "into House", "for House's memory"; never the gatherer ("have Lucas ...").
+    const to = text.match(/\b(?:into|in|to|for)\s+@?([A-Za-z]+?)(?:'s|’s)?\s+(?:brain|memory|context)\b/i)?.[1] ?? text.match(/\b(?:into|for|to)\s+@?([A-Za-z]+)\b(?!'s)/i)?.[1];
+    if (!to || !(getAgent(to.toLowerCase()) ?? findAgent(to))) return undefined;
+    const max = Number(text.match(/\b(\d{1,2})\s+(?:posts|tweets)\b/i)?.[1]) || 25;
+    return { handle: handles[0]!, to: to.toLowerCase(), max: Math.min(25, Math.max(1, max)) };
+  }
+
   /** How importX reaches X; tests swap in a fake fetch and search. */
   xReader: { f?: typeof fetch; search?: (query: string, max: number) => Promise<string> } = {};
   async importX(handle: string, toId: string, max = 25, deps = this.xReader): Promise<{ text: string; filed: number; via: "timeline" | "search"; error?: string }> {
