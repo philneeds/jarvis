@@ -9,6 +9,7 @@ import { Objective } from "@/components/Objective";
 import { Skyline } from "@/components/Skyline";
 import { Core, type CoreState } from "@/components/Core";
 import { Transcript } from "@/components/Transcript";
+import { Working } from "@/components/Working";
 import { useLive } from "@/lib/live";
 import { useVoice } from "@/lib/voice";
 import { useClap, type ClapSensitivity } from "@/lib/clap";
@@ -154,6 +155,7 @@ export default function HomePage() {
         )}
         {!voice.conversation && clapOn && <select className="input h-8 w-28 text-[10px] uppercase" aria-label="Clap sensitivity" value={clapSens} onChange={(e) => setSens(e.target.value as ClapSensitivity)}><option value="low">quiet room</option><option value="normal">normal</option><option value="high">big room</option></select>}
       </div>
+      <Working />
       <Transcript pendingText={heardText ?? (voice.interim || undefined)} />
       {/* What changed while Phil was away, right under the input. Hidden when nothing did. */}
       {changes.length > 0 && (

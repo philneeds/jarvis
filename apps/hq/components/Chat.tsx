@@ -7,6 +7,7 @@ import type { ChatMessage } from "@/lib/types";
 import { Md } from "./Md";
 import { useVoice } from "@/lib/voice";
 import { imageUrl, uploadImage } from "@/lib/images";
+import { Working } from "@/components/Working";
 
 const QUICK = ["/brief", "/status", "/approvals", "/usage", "/pause", "/condense", "/help"];
 
@@ -180,6 +181,7 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
       </div>
       {away && !ql && <button type="button" className="btn btn-sm btn-primary absolute left-1/2 -translate-x-1/2 bottom-3" style={{ boxShadow: "0 4px 18px rgba(0,0,0,0.5)" }} onClick={toLatest}>Jump to latest ↓</button>}
       </div>
+      <div className="px-3 pt-2 empty:hidden"><Working /></div>
       <form onSubmit={onSubmit} className="p-3 flex flex-col gap-2 border-t" style={{ borderColor: dragging ? "var(--accent)" : "var(--line)", background: dragging ? "rgba(60,130,255,0.15)" : "rgba(5,12,32,0.7)" }}
         onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) { e.preventDefault(); setDragging(true); } }}
         onDragLeave={() => setDragging(false)}

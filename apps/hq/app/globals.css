@@ -145,6 +145,10 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; a
 @keyframes flicker { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.15); } }
 
 /* Towers: one per lead; the plot holds the bars on a shared baseline, names hang below it, rotated to read upward. */
+/* Someone is working: a slow pulse in their venture's colour. */
+.working-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 8px currentColor; animation: working-pulse 1.4s ease-in-out infinite; }
+@keyframes working-pulse { 0%, 100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.15); } }
+@media (prefers-reduced-motion: reduce) { .working-dot { animation: none; opacity: 1; } }
 .towers { display: flex; gap: 3px; }
 .towers-skeleton { height: 240px; }
 .tower-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; color: inherit; }

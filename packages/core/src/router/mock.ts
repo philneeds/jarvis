@@ -10,6 +10,8 @@ export function mockProvider(label = "mock"): Provider {
     async available() { return { ok: true }; },
     async run(req: AgentRequest): Promise<AgentResult> {
       const t0 = Date.now();
+      // JARVIS_MOCK_DELAY_MS makes mock runs take a while, to see the Working strip and streaming in development.
+      if (process.env.JARVIS_MOCK_DELAY_MS) await new Promise((r) => setTimeout(r, Number(process.env.JARVIS_MOCK_DELAY_MS)));
       let text: string;
       if (req.agent.id === "jarvis" && /Respond with JSON/.test(req.prompt)) {
         const said = req.prompt.split("Phil says:").pop() ?? "";

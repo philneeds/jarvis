@@ -117,7 +117,9 @@ export class ModelRouter {
     if (!allowed.ok) return block(allowed.reason!);
 
     await this.store.runs.add({ id: runId, agentId: agent.id, provider: model.provider, modelId: model.modelId, prompt: opts.prompt, status: "running", startedAt, parentRunId: opts.parentRunId });
-    await this.setStatus(agent.id, "working", `on ${model.label}`);
+    // What it's on, for the Working strip in HQ: the ask itself, not the model name.
+    const ask = opts.prompt.replace(/^[^:]{0,40}?asks:\s*/i, "").replace(/\s+/g, " ").trim();
+    await this.setStatus(agent.id, "working", ask.length > 90 ? `${ask.slice(0, 90).replace(/\s+\S*$/, "")}…` : ask);
 
     const chain = this.providers[model.provider as "claude" | "grok"] ?? [];
     const errors: string[] = [];

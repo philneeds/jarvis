@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useLive } from "@/lib/live";
+import { Working } from "@/components/Working";
 import { post } from "@/lib/api";
 
 /** Five primary screens; the rest live under More on every size. The phone's bottom bar shows the first four; Ventures joins More there.
@@ -84,6 +85,7 @@ export function Shell({ children, bare, fill }: { children: React.ReactNode; bar
             <span role="status" aria-label={`System status ${level}: ${state?.status.text ?? ""}`} title={state?.status.text} className="inline-block w-3 h-3 rounded-full flex-none" style={{ background: LEVEL[level], boxShadow: `0 0 8px ${LEVEL[level]}` }} />
           </Link>
           <span className="hidden lg:inline text-[11px] tracking-[0.14em] uppercase whitespace-nowrap" style={{ color: "var(--muted)" }}>{state?.status.text ?? "connecting"} · phase {state?.status.phase ?? "-"}</span>
+          <Working compact />
           <nav className="tabs ml-auto hidden md:flex" style={{ maxWidth: 640, flex: 1 }} aria-label="HQ screens">
             {PRIMARY.map((t) => tab(t))}
             <div ref={moreRef} className="relative flex-1 flex">
