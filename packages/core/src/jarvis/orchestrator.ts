@@ -404,7 +404,9 @@ export class Jarvis {
     // data also see this week's screenshots.
     const dataImages = cfg.tools.includes("sales_data") ? await recentDataImages(this.store, agent.venture) : [];
     const images = await imageInputs([...(this.convo.getStore()?.images ?? []), ...dataImages]);
-    const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id), images, workspace });
+    let r: Awaited<ReturnType<ModelRouter["run"]>>;
+    try { r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id), images, workspace }); }
+    finally { if (workspace) this.workshop?.release(); } // the workshop is free for the next run once this one's tools are done
     if (r.blocked) return r;
     if (opts.noBlocks) return r; // the caller reads the reply itself (approval Q&A)
     const { text: said, approvals, remember, metrics, records, handoffs, attention, slides } = extractBlocks(r.text);
