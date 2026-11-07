@@ -48,7 +48,7 @@ export function spokenAddress(text: string): RegExpMatchArray | null {
 }
 
 /** Actions that reach another person. */
-const OUTBOUND_ACTIONS = new Set(["gmail.send", "x.post", "x.reply", "x.dm"]);
+const OUTBOUND_ACTIONS = new Set(["gmail.send", "x.post", "x.reply", "x.dm", "ghl.message"]);
 
 /** Does this approval reach anyone besides Phil: a message, a post, or a calendar change other people will see? */
 export function isOutbound(a: Pick<Approval, "kind" | "payload">): boolean {
@@ -58,8 +58,11 @@ export function isOutbound(a: Pick<Approval, "kind" | "payload">): boolean {
   if (typeof p.action === "string" && OUTBOUND_ACTIONS.has(p.action)) return true;
   if (Array.isArray(p.attendees) && p.attendees.length) return true;
   if (Array.isArray(p.guests) && p.guests.length) return true;
+  // A record change is HQ's own board or memory: approving records it, and an action no connector handles does nothing.
+  if (a.kind === "record") return false;
   // An action no connector recognises is treated as outbound: when unsure, ask.
-  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|spotify\.playlist\.(create|add)|goals\.(update|benchmarks)|watchlist\.add|memory\.replace|record\.)/.test(p.action);
+  // GoHighLevel's internal writes (a note, a deal, a contact record) stay inside JD PM's CRM; ghl.message reaches the customer.
+  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|spotify\.playlist\.(create|add)|goals\.(update|benchmarks)|watchlist\.add|memory\.replace|record\.|ghl\.(note|contact\.create|deal\.(create|move)))/.test(p.action);
 }
 
 /** Something Phil deleted, kept for a while so he can undo it. */
@@ -1083,9 +1086,10 @@ export class Jarvis {
     const itemCap = rules.maxAutoItems ?? 100;
     const asksFor = CHARTERS[a.agentId]?.asksFor;
     const action = (a.payload as { action?: unknown } | undefined)?.action;
-    // Phil's outbound rule: internal work goes through; anything reaching another person waits. Trash and money always wait.
+    // Phil's outbound rule: internal work goes through; anything reaching another person waits. Trash and money always
+    // wait, and Phil's dollar cap for the agent still holds.
     const auto = asksFor === "everything" ? false : asksFor === "outbound"
-      ? !isOutbound(a) && a.kind !== "money" && a.kind !== "strategy" && action !== "gmail.trash" && items <= itemCap
+      ? !isOutbound(a) && a.kind !== "money" && a.kind !== "strategy" && action !== "gmail.trash" && amount <= rules.maxAutoDollars && items <= itemCap
       : a.kind !== "money" && a.kind !== "strategy" && rules.autoApprove.includes(a.kind) && amount <= rules.maxAutoDollars && items <= itemCap;
     if (auto) {
       await this.router.log(a.agentId, "approval", `${getAgent(a.agentId)?.name ?? a.agentId}: "${a.title}" auto-approved by Phil's rule (${a.kind}${amount ? `, $${amount}` : ""})`, a.runId, { kind: a.kind, body: a.body });

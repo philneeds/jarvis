@@ -76,7 +76,7 @@ test("a GoHighLevel reply waits for Phil, then goes out through the API on appro
   assert.equal(sent[1]!.body.type, "WhatsApp", "channel names are sent the way GoHighLevel spells them");
 });
 
-test("GoHighLevel writes wait for Phil (even for agents that auto-approve records) and then create a contact, add a note, create and move a deal", async () => {
+test("GoHighLevel's internal writes go through on their own for the JD PM team (a contact, a note, a deal created and moved); a message to the customer waits for Phil", async () => {
   const store = memoryStore(); await store.init();
   const writes: { method: string; path: string; body: Record<string, unknown> }[] = [];
   const f = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -92,24 +92,26 @@ test("GoHighLevel writes wait for Phil (even for agents that auto-approve record
   const g = new GoHighLevelConnector(store, { apiKey: "pit-abc", locationId: "loc1", fetch: f });
   jarvis.addConnector(g, GoHighLevelConnector.promptHint());
   const ask = (agentId: string, title: string, payload: Record<string, unknown>) => jarvis.requestApproval({ agentId, kind: "other", title, body: "why", payload });
+  // Phil's rule for the JD PM team (asksFor "outbound"): CRM work that reaches nobody outside JD PM goes through at once, logged.
   const c = await ask("karol", "New lead: Bob Smith", { action: "ghl.contact.create", name: "Bob Smith", phone: "+15855550199", source: "Facebook", tags: ["bath"] });
-  assert.equal(c.status, "pending", "Karol auto-approves records, but a GoHighLevel write still waits");
+  assert.equal(c.status, "approved", "a contact record reaches nobody: Karol creates it on her own");
   assert.match(c.effect ?? "", /Creates Bob Smith \(\+15855550199\) as a contact.*source Facebook/);
-  assert.equal(writes.length, 0);
-  await jarvis.decide(c.id, "approved", "ok");
   assert.deepEqual(writes[0], { method: "POST", path: "/contacts/", body: { locationId: "loc1", firstName: "Bob", lastName: "Smith", phone: "+15855550199", source: "Facebook", tags: ["bath"] } });
+  assert.ok((await store.activity.list({ agentId: "karol" })).some((e) => /auto-approved by Phil's rule/.test(e.summary)));
   const n = await ask("stephanie", "Note on Ana", { action: "ghl.note", contactId: "c1", body: "Wants the install after Thanksgiving" });
-  assert.equal((n.payload as { to?: string }).to, "Ana Lopez (+1585)", "the card names the contact");
-  await jarvis.decide(n.id, "approved", "ok");
+  assert.equal((n.payload as { to?: string }).to, "Ana Lopez (+1585)", "the record still names the contact");
+  assert.equal(n.status, "approved");
   assert.deepEqual(writes[1], { method: "POST", path: "/contacts/c1/notes", body: { body: "Wants the install after Thanksgiving" } });
   const d = await ask("jake", "Quote sent", { action: "ghl.deal.create", name: "Lopez kitchen", contactId: "c1", stage: "Quoted", value: 4200 });
-  await jarvis.decide(d.id, "approved", "ok");
+  assert.equal(d.status, "approved");
   assert.deepEqual(writes[2], { method: "POST", path: "/opportunities/", body: { pipelineId: "p1", locationId: "loc1", name: "Lopez kitchen", pipelineStageId: "s2", status: "open", contactId: "c1", monetaryValue: 4200 } });
   const mv = await ask("jake", "Won", { action: "ghl.deal.move", opportunityId: "o9", name: "Lopez kitchen", stage: "Quoted", status: "won" });
-  const done = await jarvis.decide(mv.id, "approved", "ok");
   assert.deepEqual(writes[3], { method: "PUT", path: "/opportunities/o9", body: { pipelineStageId: "s2", status: "won" } });
-  assert.match(done?.note ?? "", /Moved Lopez kitchen to Quoted \(won\)/);
+  assert.match(mv.note ?? "", /Moved Lopez kitchen to Quoted \(won\)/);
   const bad = await ask("jake", "Nope", { action: "ghl.deal.move", opportunityId: "o9", stage: "Installed" });
-  const failed = await jarvis.decide(bad.id, "approved", "ok");
-  assert.match(failed?.note ?? "", /No stage "Installed" in Jobs; stages are New lead, Quoted/);
+  assert.match(bad.note ?? "", /No stage "Installed" in Jobs; stages are New lead, Quoted/);
+  // A message to the customer is outbound: it waits, and nothing is sent until Phil approves.
+  const sms = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Reply to Ana", body: "Friday works.", payload: { action: "ghl.message", contactId: "c1", type: "SMS", message: "Friday works." } });
+  assert.equal(sms.status, "pending");
+  assert.equal(writes.length, 4);
 });
