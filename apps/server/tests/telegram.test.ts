@@ -138,9 +138,14 @@ test("a voice note on Telegram is transcribed, shown back, answered, and the ans
   const texts = sent.filter((s) => s.method === "sendMessage").map((s) => String((s.body as { text: string }).text));
   assert.ok(texts.some((t) => t === 'Heard: "what is on today"'), "Phil sees what was heard");
   assert.ok(texts.some((t) => /^Jarvis: /.test(t)), "Jarvis answered in text");
-  const audio = sent.find((s) => s.method === "sendAudio");
-  assert.ok(audio, "and the answer went back as audio");
-  assert.equal(((audio!.body as FormData).get("audio") as File).name, "jarvis.mp3");
+  assert.ok(!sent.some((s) => s.method === "sendVoice" || s.method === "sendAudio"), "no audio back unless Phil turns it on");
+  await bot.handle({ update_id: 5, message: { message_id: 5, chat: { id: 42 }, text: "/voice on" } });
+  assert.match(String((sent.at(-1)!.body as { text: string }).text), /Spoken replies are on/);
+  await bot.handle({ update_id: 6, message: { message_id: 6, chat: { id: 42 }, voice: { file_id: "v1", mime_type: "audio/ogg", duration: 3 } } });
+  await new Promise((r) => setTimeout(r, 400));
+  const voice = sent.find((s) => s.method === "sendVoice");
+  assert.ok(voice, "with /voice on the answer comes back as a voice bubble");
+  assert.equal(((voice!.body as FormData).get("voice") as File).name, "jarvis.ogg");
   assert.equal((await store.chat.list(10)).find((m) => m.role === "phil")?.text, "what is on today");
   bot.stop();
   // Without any transcription set up, a voice note gets a clear answer instead of silence.

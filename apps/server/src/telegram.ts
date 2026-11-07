@@ -31,16 +31,15 @@ export class TelegramBot {
     for (let i = 0; i < text.length; i += 3900) await this.api("sendMessage", { chat_id: this.opts.chatId, text: text.slice(i, i + 3900), ...(i + 3900 >= text.length ? extra : {}) }).catch(() => undefined);
   }
 
-  /** Jarvis's reply as audio, after the text, for a question that came in as a voice note. */
+  /** Jarvis's reply as a voice bubble, after the text, for a voice note when Phil has /voice on. */
   async sendSpoken(text: string) {
     try {
       const audio = await (this.opts.synthesize ?? synthesizeDefault)(text.replace(/[*_`#>]/g, ""));
       if (!audio) return;
       const form = new FormData();
       form.append("chat_id", this.opts.chatId);
-      form.append("audio", new Blob([new Uint8Array(audio)], { type: "audio/mpeg" }), "jarvis.mp3");
-      form.append("title", "Jarvis");
-      await this.f(`https://api.telegram.org/bot${this.opts.token}/sendAudio`, { method: "POST", body: form });
+      form.append("voice", new Blob([new Uint8Array(audio)], { type: "audio/ogg" }), "jarvis.ogg");
+      await this.f(`https://api.telegram.org/bot${this.opts.token}/sendVoice`, { method: "POST", body: form });
     } catch { /* the text already went */ }
   }
 
@@ -147,8 +146,8 @@ export class TelegramBot {
         if (!heard) { await this.send("I couldn't make out that voice note."); return; }
         await this.send(`Heard: "${heard}"`);
         const text = msg.caption ? `${heard}\n\n${msg.caption}` : heard;
-        const r = await this.jarvis.submit(text, { channel: "telegram" });
-        if (r.message?.id) this.voiceAsked.add(r.message.id);
+        const r = await this.jarvis.submit(text, { channel: "telegram", voice: true });
+        if (r.message?.id && (await this.jarvis.store.settings.get("telegram.voiceReplies", false))) this.voiceAsked.add(r.message.id);
       } catch (e) { await this.send(`I couldn't take that voice note: ${(e as Error).message}`); }
       return;
     }
@@ -177,6 +176,14 @@ export class TelegramBot {
     }
     const text = msg.text!.trim();
     if (text === "/start") { await this.send("Jarvis here. Talk to me, @ an agent, or /help."); return; }
+    // Spoken replies to voice notes are off unless Phil asks; /voice on|off switches them.
+    const vm = text.match(/^\/voice(?:\s+(on|off))?$/i);
+    if (vm) {
+      if (vm[1]) await this.jarvis.store.settings.set("telegram.voiceReplies", vm[1].toLowerCase() === "on");
+      const on = await this.jarvis.store.settings.get("telegram.voiceReplies", false);
+      await this.send(on ? "Spoken replies are on: a voice note gets Jarvis's answer as audio too. /voice off to stop." : "Spoken replies are off: voice notes get text answers. /voice on to hear them.");
+      return;
+    }
     // Replies (ack, late reports, final) are forwarded as they land by the chat.message listener in start().
     await this.jarvis.submit(text, { channel: "telegram" });
   }

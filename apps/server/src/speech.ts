@@ -42,14 +42,14 @@ async function transcribeWith(provider: Provider, audio: Buffer, mime: string, f
   return (j.text ?? "").trim();
 }
 
-/** Jarvis's voice as MP3, or undefined when ElevenLabs isn't set up. */
+/** Jarvis's voice as Opus in an OGG container (what Telegram plays as a voice bubble), or undefined when ElevenLabs isn't set up. */
 export async function synthesize(text: string, f: typeof fetch = fetch): Promise<Buffer | undefined> {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key || !text.trim()) return undefined;
   const voice = process.env.ELEVENLABS_VOICE_ID || "onwK4e9ZLuTAKqWW03F9";
   const model = process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5";
   const speed = Math.min(1.2, Math.max(0.7, Number(process.env.ELEVENLABS_SPEED ?? 1.1)));
-  const res = await f(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_64`, { method: "POST", headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/mpeg" }, body: JSON.stringify({ text: text.slice(0, 2500), model_id: model, voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.2, speed } }) });
+  const res = await f(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=opus_48000_64`, { method: "POST", headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/ogg" }, body: JSON.stringify({ text: text.slice(0, 2500), model_id: model, voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.2, speed } }) });
   if (!res.ok) throw new Error(`voice failed: ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }

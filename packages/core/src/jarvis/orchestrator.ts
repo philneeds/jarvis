@@ -198,19 +198,19 @@ export class Jarvis {
   // ---- Chat -------------------------------------------------------------
 
   /** The conversation a reply belongs to, carried through async work so every say() in it is tagged. */
-  private convo = new AsyncLocalStorage<{ channel: ChatMessage["channel"]; replyTo: string; images?: string[] }>();
+  private convo = new AsyncLocalStorage<{ channel: ChatMessage["channel"]; replyTo: string; images?: string[]; voice?: boolean }>();
 
   /**
    * Submit a message from Phil and return at once with his message; the work continues in the background and
    * every reply (ack, progress, final) arrives as a chat.message event tagged with replyTo = his message id.
    */
-  async submit(text: string, opts: { channel?: ChatMessage["channel"]; images?: string[] } = {}): Promise<{ message: ChatMessage; done: Promise<ChatMessage[]> }> {
+  async submit(text: string, opts: { channel?: ChatMessage["channel"]; images?: string[]; voice?: boolean } = {}): Promise<{ message: ChatMessage; done: Promise<ChatMessage[]> }> {
     const images = opts.images?.slice(0, 4);
     // A picture on its own is a question too.
     const trimmed = text.trim() || (images?.length ? "What do you think of this?" : "");
     if (!trimmed) throw new Error("empty message");
     const message = await this.say({ role: "phil", text: trimmed, channel: opts.channel ?? "hq", ...(images?.length ? { images } : {}) });
-    const ctx = { channel: opts.channel ?? "hq", replyTo: message.id, images };
+    const ctx = { channel: opts.channel ?? "hq", replyTo: message.id, images, voice: opts.voice };
     const done = this.convo.run(ctx, async () => {
       // X links: open the posts first, so whoever takes this sees what they say (and their photos).
       let work = trimmed;
@@ -272,7 +272,8 @@ export class Jarvis {
     const system = jarvisSystemPrompt(memory, status.text, await this.attentionText(), reportsText(await recentReports(this.store, 48)));
 
     const imageIds = this.convo.getStore()?.images ?? [];
-    const planText = imageIds.length ? `${userText}\n\n(Phil attached ${imageIds.length} image${imageIds.length > 1 ? "s" : ""}. Anything about how something looks goes to Joi; the image goes with the task.)` : userText;
+    const byVoice = this.convo.getStore()?.voice ? "\n\n(Phil said this as a voice note; it was transcribed, so an odd word may be a mishearing. Don't say you can't tell how it arrived.)" : "";
+    const planText = (imageIds.length ? `${userText}\n\n(Phil attached ${imageIds.length} image${imageIds.length > 1 ? "s" : ""}. Anything about how something looks goes to Joi; the image goes with the task.)` : userText) + byVoice;
     const planRun = await this.router.run(jarvis, { system, prompt: planPrompt(planText, recent), direct: true, maxTurns: 1, images: await imageInputs(imageIds) });
     if (planRun.blocked) {
       out.push(await this.say({ role: "jarvis", text: `I can't think right now: ${planRun.blocked}`, kind: "final" }));
