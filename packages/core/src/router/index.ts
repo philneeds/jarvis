@@ -16,6 +16,7 @@ export * from "./types.js";
 export { claudeProvider, claudeAgentSdkProvider, claudeApiProvider } from "./claude.js";
 export { grokProvider, grokCliProvider, grokApiProvider, parseGrokJson, GROK_DEFAULT_ARGS, GROK_DENIED_TOOLS } from "./grok.js";
 export { mockProvider } from "./mock.js";
+export { GROK_RULES, grokOnce } from "./grok.js";
 
 export interface RouterOptions {
   store: Store;

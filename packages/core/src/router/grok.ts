@@ -24,6 +24,8 @@ export function grokProvider(mode = process.env.GROK_MODE || "cli"): Provider {
 
 export const GROK_DENIED_TOOLS = "run_terminal_command,read_file,search_replace,write,list_dir,grep,spawn_subagent,kill_command_or_subagent,get_command_or_subagent_output,scheduler_create,scheduler_delete,scheduler_list,monitor,search_tool,use_tool,workflow,enter_plan_mode,exit_plan_mode,ask_user_question,send_feedback,image_gen,image_edit,image_to_video,reference_to_video";
 export const GROK_DEFAULT_ARGS = `--permission-mode dontAsk --max-turns 14 --output-format json --disallowed-tools ${GROK_DENIED_TOOLS} -p`;
+/** How to read X from the CLI: through its X search, never by fetching x.com or api.twitter.com, which X rate-limits (HTTP 429, error 1015). */
+export const GROK_RULES = `Reading X: use your X search tool for everything on X, including one account's posts (search "from:handle", add a topic word to narrow). Never fetch x.com, twitter.com or api.twitter.com URLs directly; those requests are rate-limited and fail, and HQ has already opened any X link or @account in your task for you. If a search returns nothing, say so once and move on; don't retry in a loop.`;
 /** The CLI's stop reasons that mean "ran out of turns", in the spellings seen so far. */
 const CUT_SHORT = /max[_ -]?turns|turn[_ -]?limit|max[_ -]?tokens|length/i;
 /** A run that looks like it ended mid-work: narration about what it's about to do, with no result after it. */
@@ -72,7 +74,7 @@ export function grokCliProvider(once: typeof grokOnce = grokOnce): Provider {
     },
     async run(req: AgentRequest): Promise<AgentResult> {
       const t0 = Date.now();
-      const prompt = `${req.system}\n\n---\n\n${req.prompt}`;
+      const prompt = `${req.system}\n\n${GROK_RULES}\n\n---\n\n${req.prompt}`;
       let text = await once(prompt, { signal: req.signal });
       let parsed = parseGrokJson(text);
       let finished = (parsed?.text ?? text).trim();

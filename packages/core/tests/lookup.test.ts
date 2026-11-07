@@ -84,3 +84,14 @@ test("x_recent_posts reads an account's timeline from the public embed page; Gro
   assert.doesNotMatch(block, /@house:/, "House is an agent, not an X account");
   assert.equal(await prefetchHandles("nothing here", () => false, f), "");
 });
+
+test("when HQ's direct account read is blocked, the posts come from a from:handle search; Grok agents are told to search X, never fetch it", async () => {
+  const { accountPosts, GROK_RULES } = await import("../src/index.js");
+  const searched: string[] = [];
+  const out = await accountPosts("@limitedacct", 25, async (q) => { searched.push(q); return "@limitedacct · Nov 6 · \"VKTX readout\" · https://x.com/limitedacct/status/1"; });
+  assert.deepEqual(searched, ["from:limitedacct"]);
+  assert.match(out, /^Recent posts by @limitedacct, found by search \(HQ's direct read was blocked/);
+  await assert.rejects(accountPosts("@limitedacct", 25, async () => "X search isn't available right now (x)"), /a from:limitedacct search found nothing either/);
+  assert.match(GROK_RULES, /search "from:handle"/);
+  assert.match(GROK_RULES, /Never fetch x\.com/);
+});
