@@ -150,3 +150,20 @@ test("a voice note on Telegram is transcribed, shown back, answered, and the ans
   await bare.handle({ update_id: 2, message: { message_id: 2, chat: { id: 42 }, voice: { file_id: "v2" } } });
   assert.match(sent2[0] ?? "", /can't hear voice notes yet/);
 });
+
+test("transcription falls through: an ElevenLabs key without the speech permission gives way to Groq", async () => {
+  const { transcribe, transcriptionProviders } = await import("../src/speech.js");
+  const saved = { ...process.env };
+  process.env.ELEVENLABS_API_KEY = "el"; process.env.GROQ_API_KEY = "gq"; delete process.env.OPENAI_API_KEY; delete process.env.STT_PROVIDER;
+  try {
+    assert.deepEqual(transcriptionProviders(), ["elevenlabs", "groq"]);
+    const tried: string[] = [];
+    const f = (async (url: string | URL | Request) => { tried.push(new URL(String(url)).hostname); return String(url).includes("elevenlabs") ? new Response('{"detail":{"message":"missing the permission speech_to_text"}}', { status: 401 }) : Response.json({ text: "did they work" }); }) as typeof fetch;
+    assert.equal(await transcribe(Buffer.alloc(2000, 1), "audio/ogg", f), "did they work");
+    assert.deepEqual(tried, ["api.elevenlabs.io", "api.groq.com"]);
+    process.env.STT_PROVIDER = "groq";
+    assert.deepEqual(transcriptionProviders(), ["groq", "elevenlabs"], "STT_PROVIDER pins the first choice");
+    const all401 = (async () => new Response("no", { status: 401 })) as unknown as typeof fetch;
+    await assert.rejects(transcribe(Buffer.alloc(2000, 1), "audio/ogg", all401), /groq 401: no \| elevenlabs 401: no/);
+  } finally { process.env = saved; }
+});
