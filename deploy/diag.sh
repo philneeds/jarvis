@@ -37,5 +37,17 @@ OUT=$(sudo -u "$APP_USER" -H timeout 240 bash -lc "cd /tmp && grok --permission-
 echo "took $(( $(date +%s) - START ))s, exit ${PIPESTATUS[0]:-?}"
 echo "$OUT" | tail -c 1500
 
+section "xAI API key (XAI_API_KEY in .env): a one-post X search, which is what HQ uses for every X read"
+if [[ -n "${XAI_API_KEY:-}" ]]; then
+  RESP=$(curl -s -m 90 -w '\nHTTP %{http_code} in %{time_total}s' https://api.x.ai/v1/responses -H "Authorization: Bearer $XAI_API_KEY" -H 'content-type: application/json' \
+    -d "{\"model\":\"${XAI_SEARCH_MODEL:-grok-4.7}\",\"input\":[{\"role\":\"user\",\"content\":\"Give the single most recent post by @$H on X: date, text, link.\"}],\"tools\":[{\"type\":\"x_search\",\"allowed_x_handles\":[\"$H\"]}],\"max_turns\":2}")
+  echo "$RESP" | tail -1
+  echo "$RESP" | grep -oE '"text":"[^"]{0,300}' | head -2
+  echo "$RESP" | grep -oE '"x_posts_fetched":[0-9]+|"error":"[^"]{0,200}|"message":"[^"]{0,200}' | head -3
+  echo "(HTTP 200 with a post: the key works. 401/403: wrong key or no credits. 400 naming the model: set XAI_SEARCH_MODEL in .env.)"
+else
+  echo "not set: nobody can read X until it is (the Grok CLI has no X search)"
+fi
+
 section "HQ's direct timeline read from this box (expect 200, or 429 when X is rate-limiting this address)"
 curl -s -o /dev/null -w 'syndication.twitter.com: HTTP %{http_code} in %{time_total}s\n' -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' "https://syndication.twitter.com/srv/timeline-profile/screen-name/$H?showReplies=true"
