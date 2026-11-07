@@ -17,6 +17,7 @@ export * from "./decks.js";
 export * from "./hyperliquid.js";
 export * from "./lookup.js";
 export * from "./backup.js";
+export * from "./readiness.js";
 export { splitTools } from "./router/claude.js";
 export { addDataFile, listDataFiles, removeDataFile, dataText, xlsxToText, DATA_TOOLS, type DataFile } from "./salesdata.js";
 export * from "./tools/index.js";

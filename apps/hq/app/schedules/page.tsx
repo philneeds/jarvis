@@ -14,6 +14,7 @@ export default function SchedulesPage() {
   const [phase, setPhase] = useState(0);
   const [showOff, setShowOff] = useState(false);
   const [error, setError] = useState<string>();
+  const [ran, setRan] = useState<string | null>(null);
   useEffect(() => { api<{ schedules: ScheduleView[]; phase: number }>("/api/schedules").then((r) => { setList(r.schedules); setPhase(r.phase); }).catch((e) => setError((e as Error).message)); }, []);
 
   const agent = (id: string) => state?.agents.find((a) => a.id === id);
@@ -53,6 +54,7 @@ export default function SchedulesPage() {
                   <b style={{ color: "var(--ink-bright)" }}>{s.whenText}</b>
                   {s.push && <span className="px-1.5 border text-[10px] tracking-[0.12em] uppercase" style={{ borderColor: "var(--accent-soft)", color: "var(--accent)" }}>to Telegram</span>}
                   {s.to && <span className="px-1.5 border text-[10px] tracking-[0.12em] uppercase" style={{ borderColor: "var(--line)", color: "var(--muted)" }} title="Reports to this agent, not you">→ {agent(s.to)?.name ?? s.to}</span>}
+                  {!/^(daily-brief|oscar-condense|backup-nightly)$/.test(s.id) && <button className="btn btn-sm h-7 ml-auto" disabled={ran === s.id} onClick={async () => { setRan(s.id); try { await api(`/api/schedules/${s.id}/run`, { method: "POST" }); } catch { setRan(null); } }}>{ran === s.id ? "Running…" : "Run now"}</button>}
                   {s.custom && <span className="px-1.5 border text-[10px] tracking-[0.12em] uppercase" style={{ borderColor: "var(--line)", color: "var(--muted)" }}>your schedule</span>}
                   {!s.active && <span className="px-1.5 border text-[10px] tracking-[0.12em] uppercase" style={{ borderColor: "var(--line)", color: "var(--muted)" }}>starts in phase {s.phase}</span>}
                   <span className="ml-auto text-[11px]" style={{ color: "var(--dim)" }}>

@@ -717,3 +717,20 @@ test("every report that goes up the chain is kept for Jarvis to answer from, and
   assert.match(jarvisSystemPrompt([], "ok", "Nothing.", text), /What came up the chain in the last two days[\s\S]*House → Charlie Munger/);
   assert.equal(reportsText(reports, 10), "", "a tiny budget means nothing fits, never a cut line");
 });
+
+test("phase readiness names what each next-phase agent still lacks; /run starts a routine from chat", async () => {
+  const { phaseReadiness } = await import("../src/index.js");
+  const r2 = phaseReadiness(2, new Set(["Google", "Robinhood"]));
+  const munger = r2.find((a) => a.agentId === "munger")!, buffett = r2.find((a) => a.agentId === "buffett")!, lip = r2.find((a) => a.agentId === "lip")!;
+  assert.deepEqual(munger.missing, ["Kubera"]);
+  assert.deepEqual(buffett.missing, ["Kubera"], "Robinhood is connected, Kubera isn't");
+  assert.deepEqual(lip.missing, ["Spotify"]);
+  assert.ok(r2.every((a) => !a.missing.includes("Google")));
+  const { jarvis, store } = make();
+  assert.match(await jarvis.command("/run"), /Routines: .*stella-leads \(Stella\)/);
+  assert.match(await jarvis.command("/run nope"), /No routine or agent called "nope"/);
+  assert.match(await jarvis.command("/run stella"), /Running Stella's stella-leads now\. It reports to me/);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok((await store.activity.list({ limit: 50 })).some((e) => e.agentId === "stella" && /→ Jarvis \(stella-leads\)/.test(e.summary)));
+  assert.match(await jarvis.command("/run house-open"), /reports to Charlie Munger/);
+});

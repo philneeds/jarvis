@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -265,6 +265,21 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   // Client-side keys and flags for the always-on device.
   api.get("/config", (c) => c.json({ wakeWordKey: process.env.PICOVOICE_ACCESS_KEY || null, tz: process.env.PHIL_TZ || "America/New_York", voice: !!process.env.ELEVENLABS_API_KEY }));
   api.get("/phase", async (c) => c.json({ phase: await jarvis.store.settings.get("phase", 0) }));
+  // What the next phase's agents still lack (connections), so Phil knows who starts thin before flipping the switch.
+  api.get("/phase/readiness", async (c) => {
+    const connected = new Set<Connection>();
+    if (connectors.google && (await connectors.google.status()).connected) connected.add("Google");
+    if (connectors.x && (await connectors.x.status()).accounts.length) connected.add("X");
+    if (connectors.spotify && (await connectors.spotify.status()).connected) connected.add("Spotify");
+    if (connectors.kubera) connected.add("Kubera");
+    if (connectors.robinhood && (await connectors.robinhood.status()).connected) connected.add("Robinhood");
+    if (connectors.ghl) connected.add("GoHighLevel");
+    if (connectors.discord) connected.add("Discord");
+    if (connectors.github) connected.add("GitHub");
+    if ((await healthStatus(jarvis.store)).days > 0) connected.add("Apple Health");
+    const phase = Math.min(3, Math.max(0, Number(c.req.query("phase") ?? (await jarvis.store.settings.get("phase", 0)) + 1)));
+    return c.json({ phase, agents: phaseReadiness(phase, connected) });
+  });
   api.post("/phase", async (c) => {
     const p = z.object({ phase: z.number().int().min(0).max(3) }).safeParse(await c.req.json().catch(() => ({})));
     if (!p.success) return c.json({ error: "phase 0-3" }, 400);

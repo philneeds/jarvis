@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { DisplayCard } from "@/components/DisplayCard";
 import { startRegistration } from "@simplewebauthn/browser";
 import { Shell } from "@/components/Shell";
@@ -77,6 +78,8 @@ export default function SettingsPage() {
   const setPhase = async (phase: number) => { if (!confirm(`Move the web to Phase ${phase}? Agents in that phase go live.`)) return; await post("/api/phase", { phase }); await refresh(); };
 
   const phase = state?.status.phase ?? 0;
+  const [ready, setReady] = useState<{ phase: number; agents: { agentId: string; name: string; model: string; missing: string[] }[] } | null>(null);
+  useEffect(() => { if (phase < 3) api<typeof ready>(`/api/phase/readiness?phase=${phase + 1}`).then(setReady).catch(() => undefined); else setReady(null); }, [phase]);
   return (
     <Shell>
       <div className="max-w-3xl w-full mx-auto p-4 flex flex-col gap-4">
@@ -116,6 +119,13 @@ export default function SettingsPage() {
               <button key={n} className={`btn btn-sm ${Number(n) === phase ? "btn-primary" : ""}`} onClick={() => setPhase(Number(n))} disabled={Number(n) === phase}>Phase {n} — {name}</button>
             ))}
           </div>
+          {ready && ready.agents.length > 0 && (
+            <div className="flex flex-col gap-1 text-[12px]">
+              <span className="label">Before phase {ready.phase}: who starts thin</span>
+              {ready.agents.some((a) => a.missing.length) ? ready.agents.filter((a) => a.missing.length).map((a) => <div key={a.agentId}><Link href={`/agents/${a.agentId}`} style={{ color: "var(--ink-bright)" }}>{a.name}</Link><span style={{ color: "var(--muted)" }}> · needs {a.missing.join(", ")}</span></div>) : <span style={{ color: "var(--green)" }}>Every phase-{ready.phase} agent has what it needs.</span>}
+              <span style={{ color: "var(--dim)" }}>{ready.agents.filter((a) => !a.missing.length).length} of {ready.agents.length} ready. The rest still run; they just can't see that data until it's connected.</span>
+            </div>
+          )}
         </section>
 
         <section className="card flex flex-col gap-2" aria-label="Providers">
