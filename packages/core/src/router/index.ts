@@ -5,7 +5,7 @@ import type { AgentDef, ModelKey } from "../registry/agents.js";
 import { getAgent } from "../registry/index.js";
 import type { Store } from "../store/types.js";
 import { allowedToRun, usageSummary } from "../usage/caps.js";
-import { claudeAgentSdkProvider, claudeApiProvider } from "./claude.js";
+import { claudeAgentSdkProvider, claudeApiProvider, isUsageLimit } from "./claude.js";
 import { grokApiProvider, grokCliProvider } from "./grok.js";
 import { mockProvider } from "./mock.js";
 import { ProviderError, type AgentResult, type Provider } from "./types.js";
@@ -13,7 +13,7 @@ import type { ToolContext, ToolDef } from "../tools/index.js";
 import { NATIVE_FOR_GROK } from "../lookup.js";
 
 export * from "./types.js";
-export { claudeProvider, claudeAgentSdkProvider, claudeApiProvider } from "./claude.js";
+export { claudeProvider, claudeAgentSdkProvider, claudeApiProvider, isUsageLimit } from "./claude.js";
 export { grokProvider, grokCliProvider, grokApiProvider, parseGrokJson, GROK_DEFAULT_ARGS, GROK_DENIED_TOOLS } from "./grok.js";
 export { mockProvider } from "./mock.js";
 export { GROK_RULES, grokOnce } from "./grok.js";
@@ -152,27 +152,37 @@ export class ModelRouter {
     for (const p of chain) {
       const avail = await p.available();
       if (!avail.ok) { errors.push(`${p.id}: ${avail.reason}`); continue; }
-      try {
-        const sees = model.provider === "claude";
-        const n = opts.images?.length ?? 0;
-        const prompt = (n && !sees ? `${opts.prompt}\n\n(Phil attached ${n} image${n > 1 ? "s" : ""} you can't see. Say so, and hand anything visual to Joi.)` : opts.prompt) + prefetched;
-        const res = await p.run({ agent, model, system: opts.system, prompt, runId, onDelta: opts.onDelta, signal: opts.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext, images: sees && n ? opts.images : undefined, workspace: opts.workspace });
-        const finishedAt = new Date().toISOString();
-        await this.store.runs.update(runId, { status: "done", output: res.text, provider: res.provider, modelId: res.modelId, finishedAt, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd });
-        // A Grok run through the API spends xAI credits, not the SuperGrok plan.
-        await this.store.usage.add({ id: randomUUID(), at: finishedAt, plan: res.provider === "grok:api" ? "xai" : model.plan, provider: res.provider, agentId: agent.id, modelId: res.modelId, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd, runId });
-        await this.store.agentState.set(agent.id, { status: "idle", lastRunAt: finishedAt, lastRunId: runId, lastError: "" });
-        bus.emitEvent({ type: "agent.status", agentId: agent.id, status: "idle", at: finishedAt, detail: `last run ${res.durationMs}ms on ${res.modelId}` });
-        await this.log(agent.id, "run", `${agent.name} ran on ${res.modelId} (${res.provider}) in ${(res.durationMs / 1000).toFixed(1)}s`, runId, { prompt: opts.prompt.slice(0, 500), output: res.text.slice(0, 2000), tokens: res.inputTokens + res.outputTokens });
-        console.log(`[run] ${agent.id} ok ${res.provider} ${res.modelId} ${res.durationMs}ms ${res.text.length}ch`);
-        bus.emitEvent({ type: "usage", usage: await usageSummary(this.store) });
-        return { ...base, ...res, runId, agentId: agent.id };
-      } catch (e) {
-        const msg = e instanceof ProviderError ? e.message : (e as Error).message;
-        errors.push(`${p.id}: ${msg}`);
-        console.warn(`[run] ${agent.id} failed on ${p.id}: ${msg.slice(0, 300)}`);
-        if (opts.signal?.aborted) break;
+      // When the model's usage limit is hit (Fable's cap), the same provider gets one more go on the model's
+      // limitFallback (Opus) before the next provider in the chain. A plan-wide limit fails both; then the chain moves on.
+      let m = model;
+      for (;;) {
+        try {
+          const sees = model.provider === "claude";
+          const n = opts.images?.length ?? 0;
+          const prompt = (n && !sees ? `${opts.prompt}\n\n(Phil attached ${n} image${n > 1 ? "s" : ""} you can't see. Say so, and hand anything visual to Joi.)` : opts.prompt) + prefetched;
+          const res = await p.run({ agent, model: m, system: opts.system, prompt, runId, onDelta: opts.onDelta, signal: opts.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext, images: sees && n ? opts.images : undefined, workspace: opts.workspace });
+          const finishedAt = new Date().toISOString();
+          await this.store.runs.update(runId, { status: "done", output: res.text, provider: res.provider, modelId: res.modelId, finishedAt, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd });
+          // A Grok run through the API spends xAI credits, not the SuperGrok plan.
+          await this.store.usage.add({ id: randomUUID(), at: finishedAt, plan: res.provider === "grok:api" ? "xai" : m.plan, provider: res.provider, agentId: agent.id, modelId: res.modelId, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd, runId });
+          await this.store.agentState.set(agent.id, { status: "idle", lastRunAt: finishedAt, lastRunId: runId, lastError: "" });
+          bus.emitEvent({ type: "agent.status", agentId: agent.id, status: "idle", at: finishedAt, detail: `last run ${res.durationMs}ms on ${res.modelId}` });
+          await this.log(agent.id, "run", `${agent.name} ran on ${res.modelId} (${res.provider}) in ${(res.durationMs / 1000).toFixed(1)}s`, runId, { prompt: opts.prompt.slice(0, 500), output: res.text.slice(0, 2000), tokens: res.inputTokens + res.outputTokens });
+          console.log(`[run] ${agent.id} ok ${res.provider} ${res.modelId} ${res.durationMs}ms ${res.text.length}ch`);
+          bus.emitEvent({ type: "usage", usage: await usageSummary(this.store) });
+          return { ...base, ...res, runId, agentId: agent.id };
+        } catch (e) {
+          const msg = e instanceof ProviderError ? e.message : (e as Error).message;
+          errors.push(`${p.id}${m !== model ? ` on ${m.label}` : ""}: ${msg}`);
+          console.warn(`[run] ${agent.id} failed on ${p.id} (${m.modelId}): ${msg.slice(0, 300)}`);
+          if (opts.signal?.aborted) break;
+          const fb = m === model && model.limitFallback && isUsageLimit(msg) ? MODELS[model.limitFallback] : undefined;
+          if (!fb || fb.provider !== model.provider) break;
+          await this.log(agent.id, "system", `${agent.name} hit the ${model.label} usage limit; retrying on ${fb.label}`, runId, { error: msg.slice(0, 300) });
+          m = fb;
+        }
       }
+      if (opts.signal?.aborted) break;
     }
     const err = errors.join(" | ") || `no provider configured for ${model.label}`;
     const finishedAt = new Date().toISOString();

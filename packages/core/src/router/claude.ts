@@ -10,6 +10,15 @@ export function splitTools(all: ToolDef[]): { hq: ToolDef[]; builtins: string[] 
 }
 
 /**
+ * Did a provider fail because the plan or model ran out of usage (Claude Code's "You've hit your 5-hour limit ·
+ * resets 4:40pm", a weekly cap, an API 429) rather than a real error? The router then retries on the model's
+ * limitFallback before moving down the chain.
+ */
+export function isUsageLimit(message: string): boolean {
+  return /\b(hit|reached|exceeded) your\b[^|]{0,60}\blimit\b|usage limit|limit reached|rate[ _-]?limit|too many requests|\b429\b|out of (extra )?usage/i.test(message);
+}
+
+/**
  * Claude provider. Two modes:
  *  - "agent-sdk" (default): runs through the Claude Agent SDK, which uses the Claude Code sign-in on
  *    Phil's plan. Works wherever `claude` is logged in. Set CLAUDE_MODE=agent-sdk.

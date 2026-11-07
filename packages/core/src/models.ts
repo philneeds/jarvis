@@ -8,6 +8,8 @@ export interface ModelSpec {
   provider: ProviderId;
   /** Provider-specific model id. Overridable with env (CLAUDE_OPUS_MODEL etc.). */
   modelId?: string;
+  /** When this model's usage limit is hit, the router retries the same run once on this model before moving on. */
+  limitFallback?: ModelKey;
   /** Which paid plan this draws on, for the usage screen. */
   plan: "claude" | "supergrok" | "chatgpt" | "cursor" | "higgsfield" | "none";
   why: string;
@@ -23,6 +25,8 @@ export const MODELS: Record<ModelKey, ModelSpec> = {
   "claude-fable": {
     key: "claude-fable", label: "Claude Fable", provider: "claude", plan: "claude",
     modelId: env("CLAUDE_FABLE_MODEL", "claude-fable-5-1"),
+    // Fable's own cap is the tightest; when it is hit, Opus takes the run. (A plan-wide 5-hour limit stops Opus too.)
+    limitFallback: "claude-opus",
     why: "The most capable model, for engineering HQ itself and the hardest judgment calls; about 2.5x Opus per token.",
   },
   "claude-opus": {
