@@ -175,7 +175,7 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
       await new Promise<void>((resolve) => {
         const u = new SpeechSynthesisUtterance(text);
         const v = pickVoice(); if (v) u.voice = v;
-        u.rate = 1.12; u.pitch = 0.9;
+        u.rate = 1.25; u.pitch = 0.9;
         let pulse = 0;
         const timer = setInterval(() => { pulse = (pulse + 1) % 6; setLevel(0.25 + 0.35 * Math.abs(Math.sin(pulse))); }, 120);
         u.onboundary = () => setLevel(0.5 + Math.random() * 0.4);

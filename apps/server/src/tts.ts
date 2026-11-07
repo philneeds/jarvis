@@ -14,7 +14,7 @@ export function ttsRoutes() {
   const model = process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5";
   const sttModel = process.env.ELEVENLABS_STT_MODEL || "scribe_v1";
   // 1.0 is the voice's natural pace; ElevenLabs accepts 0.7–1.2.
-  const speed = Math.min(1.2, Math.max(0.7, Number(process.env.ELEVENLABS_SPEED ?? 1.1)));
+  const speed = Math.min(1.2, Math.max(0.7, Number(process.env.ELEVENLABS_SPEED ?? 1.2)));
 
   r.get("/status", (c) => c.json({ available: !!key, provider: key ? "elevenlabs" : "browser", stt: !!key || !!process.env.OPENAI_API_KEY || !!process.env.GROQ_API_KEY }));
   /** Speech to text: the raw audio of one utterance in the body (audio/webm or audio/mp4), the words back. */

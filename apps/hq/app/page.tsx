@@ -11,6 +11,7 @@ import { Core, type CoreState } from "@/components/Core";
 import { Transcript } from "@/components/Transcript";
 import { useLive } from "@/lib/live";
 import { useVoice } from "@/lib/voice";
+import { useClap, type ClapSensitivity } from "@/lib/clap";
 import { api, post, timeAgo } from "@/lib/api";
 import { clip, meaningful, readable } from "@/lib/activity";
 
@@ -54,6 +55,12 @@ export default function HomePage() {
       } finally { setBusy(false); setHeardText(undefined); }
     },
   });
+  // Clap-to-wake on the home screen too: a double clap starts a voice conversation, same switch and sensitivity as Always on.
+  const [clapOn, setClapOn] = useState(false);
+  const [clapSens, setClapSens] = useState<ClapSensitivity>("normal");
+  useEffect(() => { try { setClapOn(localStorage.getItem("hq.clap") === "on"); const s = localStorage.getItem("hq.clapSens"); if (s === "low" || s === "normal" || s === "high") setClapSens(s); } catch { /* ignore */ } }, []);
+  const setClap = (v: boolean) => { setClapOn(v); try { localStorage.setItem("hq.clap", v ? "on" : "off"); } catch { /* ignore */ } };
+  const setSens = (s: ClapSensitivity) => { setClapSens(s); try { localStorage.setItem("hq.clapSens", s); } catch { /* ignore */ } };
   const [money, setMoney] = useState<{ key: string; value: string }[]>([]);
   const [visual, setVisual] = useState<{ key: string; value: string } | null>(null);
   const [since, setSince] = useState<string>();
@@ -116,6 +123,7 @@ export default function HomePage() {
     setVoiceOn(true);
     void voice.startConversation();
   };
+  useClap(on && clapOn && !voice.conversation, () => { if (!busy && !voice.conversation) { setVoiceOn(true); void voice.startConversation(); } }, { sensitivity: clapSens });
   const coreState: CoreState = state?.status.killSwitch.all ? "paused" : voice.speaking ? "speaking" : voice.hearing ? "listening" : busy || state?.agents.some((a) => a.status === "working") ? "thinking" : voice.listening ? "listening" : "idle";
   const coreLabel = coreState === "paused" ? "PAUSED" : coreState === "speaking" ? "SPEAKING" : voice.hearing ? "HEARING YOU" : coreState === "thinking" ? "THINKING" : voice.listening ? "LISTENING" : voice.conversation ? "READY" : "STANDING BY";
 
@@ -139,8 +147,12 @@ export default function HomePage() {
         {voice.hearing ? (
           <button type="button" className="btn btn-sm btn-primary" onClick={voice.finishTurn} aria-label="Send what I said now">Send now</button>
         ) : (
-          <span>{voice.conversation ? "listening · pause to send · say \"stop\" to end" : voice.serverTts ? "voice: ElevenLabs" : "voice: this device"}</span>
+          <span>{voice.conversation ? "listening · pause to send · say \"stop\" to end" : `${voice.serverTts ? "voice: ElevenLabs" : "voice: this device"}${clapOn ? " · clap twice to talk" : ""}`}</span>
         )}
+        {!voice.conversation && (
+          <label className="btn btn-sm cursor-pointer normal-case tracking-normal" style={clapOn ? { borderColor: "var(--accent)" } : undefined} title="A double clap starts a voice conversation (uses the mic while on)"><input type="checkbox" className="sr-only" checked={clapOn} onChange={(e) => setClap(e.target.checked)} />clap {clapOn ? "on" : "off"}</label>
+        )}
+        {!voice.conversation && clapOn && <select className="input h-8 w-28 text-[10px] uppercase" aria-label="Clap sensitivity" value={clapSens} onChange={(e) => setSens(e.target.value as ClapSensitivity)}><option value="low">quiet room</option><option value="normal">normal</option><option value="high">big room</option></select>}
       </div>
       <Transcript pendingText={heardText ?? (voice.interim || undefined)} />
       {/* What changed while Phil was away, right under the input. Hidden when nothing did. */}
