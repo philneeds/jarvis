@@ -99,6 +99,42 @@ test("several Google accounts: pick by email, move and remove events", async () 
   assert.equal((await g.status()).accounts.length, 1);
 });
 
+test("Monica changes Phil's own events directly; events with guests go to Phil", async () => {
+  const store = memoryStore(); await store.init();
+  const { f, calls } = fakeGoogle();
+  const withGuests = (async (u: string | URL | Request, i?: RequestInit) => {
+    // e9 is a meeting with someone else on it; e1 is Phil's own.
+    if (String(u).includes("/events/e9") && (i?.method ?? "GET") === "GET") return new Response(JSON.stringify({ id: "e9", attendees: [{ email: "phil@example.com", self: true }, { email: "smith@example.com" }] }), { headers: { "content-type": "application/json" } });
+    return f(u, i);
+  }) as typeof fetch;
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: withGuests });
+  await g.exchangeCode("c1");
+  const { CHARTERS } = await import("../src/index.js");
+  for (const name of ["calendar_create_event", "calendar_update_event", "calendar_delete_event"]) {
+    assert.ok(CHARTERS.monica!.tools!.includes(name), `monica has ${name}`);
+    assert.ok(!CHARTERS.stella!.tools!.includes(name), `stella lacks ${name}`);
+  }
+  const tool = (n: string) => g.tools().find((t) => t.name === n)!;
+  const ctx = { store, agentId: "monica" };
+  // No approval queue involved: the tool writes and reports the new event.
+  assert.match(await tool("calendar_create_event").handler({ title: "Dentist", start: "2026-11-10T09:00:00-05:00", end: "2026-11-10T10:00:00-05:00" }, ctx), /Added "Dentist".*\[e2\]/);
+  const post = calls.find((c) => c.init?.method === "POST" && c.url.includes("/calendar/v3/"));
+  assert.ok(post && !String(post.init?.body).includes("attendees"));
+  assert.match(await tool("calendar_update_event").handler({ id: "e1", start: "2026-11-05T15:00:00-05:00", end: "2026-11-05T16:00:00-05:00" }, ctx), /Updated "Smith kitchen walkthrough" to 2026-11-05T15:00/);
+  assert.ok(calls.some((c) => c.init?.method === "PATCH" && c.url.includes("/events/e1")));
+  // Someone else is on e9: the tool refuses and points to the approval path; nothing is sent to Google.
+  assert.match(await tool("calendar_update_event").handler({ id: "e9", start: "2026-11-05T15:00:00-05:00" }, ctx), /Not changed.*smith@example.com.*calendar\.update/);
+  assert.match(await tool("calendar_delete_event").handler({ id: "e9", title: "Smith call" }, ctx), /Not removed.*calendar\.delete/);
+  assert.ok(!calls.some((c) => c.url.includes("/events/e9") && c.init?.method !== "GET"));
+  assert.match(await tool("calendar_delete_event").handler({ id: "e1", title: "Smith kitchen walkthrough" }, ctx), /Removed "Smith kitchen walkthrough"/);
+  assert.ok(calls.some((c) => c.init?.method === "DELETE" && c.url.includes("/events/e1")));
+  // Each change leaves a line Phil can read.
+  const log = await store.activity.list({ agentId: "monica" });
+  assert.ok(log.some((e) => /Monica added "Dentist"/.test(e.summary) && /phil@example.com/.test(e.summary)));
+  assert.ok(log.some((e) => /Monica changed "Smith kitchen walkthrough" to 2026-11-05T15:00/.test(e.summary)));
+  assert.ok(log.some((e) => /Monica removed "Smith kitchen walkthrough"/.test(e.summary)));
+});
+
 test("legacy single-account tokens are picked up", async () => {
   const store = memoryStore(); await store.init();
   await store.settings.set("google.tokens", { access_token: "at", refresh_token: "rt", expires_at: Date.now() + 100000, email: "old@example.com" });

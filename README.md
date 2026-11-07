@@ -112,7 +112,7 @@ systemctl restart jarvis-server
 
 | Connector | What it gives | Set up |
 | --- | --- | --- |
-| Google | Calendar (Monica) and Gmail (Stella's team): read tools, drafts without approval, `gmail.send` and `calendar.create` as approval actions | Create an OAuth client (Web application) in Google Cloud with redirect `<HQ origin>/api/connectors/google/callback`, set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, then Settings → Connect Google |
+| Google | Calendar (Monica) and Gmail (Stella's team): read tools, drafts without approval, Monica's direct `calendar_create_event` / `calendar_update_event` / `calendar_delete_event` on Phil's own events (guests refused), `gmail.send` and `calendar.create` with attendees as approval actions | Create an OAuth client (Web application) in Google Cloud with redirect `<HQ origin>/api/connectors/google/callback`, set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, then Settings → Connect Google |
 | X | Phil's own accounts (Philneeds, Range.cool, Acres), one OAuth connection each: mentions, own posts with metrics and the DM inbox as tools; `x.post`, `x.reply` and `x.dm` as approval actions | OAuth 2.0 app in the X developer portal with redirect `<HQ origin>/api/connectors/x/callback`, set `X_CLIENT_ID` / `X_CLIENT_SECRET`, then Settings → Connect an X account (once per account) |
 | Telegram | Talk to Jarvis from your phone; approvals arrive with Approve / Reject buttons | Make a bot with @BotFather, set `TELEGRAM_BOT_TOKEN` and your `TELEGRAM_CHAT_ID` |
 | ntfy | Push alerts | `NOTIFY_WEBHOOK_URL` |

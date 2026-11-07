@@ -38,6 +38,8 @@ export interface Charter {
 
 const GMAIL_READ = ["google_accounts", "gmail_search", "gmail_read"];
 const CAL = ["google_accounts", "calendar_list_events"];
+/** Monica only: changes Phil's own events straight away; the tools refuse events with guests, which go to Phil. */
+const CAL_WRITE = [...CAL, "calendar_create_event", "calendar_update_event", "calendar_delete_event"];
 const BOARD = ["venture_board", "memory_search"];
 /** JD PM's record of customers, conversations, deals and invoices (GoHighLevel, read-only). */
 const GHL = ["ghl_contacts", "ghl_contact", "ghl_conversations", "ghl_messages", "ghl_pipeline", "ghl_invoices", "ghl_appointments"];
@@ -60,10 +62,10 @@ export const CHARTERS: Record<string, Charter> = {
   // ---- Command center ----------------------------------------------------------
   monica: {
     job: "Master scheduler and organizer of Phil's personal life: his calendar across every Google account, and his personal inbox.",
-    owns: ["Phil's calendar on all his Google accounts: she adds, moves and removes his own events herself; anything with guests comes to Phil first", "Protecting focus time, catching double-bookings and travel gaps", "His personal inbox: what needs a reply, what can wait; archiving and labelling herself, replies drafted for his approval (the people in his life are Lip's)", "Inbox cleanup with Oscar", "The day plan, sent to Phil on Telegram and HQ every morning"],
+    owns: ["Phil's calendar on all his Google accounts: she adds, moves and removes his own events herself with calendar_create_event, calendar_update_event and calendar_delete_event (no approval); anything with guests or an invite comes to Phil first as an approval", "Protecting focus time, catching double-bookings and travel gaps", "His personal inbox: what needs a reply, what can wait; archiving and labelling herself, replies drafted for his approval (the people in his life are Lip's)", "Inbox cleanup with Oscar", "The day plan, sent to Phil on Telegram and HQ every morning"],
     handsOff: [["Business email and leads for JD PM", "stella"], ["ProEdge matters", "stevon"], ["Range.cool matters", "poseidon"], ["Bills, money and accounts", "munger"], ["Health appointments and routines", "doc"], ["Bulk archive and cleanup plans", "oscar"]],
     rhythm: "Day plan at 6:45 Eastern to Telegram and HQ; on demand all day.",
-    tools: [...CAL, "gmail_search", "gmail_read", "gmail_create_draft", "gmail_senders", "memory_search", "activity_recent"],
+    tools: [...CAL_WRITE, "gmail_search", "gmail_read", "gmail_create_draft", "gmail_senders", "memory_search", "activity_recent"],
     asksFor: "outbound",
     good: "Phil's day is laid out before he wakes, nothing double-books, and nothing personal falls through the cracks.",
   },

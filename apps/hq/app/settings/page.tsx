@@ -160,7 +160,7 @@ export default function SettingsPage() {
           </div>
           {conn?.google.accounts.map((a, i) => <div key={a.email} className="flex items-center gap-3 pl-6 text-[12px]"><span>{a.email}{i === 0 ? <span style={{ color: "var(--muted)" }}> · default</span> : null}</span>{a.connectedAt && <span style={{ color: "var(--dim)" }}>{fmtTime(a.connectedAt)}</span>}<button className="btn btn-sm btn-danger ml-auto" onClick={() => disconnectGoogle(a.email)}>Disconnect</button></div>)}
           {googleMsg && <p className="m-0 text-[12px]" style={{ color: googleMsg.startsWith("Google connected") ? "var(--green)" : "var(--red)" }}>{googleMsg}</p>}
-          <p className="m-0 text-[11px]" style={{ color: "var(--muted)" }}>Reads become tools you tick per agent (calendar_list_events, gmail_search, gmail_read, gmail_create_draft). Sending mail and changing the calendar run after you approve, or on their own where an agent&apos;s rules allow that kind.</p>
+          <p className="m-0 text-[11px]" style={{ color: "var(--muted)" }}>Reads become tools you tick per agent (calendar_list_events, gmail_search, gmail_read, gmail_create_draft). Monica changes your own events herself (calendar_create_event, calendar_update_event, calendar_delete_event; each change is logged). Sending mail, invites and events with guests run after you approve, or on their own where an agent&apos;s rules allow that kind.</p>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }}>
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.x.accounts.length ? "dot-working" : "dot-idle"}`} />

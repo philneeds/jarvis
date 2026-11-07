@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Store } from "../store/types.js";
 import { defineTool, type ToolDef } from "../tools/index.js";
 import type { Executor, Describer } from "../jarvis/orchestrator.js";
 import { getAgentConfig } from "../config.js";
 import type { ToolContext } from "../tools/index.js";
+import { bus } from "../events.js";
+import { getAgent } from "../registry/index.js";
 
 /**
  * Google connector: Calendar for Monica, Gmail for Stella's team (and anyone Phil allows).
@@ -11,6 +14,8 @@ import type { ToolContext } from "../tools/index.js";
  * optional `account` (an email or part of one) and defaults to the first account connected.
  * Reads are tools. Writes (send an email, create/move/delete an event) are approval actions executed only
  * after Phil's OK, unless an agent's rules auto-approve that kind; drafts are allowed without approval.
+ * Monica also gets calendar_create_event / calendar_update_event / calendar_delete_event: direct changes to Phil's
+ * own events (his calendar, no guests), logged to the activity feed; anything with guests still waits for Phil.
  *   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET   an OAuth client (Web application) in Google Cloud
  *   GOOGLE_REDIRECT_URI                       <HQ origin>/api/connectors/google/callback
  */
@@ -306,9 +311,23 @@ export class GoogleConnector {
 
   // ---- What agents get -------------------------------------------------------
 
-  /** Read tools plus drafting (drafts never need approval). */
+  /** The email an agent's account choice resolves to, for log lines. */
+  private async emailOf(account?: string): Promise<string> {
+    try { return (await this.pick(account, this.allowed)).email ?? "the first Google account"; } catch { return account ?? "the first Google account"; }
+  }
+
+  /** One activity line for a change made without approval, so Phil sees what moved and when. */
+  private async note(ctx: ToolContext | undefined, what: string) {
+    if (!ctx?.store) return;
+    const entry = { id: randomUUID(), at: new Date().toISOString(), agentId: ctx.agentId, kind: "system" as const, summary: `${getAgent(ctx.agentId)?.name ?? ctx.agentId} ${what}` };
+    await ctx.store.activity.add(entry);
+    bus.emitEvent({ type: "activity", entry });
+  }
+
+  /** Read tools plus drafting (drafts never need approval), and direct changes to Phil's own events for the agents given them. */
   tools(): ToolDef[] {
     const acct = { account: z.string().optional().describe("which connected Google account (email or part of it); default the first") };
+    const when = { start: z.string().optional().describe("ISO datetime, or YYYY-MM-DD for all-day"), end: z.string().optional().describe("ISO datetime, or YYYY-MM-DD for all-day") };
     return [
       defineTool({
         name: "google_accounts",
@@ -321,6 +340,44 @@ export class GoogleConnector {
         description: "Google Calendar events in a window (default: the next 7 days). ISO dates. Returns event ids for calendar.update / calendar.delete.",
         schema: { from: z.string().optional(), to: z.string().optional(), max: z.number().int().min(1).max(100).optional(), ...acct },
         handler: async (a, ctx) => { this.allowed = await this.allowedFor(ctx); const ev = await this.listEvents(a); return ev.length ? ev.map((e) => `${e.allDay ? `all day ${e.start}${e.end !== e.start ? ` through ${e.end}` : ""}` : `${e.start} → ${e.end}`} · ${e.title}${e.location ? ` @ ${e.location}` : ""}${e.attendees?.length ? ` with ${e.attendees.join(", ")}` : ""} [${e.id}]`).join("\n") : "Nothing on the calendar in that window."; },
+      }),
+      defineTool({
+        name: "calendar_create_event",
+        description: "Add an event to Phil's own Google Calendar now, no approval. start and end as ISO datetimes, or YYYY-MM-DD for all-day. No guests here: to invite anyone, ask for approval with action calendar.create and attendees instead.",
+        schema: { title: z.string(), start: z.string(), end: z.string(), description: z.string().optional(), location: z.string().optional(), ...acct },
+        handler: async (a, ctx) => {
+          this.allowed = await this.allowedFor(ctx);
+          const r = await this.createEvent({ title: a.title, start: a.start, end: a.end, description: a.description, location: a.location, account: a.account });
+          await this.note(ctx, `added "${a.title}" (${a.start} → ${a.end}) to the calendar on ${await this.emailOf(a.account)}`);
+          return `Added "${a.title}" ${a.start} → ${a.end}${r.link ? ` (${r.link})` : ""} [${r.id}].`;
+        },
+      }),
+      defineTool({
+        name: "calendar_update_event",
+        description: "Move, rename or edit one of Phil's own events now, no approval; id from calendar_list_events. Refuses an event that has guests: for those, ask for approval with action calendar.update.",
+        schema: { id: z.string(), title: z.string().optional(), ...when, description: z.string().optional(), location: z.string().optional(), ...acct },
+        handler: async (a, ctx) => {
+          this.allowed = await this.allowedFor(ctx);
+          const guests = await this.eventGuests(a.id, a.account);
+          if (guests.length) return `Not changed: that event has other people on it (${guests.join(", ")}), so the change would reach them. Ask for approval with action calendar.update instead.`;
+          const r = await this.updateEvent({ id: a.id, title: a.title, start: a.start, end: a.end, description: a.description, location: a.location, account: a.account });
+          const title = r.title ?? a.title ?? a.id;
+          await this.note(ctx, `changed "${title}"${a.start ? ` to ${a.start}${a.end ? ` → ${a.end}` : ""}` : ""} on the calendar on ${await this.emailOf(a.account)}`);
+          return `Updated "${title}"${a.start ? ` to ${a.start}${a.end ? ` → ${a.end}` : ""}` : ""}${r.link ? ` (${r.link})` : ""}.`;
+        },
+      }),
+      defineTool({
+        name: "calendar_delete_event",
+        description: "Remove one of Phil's own events now, no approval; id from calendar_list_events. Refuses an event that has guests: for those, ask for approval with action calendar.delete.",
+        schema: { id: z.string(), title: z.string().optional().describe("the event's title, for the log"), ...acct },
+        handler: async (a, ctx) => {
+          this.allowed = await this.allowedFor(ctx);
+          const guests = await this.eventGuests(a.id, a.account);
+          if (guests.length) return `Not removed: that event has other people on it (${guests.join(", ")}), so removing it would reach them. Ask for approval with action calendar.delete instead.`;
+          await this.deleteEvent({ id: a.id, account: a.account });
+          await this.note(ctx, `removed "${a.title ?? a.id}" from the calendar on ${await this.emailOf(a.account)}`);
+          return `Removed "${a.title ?? a.id}".`;
+        },
       }),
       defineTool({
         name: "gmail_search",
@@ -439,7 +496,7 @@ export class GoogleConnector {
 
   /** One paragraph for agent prompts on how to write through this connector. */
   static promptHint(): string {
-    return `Google is connected (google_accounts lists which accounts; pass "account" to use one other than the first). Reading: calendar_list_events, gmail_search, gmail_read. Drafting: gmail_create_draft (no approval). Sending mail = an approval block with "kind":"send" and "payload":{"action":"gmail.send","to":"...","subject":"...","body":"...","account":"<email>"}. Calendar changes = an approval block with "kind":"record": create with "payload":{"action":"calendar.create","title":"...","start":"<ISO>","end":"<ISO>"}; move or rename with {"action":"calendar.update","id":"<event id>","start":"<ISO>","end":"<ISO>","title":"..."}; remove with {"action":"calendar.delete","id":"<event id>","title":"..."}. Say in the title what will change. Mail cleanup = "kind":"record" for archive or label ({"action":"gmail.archive","query":"category:promotions older_than:30d","max":500,"account":"<email>"} / {"action":"gmail.label","query":"...","label":"Receipts"}), and "kind":"other" for trash ({"action":"gmail.trash","query":"...","max":200}), which always waits for Phil. Plan with gmail_senders first and say how many messages the query matches.`;
+    return `Google is connected (google_accounts lists which accounts; pass "account" to use one other than the first). Reading: calendar_list_events, gmail_search, gmail_read. Drafting: gmail_create_draft (no approval). Sending mail = an approval block with "kind":"send" and "payload":{"action":"gmail.send","to":"...","subject":"...","body":"...","account":"<email>"}. Calendar changes = an approval block with "kind":"record": create with "payload":{"action":"calendar.create","title":"...","start":"<ISO>","end":"<ISO>"}; move or rename with {"action":"calendar.update","id":"<event id>","start":"<ISO>","end":"<ISO>","title":"..."}; remove with {"action":"calendar.delete","id":"<event id>","title":"..."}. Say in the title what will change. An agent that has calendar_create_event, calendar_update_event and calendar_delete_event (Monica) changes Phil's own events with those tools straight away, no approval block; they refuse an event with guests, and inviting anyone is always the approval block with "attendees". Mail cleanup = "kind":"record" for archive or label ({"action":"gmail.archive","query":"category:promotions older_than:30d","max":500,"account":"<email>"} / {"action":"gmail.label","query":"...","label":"Receipts"}), and "kind":"other" for trash ({"action":"gmail.trash","query":"...","max":200}), which always waits for Phil. Plan with gmail_senders first and say how many messages the query matches.`;
   }
 }
 
