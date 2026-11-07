@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+
 /**
  * Speech for Telegram and HQ. Transcription takes the first key it finds: ELEVENLABS_API_KEY (Scribe), OPENAI_API_KEY
  * (Whisper), GROQ_API_KEY (Whisper on Groq, free tier). Jarvis's spoken replies need ElevenLabs.
@@ -51,5 +53,20 @@ export async function synthesize(text: string, f: typeof fetch = fetch): Promise
   const speed = Math.min(1.2, Math.max(0.7, Number(process.env.ELEVENLABS_SPEED ?? 1.2)));
   const res = await f(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=opus_48000_64`, { method: "POST", headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/ogg" }, body: JSON.stringify({ text: text.slice(0, 2500), model_id: model, voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.2, speed } }) });
   if (!res.ok) throw new Error(`voice failed: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+  const audio = Buffer.from(await res.arrayBuffer());
+  // ElevenLabs tops out at 1.2x; the rest of the way to Phil's pace is a time-stretch with ffmpeg, when it's installed.
+  const extra = Number(process.env.VOICE_STRETCH ?? 1.25);
+  return extra > 1.01 ? await stretch(audio, extra).catch(() => audio) : audio;
+}
+
+/** Speed audio up without changing pitch (ffmpeg's atempo), keeping the OGG/Opus container Telegram plays as a voice bubble. */
+export function stretch(audio: Buffer, factor: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const p = spawn("ffmpeg", ["-loglevel", "error", "-i", "pipe:0", "-filter:a", `atempo=${Math.min(2, Math.max(0.5, factor))}`, "-c:a", "libopus", "-b:a", "48k", "-f", "ogg", "pipe:1"], { stdio: ["pipe", "pipe", "pipe"] });
+    const out: Buffer[] = []; let err = "";
+    p.stdout.on("data", (d) => out.push(d)); p.stderr.on("data", (d) => { err += d.toString(); });
+    p.on("error", reject);
+    p.on("exit", (code) => (code === 0 && out.length ? resolve(Buffer.concat(out)) : reject(new Error(`ffmpeg ${code}: ${err.slice(0, 120)}`))));
+    p.stdin.end(audio);
+  });
 }

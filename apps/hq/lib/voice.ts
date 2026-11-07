@@ -141,6 +141,8 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
 
   const playBlob = useCallback(async (blob: Blob) => {
     const audio = new Audio(URL.createObjectURL(blob)); audioRef.current = audio;
+    // ElevenLabs tops out at 1.2x; Phil wants 1.5x, so the rest is playback speed (pitch is kept).
+    audio.playbackRate = Number(process.env.NEXT_PUBLIC_VOICE_PLAYBACK ?? 1.25); audio.preservesPitch = true;
     const c = ctx();
     const src = c.createMediaElementSource(audio); src.connect(c.destination);
     const stop = meter(src, c);
@@ -175,7 +177,7 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
       await new Promise<void>((resolve) => {
         const u = new SpeechSynthesisUtterance(text);
         const v = pickVoice(); if (v) u.voice = v;
-        u.rate = 1.25; u.pitch = 0.9;
+        u.rate = 1.5; u.pitch = 0.9;
         let pulse = 0;
         const timer = setInterval(() => { pulse = (pulse + 1) % 6; setLevel(0.25 + 0.35 * Math.abs(Math.sin(pulse))); }, 120);
         u.onboundary = () => setLevel(0.5 + Math.random() * 0.4);

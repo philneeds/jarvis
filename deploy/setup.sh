@@ -41,6 +41,8 @@ APP_USER=jarvis
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
 log "Packages"
+# ffmpeg speeds up Jarvis's spoken replies on Telegram past ElevenLabs's 1.2x.
+apt-get install -y -qq ffmpeg >/dev/null 2>&1 || true
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq curl git ca-certificates gnupg debian-keyring debian-archive-keyring apt-transport-https postgresql postgresql-contrib ufw >/dev/null
