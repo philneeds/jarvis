@@ -734,3 +734,10 @@ test("phase readiness names what each next-phase agent still lacks; /run starts 
   assert.ok((await store.activity.list({ limit: 50 })).some((e) => e.agentId === "stella" && /→ Jarvis \(stella-leads\)/.test(e.summary)));
   assert.match(await jarvis.command("/run house-open"), /reports to Charlie Munger/);
 });
+
+test("Jarvis knows how HQ itself works", async () => {
+  const { jarvisSystemPrompt } = await import("../src/index.js");
+  const p = jarvisSystemPrompt([], "ok");
+  assert.match(p, /clap on\/off button at the bottom enables clap-to-wake/);
+  assert.match(p, /\/voice on\|off/);
+});
