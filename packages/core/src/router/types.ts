@@ -18,7 +18,11 @@ export interface AgentRequest {
   toolContext?: ToolContext;
   /** Images to look at with the prompt (providers that can see). */
   images?: ImageInput[];
+  /** A directory the agent may read, edit and run commands in (Einstein's workshop), with the guard that limits it. */
+  workspace?: Workspace;
 }
+
+export interface Workspace { dir: string; guard: (tool: string, input: Record<string, unknown>) => string | undefined; maxTurns?: number }
 
 export interface AgentResult {
   text: string;

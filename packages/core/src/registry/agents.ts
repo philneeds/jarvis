@@ -5,6 +5,7 @@ import type { VentureId } from "./ventures.js";
  * Swapping an agent's model is a one-line change here or an override in agent settings.
  */
 export type ModelKey =
+  | "claude-fable"
   | "claude-opus"
   | "claude-sonnet"
   | "grok"
@@ -63,8 +64,8 @@ export const AGENTS: AgentDef[] = [
     desc: "Responsible for the entire calendar and the master organizer of everything. Runs Phil's day.",
   },
   {
-    id: "einstein", name: "Einstein", short: "Tooling & improvements", layer: 1, parent: "jarvis", venture: "command", model: "claude-opus", phase: 0, priority: "room",
-    desc: "In charge of all tooling and improvements across the entire spider web and agent conglomerate. Proposes upgrades; Phil approves installs and config changes.",
+    id: "einstein", name: "Einstein", short: "Engineer & improvements", layer: 1, parent: "jarvis", venture: "command", model: "claude-fable", phase: 0, priority: "room",
+    desc: "HQ's resident engineer: reads, changes and tests HQ's own code in his workshop, diagnoses from logs and the database, and ships each change through Phil's approval. In charge of tooling and improvements across the whole web.",
   },
   {
     id: "oscar", name: "Oscar", short: "Cleanup, memory & optimization", layer: 2, parent: "einstein", links: ["monica"], venture: "command", model: "claude-sonnet", phase: 0, priority: "room",

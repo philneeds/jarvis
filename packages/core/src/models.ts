@@ -20,6 +20,11 @@ const env = (k: string, d: string) => (typeof process !== "undefined" && process
  * steers a business or writes code; Grok agents scout and draft. No Haiku.
  */
 export const MODELS: Record<ModelKey, ModelSpec> = {
+  "claude-fable": {
+    key: "claude-fable", label: "Claude Fable", provider: "claude", plan: "claude",
+    modelId: env("CLAUDE_FABLE_MODEL", "claude-fable-5-1"),
+    why: "The most capable model, for engineering HQ itself and the hardest judgment calls; about 2.5x Opus per token.",
+  },
   "claude-opus": {
     key: "claude-opus", label: "Claude Opus", provider: "claude", plan: "claude",
     modelId: env("CLAUDE_OPUS_MODEL", "claude-opus-5-5"),

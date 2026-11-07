@@ -19,6 +19,7 @@ import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { LOOKUP_TOOLS } from "../lookup.js";
 import { DECK_HINT, makeDeck, normalizeDeck, type Deck } from "../decks.js";
+import { WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
 
 export interface JarvisOptions {
   store: Store;
@@ -207,7 +208,33 @@ export class Jarvis {
   }
 
   /** Every tool an agent could be given: built-in plus connectors. */
-  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...LOOKUP_TOOLS, ...this.connectorTools.values()]; }
+  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...LOOKUP_TOOLS, ...this.workshopToolList, ...this.connectorTools.values()]; }
+
+  // ---- Einstein's workshop --------------------------------------------------
+  private workshop?: Workshop;
+  private workshopToolList: import("../tools/index.js").ToolDef[] = [];
+  /** Give Einstein a workshop: a copy of the code to change, with shipping through Phil's approval. */
+  useWorkshop(w: Workshop, deps: WorkshopToolDeps = {}) {
+    this.workshop = w;
+    this.workshopToolList = workshopTools(w, deps);
+    this.executors.set("code.ship", async (a) => {
+      const p = (a.payload ?? {}) as { sha?: unknown; title?: unknown };
+      if (typeof p.sha !== "string" || !/^[0-9a-f]{7,40}$/.test(p.sha)) throw new Error("code.ship needs the commit sha from workshop_submit");
+      return w.ship(this.store, p.sha, String(p.title ?? a.title), a.id);
+    });
+    this.describers.set("code.ship", (p) => `Pushes Einstein's commit ${String(p.sha ?? "").slice(0, 7)} to the live branch and redeploys HQ (HQ restarts; two or three minutes). If HQ doesn't come back up, the deploy rolls back by itself and the commit is reverted.`);
+  }
+  /** On boot: report how the last ship went, if one was in flight when HQ restarted. */
+  async finishShip(): Promise<string | undefined> {
+    if (!this.workshop) return undefined;
+    const r = await this.workshop.finish(this.store).catch((e) => ({ record: undefined, message: `Couldn't read the last deploy's outcome: ${(e as Error).message}` }));
+    if (!r) return undefined;
+    await this.router.log("einstein", r.record?.status === "done" ? "system" : "error", r.message);
+    if (r.record?.approvalId) { const a = await this.store.approvals.get(r.record.approvalId); if (a) await this.store.approvals.update(a.id, { note: [a.note, r.message].filter(Boolean).join(" · ") }); }
+    await this.say({ role: "jarvis", text: r.message, kind: "final" });
+    await this.notify?.(r.record?.status === "done" ? "HQ updated" : "HQ deploy rolled back", r.message.slice(0, 300)).catch(() => undefined);
+    return r.message;
+  }
 
   // ---- Chat -------------------------------------------------------------
 
@@ -358,13 +385,23 @@ export class Jarvis {
     const memory = [...(await this.store.memory.list("phil")), ...(await this.store.memory.list(`venture:${agent.venture}`)), ...(await this.store.memory.list(`agent:${agent.id}`))];
     const cfg = await getAgentConfig(this.store, agent.id);
     const tools = this.allTools().filter((t) => cfg.tools.includes(t.name));
-    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "");
+    // Einstein's workshop: a fresh branch of the code for this task, with the file and shell tools inside it.
+    let workspace: import("../router/types.js").Workspace | undefined;
+    let workshopHint = "";
+    if (CHARTERS[agent.id]?.workshop && this.workshop) {
+      try {
+        const w = await this.workshop.prepare(task);
+        workspace = { dir: w.dir, guard: workshopGuard(w.dir, process.cwd()) };
+        workshopHint = `\n\n${WORKSHOP_HINT(w.dir, w.branch, w.base)}`;
+      } catch (e) { workshopHint = `\n\nYour workshop couldn't be opened (${(e as Error).message.slice(0, 200)}), so you can't change code this run; say so and diagnose with the tools you have.`; }
+    }
+    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "") + workshopHint;
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
     // Images Phil attached to this conversation go with every run in it, including hand-offs; agents that read uploaded
     // data also see this week's screenshots.
     const dataImages = cfg.tools.includes("sales_data") ? await recentDataImages(this.store, agent.venture) : [];
     const images = await imageInputs([...(this.convo.getStore()?.images ?? []), ...dataImages]);
-    const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id), images });
+    const r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id), images, workspace });
     if (r.blocked) return r;
     if (opts.noBlocks) return r; // the caller reads the reply itself (approval Q&A)
     const { text: said, approvals, remember, metrics, records, handoffs, attention, slides } = extractBlocks(r.text);

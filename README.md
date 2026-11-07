@@ -45,6 +45,10 @@ Every agent names its model in `packages/core/src/registry/agents.ts`; swapping 
 
 The router tries the configured mode first and falls back to the other if it is available. Model ids: `CLAUDE_OPUS_MODEL`, `CLAUDE_SONNET_MODEL`, `GROK_MODEL`.
 
+### Einstein's workshop (HQ changes its own code)
+
+Einstein is HQ's engineer. Ask Jarvis for a change or a fix in plain words and Jarvis delegates it to Einstein, who works in a separate copy of the code (`WORKSHOP_DIR`, `/opt/jarvis-workshop` on the server) on a fresh branch off the live one, with the Claude Agent SDK's file and shell tools inside that directory only. A guard refuses anything outside it, any `.env` or key file, the live app, network or system commands, and `git push`. He can read the server log (`hq_logs`, secrets masked) and run read-only SQL (`db_query`). `workshop_verify` builds, typechecks and tests every package; `workshop_submit` commits and returns the approval block. Phil sees a "Ship:" card under Needs you with the files, the reason and the check results; approving it pushes the commit to the live branch (needs `GITHUB_PUSH_TOKEN`, fine-grained, Contents read and write on the repo) and runs `/usr/local/bin/jarvis-deploy` (installed by `setup.sh`, the one command the app user may run as root), which redeploys, waits for `/api/health`, and rolls back to the previous commit if HQ doesn't answer. On the next boot HQ reports the outcome in chat and on Telegram, and reverts a rolled-back commit on the branch. `WORKSHOP_DIR=off` disables all of it.
+
 ### Usage rationing
 
 Work is rationed by priority against each pool, so a busy month degrades gracefully instead of stopping or overspending. The Claude pool is the plan's monthly Agent SDK credit in dollars (`CLAUDE_MONTHLY_USD`: Pro 20, Max 5x 100, Max 20x 200); the xAI pool is a monthly budget for X searches and, with `GROK_MODE=api`, Grok runs (`XAI_MONTHLY_USD`); with `GROK_MODE=cli` the Grok CLI has a weekly run pool (`GROK_WEEKLY_RUNS`). Every run is costed at list price so Usage shows dollars per agent.

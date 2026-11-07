@@ -9,7 +9,7 @@ import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 
 interface Passkey { id: string; label: string; createdAt: string }
-interface Connectors { xsearch?: { configured: boolean; model: string; grokMode: string }; google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; robinhood?: { configured: boolean; connected: boolean; connectedAt?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
+interface Connectors { workshop?: { configured: boolean; dir?: string; canShip: boolean; last?: { at: string; sha: string; title: string; status: string; note?: string } | null }; xsearch?: { configured: boolean; model: string; grokMode: string }; google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; robinhood?: { configured: boolean; connected: boolean; connectedAt?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
 
 export default function SettingsPage() {
   const { state, refresh } = useLive();
@@ -213,6 +213,16 @@ export default function SettingsPage() {
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GITHUB_READ_TOKEN (fine-grained, read-only) and optionally GITHUB_REPOS</span>}
             </div>
             {(ghMsg || (conn?.github?.lastFetch && !conn.github.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: ghMsg && !/refused|error|limit|isn't set|not found/i.test(ghMsg) ? "var(--ink)" : "var(--red)" }}>{ghMsg ?? conn?.github?.lastFetch?.error}</p>}
+          </div>
+          <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Einstein's workshop">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`dot ${conn?.workshop?.canShip ? "dot-working" : conn?.workshop?.configured ? "dot-waiting" : "dot-idle"}`} />
+              <span><b>Einstein&apos;s workshop</b> · a copy of HQ&apos;s code he changes and tests; each change ships as a card under Needs you and HQ redeploys itself.{conn?.workshop?.dir ? ` (${conn.workshop.dir})` : ""}</span>
+              {conn?.workshop?.canShip
+                ? <span className="ml-auto" style={{ color: "var(--dim)" }}>{conn.workshop.last ? `last: ${conn.workshop.last.title} · ${conn.workshop.last.status}` : "ready"}</span>
+                : <span className="ml-auto" style={{ color: "var(--amber)" }}>can prepare changes but not ship: add GITHUB_PUSH_TOKEN (fine-grained, Contents read and write on the jarvis repo) to .env and restart.</span>}
+            </div>
+            {conn?.workshop?.last?.note && <p className="m-0 pl-6" style={{ color: conn.workshop.last.status === "done" ? "var(--ink)" : "var(--red)" }}>{conn.workshop.last.note}</p>}
           </div>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="X search">
             <div className="flex flex-wrap items-center gap-3">

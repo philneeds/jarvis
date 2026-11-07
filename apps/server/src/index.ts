@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { DiscordConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, XConnector, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
+import { DiscordConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, XConnector, Workshop, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
 import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
 import { authEnabled, isAuthedRequest } from "./auth.js";
@@ -33,6 +33,14 @@ if (github) jarvis.addConnector(github, GithubConnector.promptHint());
 // Robinhood's official agent access, for Buffett and Munger: Phil connects it from Settings; orders wait for his approval.
 const robinhood = RobinhoodConnector.fromEnv(store);
 jarvis.addConnector(robinhood, RobinhoodConnector.promptHint());
+// Einstein's workshop: a copy of the code he can change and test; ships through Phil's approval, deploys itself.
+const workshop = Workshop.fromEnv();
+if (workshop) {
+  jarvis.useWorkshop(workshop, {
+    logs: async (n) => (await defaultRunner("journalctl", ["-u", "jarvis-server", "-n", String(n), "--no-pager", "-o", "cat"], { cwd: process.cwd(), timeoutMs: 20_000 })).out,
+    query: process.env.DATABASE_URL ? readOnlyQuery(process.env.DATABASE_URL) : undefined,
+  });
+}
 // Mayne's hard limits are always on: refused before Phil sees an over-limit trade, and again at execution.
 const guard = new TradingGuard(store);
 jarvis.addConnector(guard, TradingGuard.promptHint());
@@ -40,7 +48,7 @@ jarvis.onApprovalRequested(async (a) => {
   if ((a.payload as { action?: string } | undefined)?.action !== "trade.execute") return undefined;
   try { const c = await guard.check(parseTrade(a.payload)); return c.ok ? undefined : `Mayne's hard limits: ${c.reason}`; } catch (e) { return (e as Error).message; }
 });
-const app = createApp(jarvis, { google, x, guard, spotify, kubera, ghl, discord, github, robinhood });
+const app = createApp(jarvis, { google, x, guard, spotify, kubera, ghl, discord, github, robinhood, workshop });
 
 // Live feed for HQ: agent status, chat, approvals, activity, usage, system status.
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
@@ -92,6 +100,8 @@ if (process.env.HEALTHCHECK_URL) {
 const scheduler = new Scheduler(jarvis);
 // Runs that died with the previous process must not show as "working" forever.
 const stale = await jarvis.clearStaleWork();
+// A ship that was in flight when HQ restarted: say how it went.
+void jarvis.finishShip().catch((e) => console.warn("[workshop] finish:", (e as Error).message));
 if (stale.length) console.log(`[boot] cleared stale work: ${stale.join(", ")}`);
 if (process.env.SCHEDULER !== "0") scheduler.start();
 

@@ -69,7 +69,8 @@ if [[ -d "$APP_DIR/.git" ]]; then
   [[ -n "${GITHUB_TOKEN:-}" ]] && sudo -u "$APP_USER" git -C "$APP_DIR" remote set-url origin "$REPO"
   sudo -u "$APP_USER" git -C "$APP_DIR" fetch -q origin "$BRANCH"
   sudo -u "$APP_USER" git -C "$APP_DIR" checkout -q "$BRANCH"
-  sudo -u "$APP_USER" git -C "$APP_DIR" reset -q --hard "origin/$BRANCH"
+  # REF=<sha> pins the checkout (the deploy script's rollback); otherwise the branch tip.
+  sudo -u "$APP_USER" git -C "$APP_DIR" reset -q --hard "${REF:-origin/$BRANCH}"
 else
   git clone -q --branch "$BRANCH" "$REPO" "$APP_DIR"
   chown -R "$APP_USER:$APP_USER" "$APP_DIR"
@@ -116,6 +117,41 @@ sudo -u "$APP_USER" -H bash -lc "cd $APP_DIR && pnpm install --frozen-lockfile -
 # Nightly backups land here; the app user must be able to write it.
 mkdir -p /var/backups/jarvis && chown "$APP_USER:$APP_USER" /var/backups/jarvis && chmod 750 /var/backups/jarvis
 grep -q '^BACKUP_DIR=' "$APP_DIR/.env" || echo 'BACKUP_DIR=/var/backups/jarvis' >> "$APP_DIR/.env"
+
+log "Einstein's workshop"
+# A separate copy of the code for Einstein to change and test; HQ clones it on first use.
+mkdir -p /opt/jarvis-workshop && chown "$APP_USER:$APP_USER" /opt/jarvis-workshop
+grep -q '^WORKSHOP_DIR=' "$APP_DIR/.env" || echo 'WORKSHOP_DIR=/opt/jarvis-workshop' >> "$APP_DIR/.env"
+# The app user may read the server log (Einstein's hq_logs) and run exactly one privileged command: the deploy.
+usermod -aG systemd-journal "$APP_USER" 2>/dev/null || true
+mkdir -p /var/lib/jarvis && chmod 755 /var/lib/jarvis
+cat > /usr/local/bin/jarvis-deploy <<'DEPLOY'
+#!/usr/bin/env bash
+# Redeploy HQ from its branch, wait for it to answer, roll back to the previous commit if it doesn't.
+# Run by HQ (as the app user, through sudo) when Phil approves one of Einstein's changes; also fine by hand as root.
+set -u
+APP=/opt/jarvis; OUT=/var/lib/jarvis/last-deploy.json; LOG=/var/log/jarvis-deploy.log
+BRANCH=$(sudo -u jarvis git -C "$APP" rev-parse --abbrev-ref HEAD)
+PREV=$(sudo -u jarvis git -C "$APP" rev-parse HEAD)
+START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+healthy() { for _ in $(seq 1 36); do sleep 5; curl -fsS -m 5 http://localhost:4000/api/health >/dev/null 2>&1 && return 0; done; return 1; }
+report() { printf '{"at":"%s","ok":%s,"sha":"%s","previous":"%s","rolledBackTo":"%s","error":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$PREV" "$3" "$4" > "$OUT"; chmod 644 "$OUT"; }
+echo "== deploy $START from $PREV on $BRANCH" >> "$LOG"
+if BRANCH="$BRANCH" bash "$APP/deploy/setup.sh" >> "$LOG" 2>&1 && healthy; then
+  report true "$(sudo -u jarvis git -C "$APP" rev-parse HEAD)" "" ""
+  echo "== ok" >> "$LOG"; exit 0
+fi
+echo "== failed; rolling back to $PREV" >> "$LOG"
+ERR=$(tail -n 5 "$LOG" | tr -d '"\\' | tr '\n' ' ')
+if BRANCH="$BRANCH" REF="$PREV" bash "$APP/deploy/setup.sh" >> "$LOG" 2>&1 && healthy; then
+  report false "$(sudo -u jarvis git -C "$APP" rev-parse HEAD)" "$PREV" "$ERR"
+else
+  report false "" "" "rollback failed too: $ERR"
+fi
+exit 1
+DEPLOY
+chmod 755 /usr/local/bin/jarvis-deploy
+echo "$APP_USER ALL=(root) NOPASSWD: /usr/local/bin/jarvis-deploy" > /etc/sudoers.d/jarvis-deploy && chmod 440 /etc/sudoers.d/jarvis-deploy
 
 log "Services"
 cat > /etc/systemd/system/jarvis-server.service <<EOF

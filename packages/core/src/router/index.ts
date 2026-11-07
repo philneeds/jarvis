@@ -37,6 +37,8 @@ export interface RunOptions {
   toolContext?: ToolContext;
   /** Images Phil attached; only providers that can see get them, the rest are told one was attached. */
   images?: import("../uploads.js").ImageInput[];
+  /** Einstein's workshop: file and shell tools inside one directory, guarded. */
+  workspace?: import("./types.js").Workspace;
 }
 
 export interface RunOutcome extends AgentResult {
@@ -154,7 +156,7 @@ export class ModelRouter {
         const sees = model.provider === "claude";
         const n = opts.images?.length ?? 0;
         const prompt = (n && !sees ? `${opts.prompt}\n\n(Phil attached ${n} image${n > 1 ? "s" : ""} you can't see. Say so, and hand anything visual to Joi.)` : opts.prompt) + prefetched;
-        const res = await p.run({ agent, model, system: opts.system, prompt, runId, onDelta: opts.onDelta, signal: opts.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext, images: sees && n ? opts.images : undefined });
+        const res = await p.run({ agent, model, system: opts.system, prompt, runId, onDelta: opts.onDelta, signal: opts.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext, images: sees && n ? opts.images : undefined, workspace: opts.workspace });
         const finishedAt = new Date().toISOString();
         await this.store.runs.update(runId, { status: "done", output: res.text, provider: res.provider, modelId: res.modelId, finishedAt, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd });
         // A Grok run through the API spends xAI credits, not the SuperGrok plan.

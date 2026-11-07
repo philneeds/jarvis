@@ -64,21 +64,29 @@ export function claudeAgentSdkProvider(): Provider {
               yield { type: "user" as const, parent_tool_use_id: null, message: { role: "user" as const, content: [...req.images!.map((im) => ({ type: "image" as const, source: { type: "base64" as const, media_type: im.mime as "image/jpeg", data: im.data } })), { type: "text" as const, text: req.prompt }] } };
             })()
           : req.prompt;
+        // Einstein's workshop: the file and shell tools, inside one directory, every call checked by the guard first.
+        const ws = req.workspace;
+        const WORKSHOP_TOOLS = ["Read", "Edit", "Write", "MultiEdit", "Glob", "Grep", "Bash"];
         const q = query({
           prompt,
           options: {
             model: req.model.modelId,
             systemPrompt: req.system,
-            maxTurns: req.maxTurns ?? (tools.length || builtins.length ? 8 : 2),
-            // Only HQ tools and the web, never the CLI's file/shell tools.
-            allowedTools: [...tools.map((t) => `mcp__jarvis__${t.name}`), ...builtins],
-            tools: builtins,
+            maxTurns: req.maxTurns ?? (ws ? ws.maxTurns ?? 120 : tools.length || builtins.length ? 8 : 2),
+            // Only HQ tools and the web; the CLI's file/shell tools only in a workshop.
+            allowedTools: [...tools.map((t) => `mcp__jarvis__${t.name}`), ...builtins, ...(ws ? WORKSHOP_TOOLS : [])],
+            tools: [...builtins, ...(ws ? WORKSHOP_TOOLS : [])],
             ...(mcp ? { mcpServers: { jarvis: mcp } } : {}),
             permissionMode: "dontAsk",
             persistSession: false,
             settingSources: [],
             abortController: abort,
-            cwd: process.env.JARVIS_AGENT_CWD || process.cwd(),
+            cwd: ws?.dir ?? process.env.JARVIS_AGENT_CWD ?? process.cwd(),
+            ...(ws ? { hooks: { PreToolUse: [{ hooks: [async (input) => {
+              const i = input as { tool_name?: string; tool_input?: unknown };
+              const why = ws.guard(i.tool_name ?? "", (i.tool_input ?? {}) as Record<string, unknown>);
+              return why ? { hookSpecificOutput: { hookEventName: "PreToolUse" as const, permissionDecision: "deny" as const, permissionDecisionReason: why } } : {};
+            }] }] } } : {}),
           },
         });
         for await (const msg of q) {
@@ -172,6 +180,6 @@ export function claudeApiProvider(): Provider {
 /** Rough list-price estimate so the usage screen has a dollar figure for API fallback runs. */
 export function estimateClaudeCost(model: string, input: number, output: number): number {
   // List prices: Opus 5.5 $4 / $20, Sonnet 5.5 $2 / $10, Haiku 5.5 $0.10 / $0.50 per 1M tokens.
-  const [inRate, outRate] = /opus/i.test(model) ? [4, 20] : /haiku/i.test(model) ? [0.1, 0.5] : [2, 10];
+  const [inRate, outRate] = /fable|mythos/i.test(model) ? [10, 50] : /opus/i.test(model) ? [4, 20] : /haiku/i.test(model) ? [0.1, 0.5] : [2, 10];
   return (input * inRate + output * outRate) / 1_000_000;
 }

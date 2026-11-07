@@ -59,6 +59,10 @@ Estimates at list prices from the current schedules (daily brief, Jarvis convers
 
 The xAI line is the only one that scales with activity, and it's pay-as-you-go against credit Phil loads, so it can never run past what's loaded.
 
+## 4b. Einstein as HQ's engineer (added later the same night)
+
+Einstein now does what Claude Code has been doing here: reads, changes and tests HQ's code in a workshop copy, diagnoses from the server log and the database, and ships each change through one approval card with automatic rollback (README, "Einstein's workshop"). He runs on Claude Fable 5.1 by default ($10 / $50 per 1M tokens, about 2.5x Opus; Opus is one dropdown away on his agent page). A typical code task is $2–8 of the Claude credit; the weekly review about $1. Budget $30–60/mo of credit for him if he's used daily. Needs on Phil's side: a fine-grained GitHub token (Contents read and write, jarvis repo only) in `.env` as `GITHUB_PUSH_TOKEN`.
+
 ## 5. What changed in the backend tonight
 
 - X search through xAI's Responses API (`packages/core/src/xai.ts`), used by `x_search` for every agent, by account pulls, and pre-fetched into Grok agents' tasks when the task is about X. Costed per search and logged to Usage.

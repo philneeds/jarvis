@@ -16,6 +16,8 @@ export interface Charter {
   rhythm: string;
   /** HQ tools it may call by default (Claude agents). Grok agents search X and the web themselves. */
   tools?: string[];
+  /** Works in the workshop (a copy of HQ's code) with file and shell tools; changes ship through Phil's approval. */
+  workshop?: boolean;
   /** Kinds it may do without Phil, by default. Money and strategies never auto-approve. */
   autoApprove?: ApprovalKind[];
   /** Over this amount (USD) an auto-approvable kind still waits for Phil. */
@@ -66,12 +68,13 @@ export const CHARTERS: Record<string, Charter> = {
     good: "Phil's day is laid out before he wakes, nothing double-books, and nothing personal falls through the cracks.",
   },
   einstein: {
-    job: "Makes the whole web better: proposes new tools, connectors, models and agent changes, and spots what's broken.",
-    owns: ["Reviewing how agents perform and where they fail", "Proposing new tools, connectors and model changes as approvals", "Keeping costs and plan usage sensible", "Owning Oscar's work on cleanup and memory", "Phil's improvement ideas: say whether each is quick or big and what it would take, keep it on the list (a remember block with scope agent:einstein and key idea:<short name>), and report where each stands in the weekly review"],
+    job: "HQ's engineer: changes HQ's own code, fixes what's broken, adds what Phil asks for, and keeps the whole web improving.",
+    owns: ["Changing HQ itself: in the workshop (a copy of the code), read, edit and test, then submit the change (workshop_submit) and ask Phil to ship it as an approval; HQ deploys it and rolls back if it doesn't come up", "Diagnosing problems from the server log (hq_logs), the database (db_query, read-only) and the activity log before changing anything", "Reviewing how agents perform and where they fail", "Proposing new tools, connectors and model changes, as working code where possible", "Keeping costs and plan usage sensible", "Owning Oscar's work on cleanup and memory", "Phil's improvement ideas: say whether each is quick or big and what it would take, keep it on the list (a remember block with scope agent:einstein and key idea:<short name>), and report where each stands in the weekly review"],
     handsOff: [["Cleaning up memory, inboxes and unused agents", "oscar"]],
-    rhythm: "Weekly review Sundays at 7:00 pm Eastern, sent to Telegram and HQ; on demand for Phil's ideas.",
-    tools: ["web_health", "web_status", "activity_recent", "roster", "memory_search", "x_read_post", "x_recent_posts", "x_recent_posts"],
-    good: "Every week the web is a little faster, cheaper or more capable, and Phil approves each change.",
+    rhythm: "Weekly review Sundays at 7:00 pm Eastern, sent to Telegram and HQ; on demand for Phil's ideas and for anything to build or fix.",
+    tools: ["web_health", "web_status", "activity_recent", "roster", "memory_search", "x_read_post", "x_recent_posts", "workshop_status", "workshop_verify", "workshop_submit", "hq_logs", "db_query"],
+    workshop: true,
+    good: "Phil asks for a change in plain words, Einstein builds and tests it, Phil approves one card, and HQ is running it minutes later.",
   },
   oscar: {
     job: "Addition by subtraction: cleans up inboxes, memory and anything the web no longer needs.",

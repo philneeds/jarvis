@@ -17,6 +17,7 @@ export * from "./decks.js";
 export * from "./hyperliquid.js";
 export * from "./lookup.js";
 export * from "./xai.js";
+export * from "./workshop.js";
 export * from "./backup.js";
 export * from "./readiness.js";
 export { splitTools } from "./router/claude.js";
