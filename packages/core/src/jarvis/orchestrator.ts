@@ -78,6 +78,20 @@ export class Jarvis {
   private describers = new Map<string, Describer>();
   /** Extra tools from connectors, by name. */
   readonly connectorTools = new Map<string, import("../tools/index.js").ToolDef>();
+  /**
+   * After a restart nothing is running, whatever the database says: a run that died with the old process would otherwise
+   * show as "working" forever. Called once at boot; returns the agents that were reset.
+   */
+  async clearStaleWork(): Promise<string[]> {
+    const stale = (await this.store.agentState.all()).filter((s) => s.status === "working");
+    for (const s of stale) {
+      await this.store.agentState.set(s.id, { status: "idle", detail: "" });
+      await this.router.log(s.id, "system", `${getAgent(s.id)?.name ?? s.id} was mid-run when the server restarted; that run was lost. Ask again.`);
+      bus.emitEvent({ type: "agent.status", agentId: s.id, status: "idle", detail: "", at: new Date().toISOString() });
+    }
+    return stale.map((s) => s.id);
+  }
+
   /** Housekeeping the scheduler runs by name (the server registers "backup"); each returns a one-line result for the log. */
   readonly tasks = new Map<string, () => Promise<string>>();
   private promptHints: string[] = [];

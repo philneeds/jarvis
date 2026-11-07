@@ -90,6 +90,9 @@ if (process.env.HEALTHCHECK_URL) {
   void ping(); setInterval(() => void ping(), 5 * 60_000);
 }
 const scheduler = new Scheduler(jarvis);
+// Runs that died with the previous process must not show as "working" forever.
+const stale = await jarvis.clearStaleWork();
+if (stale.length) console.log(`[boot] cleared stale work: ${stale.join(", ")}`);
 if (process.env.SCHEDULER !== "0") scheduler.start();
 
 const shutdown = async () => { scheduler.stop(); telegram?.stop(); await store.close(); process.exit(0); };

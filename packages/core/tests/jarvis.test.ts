@@ -793,3 +793,13 @@ test("a Grok run cut off by the turn limit gets one finish-up pass; a hand-off's
   const rep = (await recentReports(store, 1)).find((x) => x.agentId === "joi")!;
   assert.equal(rep.toId, "pentoshi"); assert.match(rep.text, /no vault name shown/);
 });
+
+test("a restart clears agents left 'working' by a run that died with the old process", async () => {
+  const { jarvis, store } = make();
+  await store.agentState.set("lucas", { status: "working", detail: "pulling @houseofsweeps" });
+  await store.agentState.set("stella", { status: "idle" });
+  assert.deepEqual(await jarvis.clearStaleWork(), ["lucas"]);
+  assert.equal((await store.agentState.get("lucas"))?.status, "idle");
+  assert.ok((await store.activity.list({ agentId: "lucas" })).some((e) => /mid-run when the server restarted/.test(e.summary)));
+  assert.deepEqual(await jarvis.clearStaleWork(), []);
+});
