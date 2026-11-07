@@ -130,6 +130,11 @@ cat > /usr/local/bin/jarvis-deploy <<'DEPLOY'
 # Redeploy HQ from its branch, wait for it to answer, roll back to the previous commit if it doesn't.
 # Run by HQ (as the app user, through sudo) when Phil approves one of Einstein's changes; also fine by hand as root.
 set -u
+# HQ starts this from its own service, and the deploy restarts that service, which would kill this script with it.
+# So first hand the run to systemd as its own short-lived unit, immune to the restart.
+if [[ -z "${JARVIS_DEPLOY_DETACHED:-}" ]] && command -v systemd-run >/dev/null; then
+  exec systemd-run --quiet --collect --unit "jarvis-deploy-$(date +%s)" --setenv=JARVIS_DEPLOY_DETACHED=1 /usr/local/bin/jarvis-deploy
+fi
 APP=/opt/jarvis; OUT=/var/lib/jarvis/last-deploy.json; LOG=/var/log/jarvis-deploy.log
 BRANCH=$(sudo -u jarvis git -C "$APP" rev-parse --abbrev-ref HEAD)
 PREV=$(sudo -u jarvis git -C "$APP" rev-parse HEAD)
