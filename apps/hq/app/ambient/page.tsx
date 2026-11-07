@@ -7,6 +7,7 @@ import { Skyline } from "@/components/Skyline";
 import { useLive } from "@/lib/live";
 import { useVoice } from "@/lib/voice";
 import { useClap, type ClapSensitivity } from "@/lib/clap";
+import { PAUSE_LABEL, readPause, savePause, type PauseChoice } from "@/lib/voice";
 import { api, post } from "@/lib/api";
 import type { ChatMessage } from "@/lib/types";
 
@@ -163,6 +164,9 @@ export default function AmbientPage() {
   }, [cfg]);
   const setClap = (on: boolean) => { setClapOn(on); try { localStorage.setItem("hq.clap", on ? "on" : "off"); } catch { /* ignore */ } };
   const setSens = (s: ClapSensitivity) => { setClapSens(s); try { localStorage.setItem("hq.clapSens", s); } catch { /* ignore */ } };
+  const [pause, setPause] = useState<PauseChoice>("normal");
+  useEffect(() => { setPause(readPause()); }, []);
+  const choosePause = (p: PauseChoice) => { setPause(p); savePause(p); };
   useClap(phase !== "off" && clapOn, () => { if (!busyRef.current) void converse(); }, { sensitivity: clapSens });
 
   const start = async () => {
@@ -235,6 +239,7 @@ export default function AmbientPage() {
           <span>{cfg ? (cfg.voice ? "voice: ElevenLabs" : "voice: this device") : ""}{cfg ? (cfg.wakeWordKey ? " · wake word: on-device" : " · wake word: speech service") : ""}</span>
           <label className="btn btn-sm cursor-pointer" style={clapOn ? { borderColor: "var(--accent)" } : undefined}><input type="checkbox" className="sr-only" checked={clapOn} onChange={(e) => setClap(e.target.checked)} />clap {clapOn ? "on" : "off"}</label>
           {clapOn && <select className="input h-8 w-28 text-[10px] uppercase" aria-label="Clap sensitivity" value={clapSens} onChange={(e) => setSens(e.target.value as ClapSensitivity)}><option value="low">quiet room</option><option value="normal">normal</option><option value="high">big room</option></select>}
+          <select className="input h-8 w-28 text-[10px] uppercase" aria-label="Pause before Jarvis answers" title="How long Jarvis waits after you stop talking before he answers" value={pause} onChange={(e) => choosePause(e.target.value as PauseChoice)}>{(Object.keys(PAUSE_LABEL) as PauseChoice[]).map((k) => <option key={k} value={k}>{PAUSE_LABEL[k]}</option>)}</select>
         </div>
         {phase === "off" ? <button className="btn btn-primary" onClick={start}>Start</button> : <button className="btn" onClick={stop}>Stop</button>}
       </footer>

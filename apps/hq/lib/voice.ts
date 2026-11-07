@@ -64,6 +64,19 @@ function chime(ctx: AudioContext, up = true) {
 }
 
 
+/**
+ * How long HQ waits after Phil stops talking before it takes the turn. The browser's own end-of-speech cut-off is
+ * about a second and not adjustable, so HQ listens continuously and ends the turn itself. Remembered per device.
+ */
+export type PauseChoice = "short" | "normal" | "long" | "longer";
+export const PAUSE_MS: Record<PauseChoice, number> = { short: 1500, normal: 2500, long: 4000, longer: 6000 };
+export const PAUSE_LABEL: Record<PauseChoice, string> = { short: "pause 1.5s", normal: "pause 2.5s", long: "pause 4s", longer: "pause 6s" };
+export function readPause(): PauseChoice {
+  try { const v = localStorage.getItem("hq.pause"); if (v === "short" || v === "normal" || v === "long" || v === "longer") return v; } catch { /* ignore */ }
+  return "normal";
+}
+export function savePause(p: PauseChoice) { try { localStorage.setItem("hq.pause", p); } catch { /* ignore */ } }
+
 export function useVoice(opts: { onHeard: (text: string) => void | Promise<void> }) {
   const [speaking, setSpeaking] = useState(false);
   const [listening, setListening] = useState(false);
@@ -203,7 +216,7 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
    * Listen for one utterance; resolves with the text ("" if nothing was heard, or nothing within timeoutMs).
    * The recognizer ends the turn itself when Phil stops talking; "Send now" asks it to finish early.
    */
-  const listen = useCallback(async (opts: { timeoutMs?: number } = {}): Promise<string> => {
+  const listen = useCallback(async (opts: { timeoutMs?: number; pauseMs?: number } = {}): Promise<string> => {
     const r = recognizer();
     if (!r) { setError("Voice input isn't available in this browser. Chrome or Safari work."); return ""; }
     stopSpeaking();
@@ -219,21 +232,27 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
       stopMeter = () => { stop(); src.disconnect(); };
     } catch { /* no meter */ }
     return new Promise<string>((resolve) => {
-      recRef.current = r; r.lang = "en-US"; r.interimResults = true; r.continuous = false;
+      // Continuous: the browser keeps listening through Phil's pauses; HQ ends the turn after the chosen silence.
+      recRef.current = r; r.lang = "en-US"; r.interimResults = true; r.continuous = true;
       let finalText = "", latest = "", done = false, heard = false;
+      let silence: ReturnType<typeof setTimeout> | undefined;
       const finish = () => {
         if (done) return; done = true;
-        clearTimeout(timer); stopMeter(); forceEnd.current = null; abortListen.current = null; recRef.current = null;
+        clearTimeout(timer); clearTimeout(silence); stopMeter(); forceEnd.current = null; abortListen.current = null; recRef.current = null;
         setListening(false); setHearing(false); setInterim("");
         resolve((finalText || latest).trim());
       };
       // The reply window: if nobody has started talking by then, close the mic.
       const timer = opts.timeoutMs ? setTimeout(() => { if (!heard) { try { r.abort(); } catch { /* fine */ } finish(); } }, opts.timeoutMs) : undefined;
+      const pauseMs = opts.pauseMs ?? PAUSE_MS[readPause()];
       r.onresult = (e) => {
         heard = true; setHearing(true);
         let s = ""; for (let i = 0; i < e.results.length; i++) s += e.results[i]![0]!.transcript;
         latest = s; setInterim(s);
         if (e.results[e.results.length - 1]?.isFinal) finalText = s;
+        // Every word restarts the clock; the turn ends only after pauseMs of nothing.
+        clearTimeout(silence);
+        silence = setTimeout(() => { try { r.stop(); } catch { finish(); } }, pauseMs);
       };
       r.onend = finish;
       r.onerror = (e) => { if (e.error !== "no-speech" && e.error !== "aborted") setError(`Mic: ${e.error}`); finish(); };

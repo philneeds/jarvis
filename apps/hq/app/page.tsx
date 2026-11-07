@@ -13,6 +13,7 @@ import { Working } from "@/components/Working";
 import { useLive } from "@/lib/live";
 import { useVoice } from "@/lib/voice";
 import { useClap, type ClapSensitivity } from "@/lib/clap";
+import { PAUSE_LABEL, readPause, savePause, type PauseChoice } from "@/lib/voice";
 import { api, post, timeAgo } from "@/lib/api";
 import { clip, meaningful, readable } from "@/lib/activity";
 
@@ -64,6 +65,10 @@ export default function HomePage() {
   useEffect(() => { try { setClapOn(localStorage.getItem("hq.clap") === "on"); const s = localStorage.getItem("hq.clapSens"); if (s === "low" || s === "normal" || s === "high") setClapSens(s); } catch { /* ignore */ } }, []);
   const setClap = (v: boolean) => { setClapOn(v); try { localStorage.setItem("hq.clap", v ? "on" : "off"); } catch { /* ignore */ } };
   const setSens = (s: ClapSensitivity) => { setClapSens(s); try { localStorage.setItem("hq.clapSens", s); } catch { /* ignore */ } };
+  // How long Jarvis waits after Phil goes quiet before answering.
+  const [pause, setPause] = useState<PauseChoice>("normal");
+  useEffect(() => { setPause(readPause()); }, []);
+  const choosePause = (p: PauseChoice) => { setPause(p); savePause(p); };
   const [money, setMoney] = useState<{ key: string; value: string }[]>([]);
   const [visual, setVisual] = useState<{ key: string; value: string } | null>(null);
   const [since, setSince] = useState<string>();
@@ -157,6 +162,7 @@ export default function HomePage() {
           <label className="btn btn-sm cursor-pointer normal-case tracking-normal" style={clapOn ? { borderColor: "var(--accent)" } : undefined} title="A double clap starts a voice conversation (uses the mic while on)"><input type="checkbox" className="sr-only" checked={clapOn} onChange={(e) => setClap(e.target.checked)} />clap {clapOn ? "on" : "off"}</label>
         )}
         {!voice.conversation && clapOn && <select className="input h-8 w-28 text-[10px] uppercase" aria-label="Clap sensitivity" value={clapSens} onChange={(e) => setSens(e.target.value as ClapSensitivity)}><option value="low">quiet room</option><option value="normal">normal</option><option value="high">big room</option></select>}
+        <select className="input h-8 w-28 text-[10px] uppercase" aria-label="Pause before Jarvis answers" title="How long Jarvis waits after you stop talking before he answers" value={pause} onChange={(e) => choosePause(e.target.value as PauseChoice)}>{(Object.keys(PAUSE_LABEL) as PauseChoice[]).map((k) => <option key={k} value={k}>{PAUSE_LABEL[k]}</option>)}</select>
       </div>
       <Working />
       <Transcript pendingText={heardText ?? (voice.interim || undefined)} />
