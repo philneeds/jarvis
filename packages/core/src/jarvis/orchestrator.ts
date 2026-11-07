@@ -770,7 +770,7 @@ export class Jarvis {
     // The receiver: "House's brain", "into House", "for House's memory"; never the gatherer ("have Lucas ...").
     const isAgent = (name: string) => !!(getAgent(name.toLowerCase()) ?? findAgent(name));
     const to = text.match(/\b(?:into|in|to|for)\s+@?([A-Za-z]+?)(?:'s|’s)?\s+(?:brain|memory|context)\b/i)?.[1]
-      ?? [...text.matchAll(/\b(?:into|for|to)\s+@?([A-Za-z]+)\b/gi)].map((m) => m[1]!).find(isAgent);
+      ?? [...text.matchAll(/\b(?:into|for|to)\s+@?([A-Za-z]+)\b/gi)].map((m) => m[1]!).filter(isAgent).pop();
     if (!to || !isAgent(to)) return undefined;
     const max = Number(text.match(/\b(\d{1,2})\s+(?:posts|tweets)\b/i)?.[1]) || 25;
     return { handle: handles[0]!, to: to.toLowerCase(), max: Math.min(25, Math.max(1, max)) };
