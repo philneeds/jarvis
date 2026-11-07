@@ -803,3 +803,49 @@ test("a restart clears agents left 'working' by a run that died with the old pro
   assert.ok((await store.activity.list({ agentId: "lucas" })).some((e) => /mid-run when the server restarted/.test(e.summary)));
   assert.deepEqual(await jarvis.clearStaleWork(), []);
 });
+
+test("Jarvis pulls an X account into an agent's brain himself: timeline when X allows it, a from:handle search when it doesn't", async () => {
+  const { jarvis, store } = make();
+  await store.init();
+  const page = (entries: unknown[]) => `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { timeline: { entries } } } })}</script></html>`;
+  const tweet = (id: string, text: string) => ({ type: "tweet", content: { tweet: { id_str: id, full_text: text, created_at: "2026-11-06T18:00:00.000Z", favorite_count: 40, user: { screen_name: "sweepsalpha", name: "Sweeps" } } } });
+  let hits = 0;
+  jarvis.xReader = {
+    f: (async (url: string) => {
+      hits++;
+      if (/sweepsalpha/.test(url)) return new Response(page([tweet("3", "VKTX readout Nov 12"), tweet("2", "sized small into the print"), tweet("1", "watching $ARWR")]), { status: 200 });
+      return new Response("", { status: 429 });
+    }) as unknown as typeof fetch,
+    search: async (q) => (/blockedacct/.test(q) ? `@blockedacct · Nov 5 · "OPEC cut chatter, long energy" · 90 likes · https://x.com/blockedacct/status/77\n@blockedacct · Nov 4 · "trimmed VKTX" · 30 likes · https://x.com/blockedacct/status/76\nAgree: cautious. Disagree: timing.` : "X search returned nothing."),
+  };
+  // Through conversation: the plan says pull, nobody is delegated, and the posts land in House's memory.
+  const out = await jarvis.handle("pull the last 25 posts from @sweepsalpha into house's brain");
+  const final = out[out.length - 1]!;
+  assert.match(final.text, /Filed 3 recent posts by @sweepsalpha in House's brain \(3 new/);
+  assert.equal(final.via, undefined);
+  const house = await store.memory.list("agent:house");
+  assert.equal(house.length, 3);
+  assert.match(house.find((m) => m.key === "x-sweepsalpha-3")!.value, /VKTX readout Nov 12/);
+  assert.equal(house[0]!.source, "jarvis");
+  // Again: nothing doubles up.
+  assert.match((await jarvis.importX("sweepsalpha", "house")).text, /0 new, 3 already there/);
+  assert.equal((await store.memory.list("agent:house")).length, 3);
+  // From chat, with the count.
+  assert.match(await jarvis.command("/brain ansem from @sweepsalpha 2"), /Filed 2 recent posts by @sweepsalpha in Ansem's brain/);
+  assert.equal((await store.memory.list("agent:ansem")).length, 2);
+  // X blocks the direct read: the search route files one block, and says so.
+  const r = await jarvis.importX("@blockedacct", "house");
+  assert.equal(r.via, "search");
+  assert.match(r.text, /found by X search \(X blocked HQ's direct read/);
+  const blob = (await store.memory.list("agent:house")).find((m) => m.key.startsWith("x-blockedacct-search-"))!;
+  assert.match(blob.value, /OPEC cut chatter/);
+  // Neither route works: nothing filed, and Phil hears why.
+  const bad = await jarvis.importX("nobodyhere", "house");
+  assert.equal(bad.filed, 0);
+  assert.match(bad.text, /couldn't pull @nobodyhere's posts right now[\s\S]*Nothing was filed/);
+  assert.match((await jarvis.importX("sweepsalpha", "nobody")).text, /don't know an agent/);
+  assert.ok(hits >= 2);
+  // The receiver sees the posts on its next run.
+  const { agentSystemPrompt, getAgent } = await import("../src/index.js");
+  assert.match(agentSystemPrompt(getAgent("house")!, await store.memory.list("agent:house")), /sized small into the print/);
+});

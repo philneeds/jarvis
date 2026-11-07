@@ -77,18 +77,26 @@ export function extractBlocks(text: string): { text: string; approvals: Approval
 }
 
 /** Parse Jarvis's plan JSON, tolerating fences and stray prose around it. */
-export function parsePlan(raw: string): { reply?: string; delegate: { agent: string; task: string }[] } {
+export interface XPull { handle: string; to: string; max: number }
+export function parsePlan(raw: string): { reply?: string; delegate: { agent: string; task: string }[]; pull?: XPull } {
   const s = raw.trim();
   const candidates = [s, s.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "")];
   const first = s.indexOf("{"), last = s.lastIndexOf("}");
   if (first >= 0 && last > first) candidates.push(s.slice(first, last + 1));
   for (const c of candidates) {
     try {
-      const o = JSON.parse(c) as { reply?: unknown; delegate?: unknown };
+      const o = JSON.parse(c) as { reply?: unknown; delegate?: unknown; pull?: unknown };
       const delegate = Array.isArray(o.delegate)
         ? o.delegate.filter((d): d is { agent: string; task: string } => !!d && typeof d === "object" && typeof (d as { agent?: unknown }).agent === "string").map((d) => ({ agent: String(d.agent).replace(/^@/, "").toLowerCase(), task: String((d as { task?: unknown }).task ?? "") }))
         : [];
-      return { reply: typeof o.reply === "string" && o.reply.trim() ? o.reply.trim() : undefined, delegate };
+      const plan: { reply?: string; delegate: { agent: string; task: string }[]; pull?: XPull } = { reply: typeof o.reply === "string" && o.reply.trim() ? o.reply.trim() : undefined, delegate };
+      // "Pull @handle's posts into <agent>'s brain": HQ does it itself, no research run needed.
+      const p = o.pull as { handle?: unknown; to?: unknown; max?: unknown } | undefined;
+      if (p && typeof p === "object" && typeof p.handle === "string" && typeof p.to === "string") {
+        const handle = p.handle.replace(/^@/, "").trim();
+        if (/^[A-Za-z0-9_]{1,15}$/.test(handle)) plan.pull = { handle, to: p.to.replace(/^@/, "").toLowerCase().trim(), max: Math.min(25, Math.max(1, Number(p.max) || 25)) };
+      }
+      return plan;
     } catch { /* try next */ }
   }
   // Not JSON at all: treat the whole thing as the reply.

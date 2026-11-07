@@ -16,7 +16,9 @@ export function mockProvider(label = "mock"): Provider {
       if (req.agent.id === "jarvis" && /Respond with JSON/.test(req.prompt)) {
         const said = req.prompt.split("Phil says:").pop() ?? "";
         const mentions = [...said.matchAll(/@([a-z0-9]+)/gi)].map((m) => m[1]!.toLowerCase());
-        const plan = {
+        // "pull @handle's posts into house's brain": HQ's own pull, no delegation.
+        const pull = said.match(/\b(?:pull|import|grab)\b[^@]*@([A-Za-z0-9_]{1,15})[\s\S]*?\b(?:for|into|to)\s+@?([a-z]+)/i);
+        const plan = pull ? { pull: { handle: pull[1], to: pull[2]!.toLowerCase(), max: 25 } } : {
           reply: mentions.length ? undefined : `(${label}) Noted: "${req.prompt.split("Phil says:").pop()?.trim().slice(0, 120)}". Nothing to delegate.`,
           delegate: mentions.map((id) => ({ agent: id, task: "Give Phil a one-paragraph status in your own voice." })),
         };
