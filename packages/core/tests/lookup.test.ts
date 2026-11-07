@@ -53,3 +53,34 @@ test("every agent has a source ladder in its charter, and every tool a charter n
   assert.ok(CHARTERS.mantis!.tools!.includes("x_search"), "Mantis (Claude) reaches X through x_search");
   assert.ok(!CHARTERS.pentoshi!.tools!.includes("x_search"), "Pentoshi (Grok) searches X natively");
 });
+
+test("x_recent_posts reads an account's timeline from the public embed page; Grok agents get named accounts' posts up front", async () => {
+  const { readXTimeline, xTimelineText, prefetchHandles } = await import("../src/index.js");
+  const page = (entries: unknown[]) => `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { timeline: { entries } } } })}</script></html>`;
+  const entries = [
+    { type: "tweet", content: { tweet: { id_str: "3", full_text: "VKTX readout Nov 12, sized small", created_at: "2026-11-06T18:00:00.000Z", favorite_count: 120, user: { screen_name: "houseofsweeps", name: "Houseofexitliquidity" }, entities: { urls: [] } } } },
+    { type: "tweet", content: { tweet: { id_str: "2", full_text: "RT text", created_at: "2026-11-05T12:00:00.000Z", user: { screen_name: "houseofsweeps" }, retweeted_status: { id_str: "9", full_text: "FDA accepts the NDA", created_at: "2026-11-05T11:00:00.000Z", user: { screen_name: "fdanews", name: "FDA News" }, entities: { urls: [{ url: "https://t.co/x", expanded_url: "https://example.com/fda" }] } } } } },
+    { type: "tweet", content: { tweet: { id_str: "1", full_text: "@someone yes", created_at: "2026-11-04T10:00:00.000Z", in_reply_to_screen_name: "someone", user: { screen_name: "houseofsweeps" } } } },
+  ];
+  let calls = 0;
+  const f = (async (url: string | URL | Request) => { calls++; const u = String(url); if (/houseofsweeps/.test(u)) return new Response(page(entries), { headers: { "content-type": "text/html" } }); if (/limited/.test(u)) return new Response("", { status: 429 }); return new Response("", { status: 404 }); }) as typeof fetch;
+  let now = 1_000_000;
+  const posts = await readXTimeline("@houseofsweeps", f, () => now);
+  assert.equal(posts.length, 3);
+  assert.equal(posts[1]!.text, "RT @fdanews: FDA accepts the NDA");
+  assert.deepEqual(posts[1]!.links, ["https://example.com/fda"]);
+  assert.match(posts[2]!.text, /^\(reply to @someone\) /);
+  const text = xTimelineText("houseofsweeps", posts, 2);
+  assert.match(text, /Recent posts by @houseofsweeps \(2 shown/);
+  assert.match(text, /120 likes · https:\/\/x.com\/houseofsweeps\/status\/3\n  "VKTX readout Nov 12/);
+  await readXTimeline("houseofsweeps", f, () => now + 60_000);
+  assert.equal(calls, 1, "cached for an hour");
+  await assert.rejects(readXTimeline("limited", f, () => now), /rate-limiting profile reads/);
+  await assert.rejects(readXTimeline("nobody", f, () => now), /no account @nobody/);
+  // Prefetch: handles in the task, minus HQ's own agents.
+  const block = await prefetchHandles("pull the last 25 posts from @houseofsweeps for @house and @nobody", (id) => id === "house", f);
+  assert.match(block, /Recent posts by @houseofsweeps/);
+  assert.match(block, /@nobody: couldn't read the account's posts \(X has no account @nobody\)/);
+  assert.doesNotMatch(block, /@house:/, "House is an agent, not an X account");
+  assert.equal(await prefetchHandles("nothing here", () => false, f), "");
+});

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { bus } from "../events.js";
 import { MODELS, type ModelSpec } from "../models.js";
 import type { AgentDef, ModelKey } from "../registry/agents.js";
+import { getAgent } from "../registry/index.js";
 import type { Store } from "../store/types.js";
 import { allowedToRun, usageSummary } from "../usage/caps.js";
 import { claudeAgentSdkProvider, claudeApiProvider } from "./claude.js";
@@ -124,7 +125,12 @@ export class ModelRouter {
     const chain = this.providers[model.provider as "claude" | "grok"] ?? [];
     const errors: string[] = [];
     // Grok can't call HQ's tools (it gets their names only), so HQ runs the ones that need no input and hands over the results.
-    const prefetched = model.provider === "grok" && opts.tools?.length && opts.toolContext ? await prefetchTools(opts.tools, opts.toolContext) : "";
+    let prefetched = model.provider === "grok" && opts.tools?.length && opts.toolContext ? await prefetchTools(opts.tools, opts.toolContext) : "";
+    if (model.provider === "grok" && opts.tools?.some((t) => t.name === "x_recent_posts")) {
+      const { prefetchHandles } = await import("../xread.js");
+      const posts = await prefetchHandles(opts.prompt, (id) => !!getAgent(id));
+      if (posts) prefetched += `\n\n---\nHQ already opened the X accounts your task names, so you don't have to search for them:\n\n${posts}`;
+    }
     for (const p of chain) {
       const avail = await p.available();
       if (!avail.ok) { errors.push(`${p.id}: ${avail.reason}`); continue; }
