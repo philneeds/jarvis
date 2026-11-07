@@ -148,12 +148,18 @@ test("a voice note on Telegram is transcribed, shown back, answered, and the ans
   assert.equal(((voice!.body as FormData).get("voice") as File).name, "jarvis.ogg");
   assert.equal((await store.chat.list(10)).find((m) => m.role === "phil")?.text, "what is on today");
   bot.stop();
-  // Without any transcription set up, a voice note gets a clear answer instead of silence.
-  const sent2: string[] = [];
-  const f2 = (async (url: string | URL | Request, init?: RequestInit) => { if (String(url).endsWith("sendMessage")) sent2.push(JSON.parse(String(init?.body)).text); return new Response(JSON.stringify({ ok: true, result: [] }), { headers: { "content-type": "application/json" } }); }) as typeof fetch;
-  const bare = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f2, pollTimeout: 0 });
-  await bare.handle({ update_id: 2, message: { message_id: 2, chat: { id: 42 }, voice: { file_id: "v2" } } });
-  assert.match(sent2[0] ?? "", /can't hear voice notes yet/);
+  // Without any transcription set up, a voice note gets a clear answer instead of silence. The tests run with HQ's
+  // real environment on the server, so its speech keys are cleared for this part.
+  const keys = ["ELEVENLABS_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY"] as const;
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  for (const k of keys) delete process.env[k];
+  try {
+    const sent2: string[] = [];
+    const f2 = (async (url: string | URL | Request, init?: RequestInit) => { if (String(url).endsWith("sendMessage")) sent2.push(JSON.parse(String(init?.body)).text); return new Response(JSON.stringify({ ok: true, result: [] }), { headers: { "content-type": "application/json" } }); }) as typeof fetch;
+    const bare = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f2, pollTimeout: 0 });
+    await bare.handle({ update_id: 2, message: { message_id: 2, chat: { id: 42 }, voice: { file_id: "v2" } } });
+    assert.match(sent2[0] ?? "", /can't hear voice notes yet/);
+  } finally { for (const k of keys) if (saved[k] !== undefined) process.env[k] = saved[k]; }
 });
 
 test("transcription falls through: an ElevenLabs key without the speech permission gives way to Groq", async () => {

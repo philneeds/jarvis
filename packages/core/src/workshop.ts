@@ -52,6 +52,9 @@ export interface WorkshopOptions {
 }
 export interface WorkshopState { dir: string; branch: string; base: string }
 export interface ShipRecord { at: string; sha: string; title: string; approvalId?: string; previous?: string; status: "shipping" | "done" | "rolled-back" | "failed"; note?: string }
+/** What the deploy script writes after each run: Einstein's ships and deploys by hand alike. */
+export interface DeployOutcome { at: string; ok: boolean; sha?: string; previous?: string; rolledBackTo?: string; error?: string }
+export interface DeployStatus { last: DeployOutcome | null; live: { sha: string; branch: string } | null }
 export const SHIP_KEY = "workshop.ship";
 const SLUG = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "change";
 
@@ -135,9 +138,11 @@ export class Workshop {
     const dir = this.opts.dir;
     const steps: [string, string, string[], string][] = [
       ["core build", "pnpm", ["--filter", "@jarvis/core", "build"], dir],
-      ["core tests", "node", ["--test", "--import", "tsx", "tests/"], path.join(dir, "packages/core")],
+      // Each package's own test script (node --test with the tests/*.test.ts glob): a bare "tests/" is not a test
+      // file to node 22, which tries to import the directory and fails.
+      ["core tests", "pnpm", ["test"], path.join(dir, "packages/core")],
       ["server typecheck", "pnpm", ["exec", "tsc", "--noEmit", "-p", "."], path.join(dir, "apps/server")],
-      ["server tests", "node", ["--test", "--import", "tsx", "tests/"], path.join(dir, "apps/server")],
+      ["server tests", "pnpm", ["test"], path.join(dir, "apps/server")],
       ["hq typecheck", "pnpm", ["exec", "tsc", "--noEmit", "-p", "."], path.join(dir, "apps/hq")],
     ];
     const lines: string[] = [];
@@ -234,6 +239,20 @@ export class Workshop {
     await store.settings.set(SHIP_KEY, rec);
     return { record: rec, message };
   }
+
+  /** For Settings: the deploy script's last verdict (any deploy, not only Einstein's) and the commit HQ is running now. */
+  async lastDeploy(): Promise<DeployStatus> {
+    const file = this.opts.outcomeFile ?? "/var/lib/jarvis/last-deploy.json";
+    let last: DeployOutcome | null = null;
+    try {
+      const o = JSON.parse(await fs.readFile(file, "utf8")) as Partial<DeployOutcome>;
+      // The script writes "" for a field it has nothing for.
+      if (o.at) last = { at: o.at, ok: o.ok === true, sha: o.sha || undefined, previous: o.previous || undefined, rolledBackTo: o.rolledBackTo || undefined, error: o.error || undefined };
+    } catch { /* no deploy recorded yet, or an unreadable file */ }
+    const live = await Promise.all([this.must(["rev-parse", "HEAD"], this.opts.appDir), this.must(["rev-parse", "--abbrev-ref", "HEAD"], this.opts.appDir)])
+      .then(([sha, branch]) => ({ sha, branch })).catch(() => null);
+    return { last, live };
+  }
 }
 
 /**
@@ -291,7 +310,7 @@ export interface WorkshopToolDeps {
   logs?: (lines: number) => Promise<string>;
 }
 
-export const WORKSHOP_HINT = (dir: string, branch: string, base: string) => `You are working in your workshop: ${dir}, a copy of HQ's code on branch ${branch}, started fresh from ${base} (the live branch). Your Read, Edit, Write, Glob, Grep and Bash tools work only inside it; .env, keys and the live app are off limits and git push is refused. The layout: packages/core (the brain: agents, charters, scheduler, tools, connectors), apps/server (API, Telegram, scheduler host), apps/hq (the Next.js screens), deploy/ (server scripts), docs/. Tests: packages/core/tests and apps/server/tests (node --test --import tsx tests/). Read before you change; keep changes small and in the codebase's style; add or adjust a test for behaviour you change.
+export const WORKSHOP_HINT = (dir: string, branch: string, base: string) => `You are working in your workshop: ${dir}, a copy of HQ's code on branch ${branch}, started fresh from ${base} (the live branch). Your Read, Edit, Write, Glob, Grep and Bash tools work only inside it; .env, keys and the live app are off limits and git push is refused. The layout: packages/core (the brain: agents, charters, scheduler, tools, connectors), apps/server (API, Telegram, scheduler host), apps/hq (the Next.js screens), deploy/ (server scripts), docs/. Tests: packages/core/tests and apps/server/tests (pnpm test in the package, or node --test --import tsx tests/<name>.test.ts for one file). Read before you change; keep changes small and in the codebase's style; add or adjust a test for behaviour you change.
 When the change is ready: call workshop_verify (build, typecheck, tests across packages; fix anything red), then workshop_submit with a title and why. It commits and returns the approval block to put in your reply, word for word, so Phil can ship it from Needs you. HQ then pushes it to the live branch, redeploys, and rolls back by itself if HQ doesn't come back. Never claim a change is live: it is live only after Phil approves and HQ reports the deploy. If a task needs a secret or a setting only Phil can add, say exactly what (name and where) and stop; never guess a key.`;
 
 /** Files that define what Einstein may do; a change to any of them is flagged on the ship card. */

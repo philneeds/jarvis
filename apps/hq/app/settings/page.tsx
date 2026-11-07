@@ -33,6 +33,9 @@ export default function SettingsPage() {
   const [bk, setBk] = useState<{ last: { at: string; ok: boolean; file?: string; bytes?: number; drive?: string; error?: string; kept?: number } | null; dir: string; drive: boolean; healthcheck: boolean } | null>(null);
   const [bkMsg, setBkMsg] = useState<string>();
   useEffect(() => { api<typeof bk>("/api/backup").then(setBk).catch(() => undefined); }, []);
+  const [dep, setDep] = useState<{ last: { at: string; ok: boolean; sha?: string; previous?: string; rolledBackTo?: string; error?: string } | null; live: { sha: string; branch: string } | null; ship: { at: string; sha: string; title: string; status: string } | null; startedAt: string } | null>(null);
+  useEffect(() => { api<typeof dep>("/api/deploy").then(setDep).catch(() => undefined); }, []);
+  const short = (sha?: string) => (sha ?? "").slice(0, 7);
   const backupNow = async () => { setBkMsg("Backing up…"); try { const r = await post<{ result: string }>("/api/backup", {}); setBkMsg(r.result); setBk(await api<typeof bk>("/api/backup")); } catch (e) { setBkMsg((e as Error).message); } };
   const [rhMsg, setRhMsg] = useState<string>();
   const connectRobinhood = async () => { try { const r = await api<{ url: string }>("/api/connectors/robinhood/auth"); location.href = r.url; } catch (e) { setRhMsg((e as Error).message); } };
@@ -86,6 +89,19 @@ export default function SettingsPage() {
         <h1 className="display font-bold text-2xl tracking-[0.2em] m-0" style={{ color: "var(--ink-strong)" }}>SETTINGS</h1>
 
         <DisplayCard />
+        <section className="card flex flex-col gap-2" aria-label="Last deploy">
+          <span className="label">Last deploy</span>
+          <div className="flex flex-col gap-1 text-[12px]">
+            <div className="flex items-center gap-2">
+              <span className={`dot ${dep?.last ? (dep.last.ok ? "dot-working" : "dot-error") : "dot-idle"}`} />
+              {dep?.last
+                ? <span><b>{fmtTime(dep.last.at)}</b> · {dep.last.ok ? `commit ${short(dep.last.sha)}` : dep.last.rolledBackTo ? `rolled back to ${short(dep.last.rolledBackTo)}` : "failed, and the rollback failed too"}{dep.ship && dep.ship.sha && (dep.ship.sha === dep.last.sha || (!dep.last.ok && dep.ship.status !== "done")) ? ` · "${dep.ship.title}" (${dep.ship.status})` : ""}</span>
+                : <span style={{ color: "var(--muted)" }}>{dep ? "No deploy recorded yet: the record is written by the deploy script from this version on." : "…"}</span>}
+            </div>
+            {dep?.live && <div className="flex items-center gap-2 pl-5"><span>Running <code>{short(dep.live.sha)}</code> on <code>{dep.live.branch}</code> · HQ up since {fmtTime(dep.startedAt)}</span></div>}
+            {dep?.last?.error && <p className="m-0 pl-5" style={{ color: "var(--red)" }}>{dep.last.error}</p>}
+          </div>
+        </section>
         <section className="card flex flex-col gap-3" aria-label="Security">
           <span className="label">Security · passkeys</span>
           <p className="m-0 text-[12px]">HQ can move money, so add a passkey on each phone and laptop you use. The password stays as the fallback. Domain: <code>{rpID || "…"}</code>.</p>

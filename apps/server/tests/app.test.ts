@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 process.env.JARVIS_MOCK = "1";
 process.env.HQ_PASSWORD = "open-sesame";
+// The tests run with HQ's real environment on the server; the passkey domain must not come from it.
+process.env.HQ_ORIGIN = "http://localhost:3000"; delete process.env.HQ_RP_ID;
 { const os = await import("node:os"); const fs = await import("node:fs"); const path = await import("node:path"); process.env.JARVIS_UPLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-app-up-")); }
 const { Jarvis, memoryStore } = await import("@jarvis/core");
 const { createApp } = await import("../src/app.js");
@@ -51,6 +53,17 @@ test("login gates the API", async () => {
   assert.ok(((await act.json()) as { entries: unknown[] }).entries.length > 0);
   const quiet = (await (await call("/api/activity?exclude=run,bogus", { cookie })).json()) as { entries: { kind: string }[] };
   assert.ok(quiet.entries.length > 0 && quiet.entries.every((e) => e.kind !== "run"));
+});
+
+test("the last-deploy line answers even without a workshop: no record, no live commit, but when HQ came up", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  assert.equal((await call("/api/deploy")).status, 401);
+  const r = await call("/api/deploy", { cookie });
+  assert.equal(r.status, 200);
+  const j = (await r.json()) as { last: unknown; live: unknown; ship: unknown; startedAt: string };
+  assert.equal(j.last, null); assert.equal(j.live, null); assert.equal(j.ship, null);
+  assert.ok(Date.now() - Date.parse(j.startedAt) < 10 * 60_000, "started within the last minutes");
 });
 
 test("agent settings round-trip and passkey registration needs a session", async () => {

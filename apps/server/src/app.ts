@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -459,6 +459,13 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   });
   // Backups: the last run, and run one now.
   api.get("/backup", async (c) => c.json({ last: await backupStatus(jarvis.store), dir: process.env.BACKUP_DIR ?? "/var/backups/jarvis", drive: !!connectors.google, healthcheck: !!process.env.HEALTHCHECK_URL }));
+  // The last deploy for Settings: the deploy script's verdict (Einstein's ships and deploys by hand alike), the commit
+  // HQ is running, the ship it belonged to if any, and when this process came up.
+  api.get("/deploy", async (c) => c.json({
+    ...(connectors.workshop ? await connectors.workshop.lastDeploy() : { last: null, live: null }),
+    ship: await jarvis.store.settings.get(SHIP_KEY, null),
+    startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+  }));
   api.post("/backup", async (c) => {
     const fn = jarvis.tasks.get("backup");
     if (!fn) return c.json({ error: "backups aren't set up on this server" }, 400);

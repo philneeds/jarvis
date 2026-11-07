@@ -109,6 +109,28 @@ test("a change goes workshop → commit → approval → push to the live branch
   deployed.length;
 });
 
+test("the last-deploy line for Settings: the deploy script's verdict, blanks dropped, plus the commit HQ is running", async () => {
+  const { root, app } = await repo();
+  const outcome = path.join(root, "last-deploy.json");
+  const w = new Workshop({ dir: path.join(root, "workshop"), appDir: app, outcomeFile: outcome });
+  // Nothing recorded yet: still says what is running.
+  const none = await w.lastDeploy();
+  assert.equal(none.last, null); assert.equal(none.live!.branch, "deploy"); assert.equal(none.live!.sha, git(app, "rev-parse", "HEAD"));
+  // A good deploy, as the script writes it.
+  await fs.writeFile(outcome, JSON.stringify({ at: "2026-11-07T12:00:00Z", ok: true, sha: "abc1234def", previous: "0001111", rolledBackTo: "", error: "" }));
+  const ok = (await w.lastDeploy()).last!;
+  assert.equal(ok.ok, true); assert.equal(ok.sha, "abc1234def"); assert.equal(ok.previous, "0001111"); assert.equal(ok.rolledBackTo, undefined); assert.equal(ok.error, undefined);
+  // A rollback.
+  await fs.writeFile(outcome, JSON.stringify({ at: "2026-11-07T13:00:00Z", ok: false, sha: "", previous: "abc1234def", rolledBackTo: "abc1234def", error: "health check failed" }));
+  const back = (await w.lastDeploy()).last!;
+  assert.equal(back.ok, false); assert.equal(back.sha, undefined); assert.equal(back.rolledBackTo, "abc1234def"); assert.equal(back.error, "health check failed");
+  // A broken file is the same as none.
+  await fs.writeFile(outcome, "not json");
+  assert.equal((await w.lastDeploy()).last, null);
+  // No live checkout: the line still renders without it.
+  assert.equal((await new Workshop({ dir: path.join(root, "w2"), appDir: path.join(root, "nowhere"), outcomeFile: outcome }).lastDeploy()).live, null);
+});
+
 test("Einstein is HQ's engineer: Fable by default, the workshop tools in his charter, a code task opens the workshop and the ship action is described", async () => {
   assert.equal(getAgent("einstein")!.model, "claude-fable");
   assert.equal(MODELS["claude-fable"].modelId, "claude-fable-5-1");
