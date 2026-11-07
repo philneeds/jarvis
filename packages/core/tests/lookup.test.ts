@@ -38,7 +38,8 @@ test("web_search and web_fetch become Claude's own tools; Grok agents keep their
   const store = memoryStore(); await store.init();
   const block = await prefetchTools([hq, ...WEB_TOOLS, makeXSearchTool()], { store, agentId: "pentoshi" });
   assert.match(block, /### hyperliquid_perps\nBTC 76,000/);
-  assert.doesNotMatch(block, /x_search|web_search|web_fetch/, "native-to-Grok tools are neither run nor listed as missing");
+  assert.doesNotMatch(block, /web_search|web_fetch/, "native-to-Grok tools are neither run nor listed as missing");
+  assert.match(block, /x_search need input and weren.t run/, "X is not native to the Grok CLI: HQ runs it, or says it is missing");
 });
 
 test("every agent has a source ladder in its charter, and every tool a charter names exists", async () => {
@@ -85,7 +86,7 @@ test("x_recent_posts reads an account's timeline from the public embed page; Gro
   assert.equal(await prefetchHandles("nothing here", () => false, f), "");
 });
 
-test("when HQ's direct account read is blocked, the posts come from a from:handle search; Grok agents are told to search X, never fetch it", async () => {
+test("when HQ's direct account read is blocked, the posts come from a from:handle search; Grok agents are told X comes only from HQ, never fetched", async () => {
   const { accountPosts, GROK_RULES } = await import("../src/index.js");
   const searched: string[] = [];
   const blocked = (async () => new Response("", { status: 429 })) as unknown as typeof fetch;
@@ -93,6 +94,6 @@ test("when HQ's direct account read is blocked, the posts come from a from:handl
   assert.deepEqual(searched, ["from:limitedacct"]);
   assert.match(out, /^Recent posts by @limitedacct, found by search \(HQ's direct read was blocked/);
   await assert.rejects(accountPosts("@limitedacct", 25, async () => "X search isn't available right now (x)", blocked), /a from:limitedacct search found nothing either/);
-  assert.match(GROK_RULES, /search "from:handle"/);
+  assert.match(GROK_RULES, /this environment has no X search/);
   assert.match(GROK_RULES, /Never fetch x\.com/);
 });
