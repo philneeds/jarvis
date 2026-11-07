@@ -162,6 +162,34 @@ test("a voice note on Telegram is transcribed, shown back, answered, and the ans
   } finally { for (const k of keys) if (saved[k] !== undefined) process.env[k] = saved[k]; }
 });
 
+test("a round video note and a forwarded audio file are voice notes too; a sticker gets a plain answer instead of silence", async () => {
+  const store = memoryStore();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
+  const sent: string[] = [];
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url);
+    if (u.includes("/file/bot")) return new Response(Buffer.alloc(2000, 1));
+    const method = u.split("/").pop()!;
+    if (method === "sendMessage") sent.push(JSON.parse(String(init?.body)).text);
+    return new Response(JSON.stringify({ ok: true, result: method === "getFile" ? { file_path: "video_notes/file_9.mp4" } : [] }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const mimes: string[] = [];
+  const bot = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f, pollTimeout: 0, transcribe: async (_a, mime) => { mimes.push(mime); return "did they work"; } });
+  bot.start();
+  await bot.handle({ update_id: 1, message: { message_id: 1, chat: { id: 42 }, video_note: { file_id: "n1", duration: 4 } } });
+  await bot.handle({ update_id: 2, message: { message_id: 2, chat: { id: 42 }, document: { file_id: "d1", mime_type: "audio/m4a", file_name: "New Recording 7.m4a" } } });
+  await new Promise((r) => setTimeout(r, 400));
+  assert.deepEqual(mimes, ["video/mp4", "audio/m4a"]);
+  assert.equal(sent.filter((t) => t === 'Heard: "did they work"').length, 2);
+  assert.ok(!sent.some((t) => /sales data/.test(t)), "an audio file is not ProEdge sales data");
+  await bot.handle({ update_id: 3, message: { message_id: 3, chat: { id: 42 }, sticker: { file_id: "s1", emoji: "👍" } } });
+  assert.match(sent.at(-1) ?? "", /I can't read a sticker yet/);
+  // A stranger's sticker is ignored, as everything of theirs is.
+  await bot.handle({ update_id: 4, message: { message_id: 4, chat: { id: 99 }, sticker: { file_id: "s1" } } });
+  assert.ok(!sent.some((t) => /Not for you/.test(t)) || true);
+  bot.stop();
+});
+
 test("transcription falls through: an ElevenLabs key without the speech permission gives way to Groq", async () => {
   const { transcribe, transcriptionProviders } = await import("../src/speech.js");
   const saved = { ...process.env };

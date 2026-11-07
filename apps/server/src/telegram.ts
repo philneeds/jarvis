@@ -133,16 +133,25 @@ export class TelegramBot {
     const msg = u.message;
     if (!msg) return;
     const imageFile = msg.photo?.length ? msg.photo[msg.photo.length - 1]!.file_id : msg.document?.mime_type?.startsWith("image/") ? msg.document.file_id : undefined;
-    const doc = !imageFile && msg.document ? msg.document : undefined;
-    const voice = msg.voice ?? msg.audio;
-    if (!msg.text && !imageFile && !doc && !voice) return;
+    // Anything with speech in it is a voice note: Telegram's own, a round video note, an audio track, or a recording
+    // forwarded from another app (which arrives as a document with an audio type).
+    const audioDoc = msg.document?.mime_type?.startsWith("audio/") ? msg.document : undefined;
+    const voice = msg.voice ?? msg.audio ?? msg.video_note ?? audioDoc;
+    const doc = !imageFile && !audioDoc && msg.document ? msg.document : undefined;
+    const other = msg.sticker ? "sticker" : msg.video ? "video" : msg.animation ? "GIF" : msg.location ? "location" : msg.contact ? "contact card" : msg.poll ? "poll" : undefined;
+    if (!msg.text && !imageFile && !doc && !voice && !other) return;
     if (String(msg.chat.id) !== this.opts.chatId) { await this.api("sendMessage", { chat_id: msg.chat.id, text: "This is Phil's Jarvis. Not for you." }).catch(() => undefined); return; }
+    if (!msg.text && !imageFile && !doc && !voice) {
+      // Said plainly, rather than dropped: Phil once sent a voice memo and heard nothing back.
+      await this.send(`I can't read a ${other} yet. Send it as text, a voice note, a photo or a file.`);
+      return;
+    }
     if (voice) {
       // A voice note: transcribed, shown back so Phil can see what was heard, then handled like a typed message.
       if (!transcriptionProvider() && !this.opts.transcribe) { await this.send("I can't hear voice notes yet: the server needs a transcription key (ElevenLabs, OpenAI or Groq). Type it for now."); return; }
       try {
         const { data } = await this.download(voice.file_id);
-        const heard = await (this.opts.transcribe ?? transcribeDefault)(data, voice.mime_type ?? "audio/ogg");
+        const heard = await (this.opts.transcribe ?? transcribeDefault)(data, voice.mime_type ?? (msg.video_note ? "video/mp4" : "audio/ogg"));
         if (!heard) { await this.send("I couldn't make out that voice note."); return; }
         await this.send(`Heard: "${heard}"`);
         const text = msg.caption ? `${heard}\n\n${msg.caption}` : heard;
@@ -191,6 +200,6 @@ export class TelegramBot {
 
 export interface Update {
   update_id: number;
-  message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string; caption?: string; photo?: { file_id: string; width: number; height: number; file_size?: number }[]; document?: { file_id: string; mime_type?: string; file_size?: number; file_name?: string }; voice?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; audio?: { file_id: string; mime_type?: string; duration?: number; file_size?: number } };
+  message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string; caption?: string; photo?: { file_id: string; width: number; height: number; file_size?: number }[]; document?: { file_id: string; mime_type?: string; file_size?: number; file_name?: string }; voice?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; audio?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; video_note?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; sticker?: { file_id: string; emoji?: string }; video?: { file_id: string }; animation?: { file_id: string }; location?: { latitude: number; longitude: number }; contact?: { phone_number: string }; poll?: { id: string } };
   callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number } } };
 }
