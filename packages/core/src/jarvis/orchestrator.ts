@@ -764,12 +764,14 @@ export class Jarvis {
    */
   /** A message asking for an X account's posts in an agent's brain: the handle, the receiver and how many. */
   static pullRequest(text: string): { handle: string; to: string; max: number } | undefined {
-    if (!/\b(pull|import|grab|get|file|fetch|load|add|put|save)\b/i.test(text) || !/\b(brain|memory|context)\b/i.test(text)) return undefined;
+    if (!/\b(pull|import|grab|get|file|fetch|load|add|put|save)\b/i.test(text) || !/\b(brain|memory|context|posts|tweets)\b/i.test(text)) return undefined;
     const handles = [...text.matchAll(/(?:^|[^\w@/])@([A-Za-z0-9_]{2,15})\b/g)].map((m) => m[1]!).filter((h) => !getAgent(h.toLowerCase()));
     if (handles.length !== 1) return undefined;
     // The receiver: "House's brain", "into House", "for House's memory"; never the gatherer ("have Lucas ...").
-    const to = text.match(/\b(?:into|in|to|for)\s+@?([A-Za-z]+?)(?:'s|’s)?\s+(?:brain|memory|context)\b/i)?.[1] ?? text.match(/\b(?:into|for|to)\s+@?([A-Za-z]+)\b(?!'s)/i)?.[1];
-    if (!to || !(getAgent(to.toLowerCase()) ?? findAgent(to))) return undefined;
+    const isAgent = (name: string) => !!(getAgent(name.toLowerCase()) ?? findAgent(name));
+    const to = text.match(/\b(?:into|in|to|for)\s+@?([A-Za-z]+?)(?:'s|’s)?\s+(?:brain|memory|context)\b/i)?.[1]
+      ?? [...text.matchAll(/\b(?:into|for|to)\s+@?([A-Za-z]+)\b/gi)].map((m) => m[1]!).find(isAgent);
+    if (!to || !isAgent(to)) return undefined;
     const max = Number(text.match(/\b(\d{1,2})\s+(?:posts|tweets)\b/i)?.[1]) || 25;
     return { handle: handles[0]!, to: to.toLowerCase(), max: Math.min(25, Math.max(1, max)) };
   }

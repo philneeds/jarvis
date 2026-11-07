@@ -854,7 +854,8 @@ test("a pull request in Phil's words is recognised before any model plans it", (
   const p = Jarvis.pullRequest;
   assert.deepEqual(p("have Lucas pull the last 25 posts from @houseofsweeps and file them in House's brain"), { handle: "houseofsweeps", to: "house", max: 25 });
   assert.deepEqual(p("pull @houseofsweeps's tweets for House's context"), { handle: "houseofsweeps", to: "house", max: 25 });
-  assert.equal(p("pull @houseofsweeps's tweets for House"), undefined); // no brain named: the planner decides
+  assert.deepEqual(p("have Lucas pull @houseofsweeps's tweets for House"), { handle: "houseofsweeps", to: "house", max: 25 });
+  assert.deepEqual(p("get the last 25 posts from @houseofsweeps to lucas for house"), { handle: "houseofsweeps", to: "house", max: 25 });
   assert.deepEqual(p("get the last 10 tweets from @degenspartan into Ansem's memory"), { handle: "degenspartan", to: "ansem", max: 10 });
   assert.equal(p("what did @houseofsweeps say today"), undefined);
   assert.equal(p("have @lucas pull @a and @b for House's brain"), undefined);
