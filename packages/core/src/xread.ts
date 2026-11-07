@@ -157,9 +157,9 @@ export async function prefetchHandles(text: string, isAgent: (id: string) => boo
 }
 
 /** The timeline through HQ's reader, or, when X blocks that route, a "from:handle" search through Grok. */
-export async function accountPosts(handle: string, max = 25, search?: (query: string, max: number) => Promise<string>): Promise<string> {
+export async function accountPosts(handle: string, max = 25, search?: (query: string, max: number) => Promise<string>, f: typeof fetch = fetch): Promise<string> {
   const h = handle.replace(/^@/, "");
-  try { return xTimelineText(h, await readXTimeline(h), max); }
+  try { return xTimelineText(h, await readXTimeline(h, f), max); }
   catch (e) {
     if (!search) throw e;
     const viaSearch = await search(`from:${h}`, Math.min(25, max));
