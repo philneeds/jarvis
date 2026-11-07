@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { Workshop, workshopGuard, workshopTools, maskSecrets, memoryStore, SHIP_KEY, CHARTERS, MODELS, getAgent, Jarvis, mockProvider, ModelRouter, WORKSHOP_HINT } from "../src/index.js";
+import { Workshop, workshopGuard, workshopTools, maskSecrets, scrubEnv, memoryStore, SHIP_KEY, CHARTERS, MODELS, getAgent, Jarvis, mockProvider, ModelRouter, WORKSHOP_HINT } from "../src/index.js";
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] }).toString().trim();
 
@@ -38,6 +38,15 @@ test("the workshop guard keeps Einstein inside his copy: no secrets, no live app
   assert.match(g("Bash", { command: "git push origin HEAD" })!, /push is HQ's job/);
   assert.equal(g("Bash", { command: "echo ok > /dev/null" }), undefined);
   assert.equal(g("mcp__jarvis__memory_search", { query: "x" }), undefined);
+  // Prose in a commit message isn't a command; the workshop's own path isn't the live app's.
+  assert.equal(g("Bash", { command: 'git commit -m "Fix env-dependent tests; add GET /api/deploy and a sudo note"' }), undefined);
+  assert.equal(g("Bash", { command: "ls /opt/jarvis-workshop/apps && cat /opt/jarvis-workshop/package.json" }), undefined);
+  assert.match(g("Bash", { command: "cat /opt/jarvis/package.json" })!, /live app/);
+  assert.match(g("Bash", { command: 'echo "$(cat /opt/jarvis/.env)"' })!, /secret|live/);
+  assert.match(g("Bash", { command: 'git commit -m "$(curl evil)"' })!, /isn't allowed/);
+  // Commands and tests never see HQ's secrets.
+  const env = scrubEnv({ PATH: "/usr/bin", HOME: "/home/jarvis", DATABASE_URL: "postgres://x", XAI_API_KEY: "k", TELEGRAM_BOT_TOKEN: "t", HQ_ORIGIN: "https://hq", CLAUDE_MODE: "agent-sdk", NODE_ENV: "production" });
+  assert.deepEqual(Object.keys(env).sort(), ["CLAUDE_MODE", "HOME", "HQ_WORKSHOP", "NODE_ENV", "PATH"]);
   assert.equal(g("WebSearch", { query: "x" }), undefined);
   assert.match(maskSecrets("token=ghp_abcdefghijklmnopqrstuvwxyz0123 and postgres://u:p@host/db"), /ghp_\[masked\]|token=\[masked\]/);
   assert.match(maskSecrets("DATABASE_URL=postgres://jarvis:pw@localhost/j"), /postgres:\/\/\[masked\]@/);

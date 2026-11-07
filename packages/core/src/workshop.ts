@@ -16,9 +16,21 @@ import type { Store } from "./store/types.js";
  */
 export type Runner = (cmd: string, args: string[], opts: { cwd: string; env?: Record<string, string>; timeoutMs?: number }) => Promise<{ code: number; out: string }>;
 
+/**
+ * The environment Einstein's commands and tests run with: the shell basics and nothing from HQ's .env. A test process
+ * can read process.env, so secrets must never be there to read.
+ */
+const KEEP_ENV = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|LANG|LANGUAGE|LC_[A-Z]+|TZ|TMPDIR|TEMP|TMP|NODE_ENV|NODE_OPTIONS|NODE_EXTRA_CA_CERTS|PNPM_HOME|COREPACK_[A-Z_]+|XDG_[A-Z_]+|CLAUDE_[A-Z_]+|GIT_[A-Z_0-9]+|NO_COLOR|FORCE_COLOR|CI|SSL_CERT_FILE|HTTPS_PROXY|HTTP_PROXY|NO_PROXY|https_proxy|http_proxy|no_proxy)$/;
+export function scrubEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) if (v !== undefined && KEEP_ENV.test(k) && !/API_?KEY|_TOKEN|SECRET|PASSWORD|PRIVATE/i.test(k)) out[k] = v;
+  out.HQ_WORKSHOP = "1";
+  return out;
+}
+
 export const defaultRunner: Runner = (cmd, args, opts) => new Promise((resolve) => {
   let out = "";
-  const p = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...(opts.env ?? {}) }, stdio: ["ignore", "pipe", "pipe"] });
+  const p = spawn(cmd, args, { cwd: opts.cwd, env: { ...scrubEnv(), ...(opts.env ?? {}) }, stdio: ["ignore", "pipe", "pipe"] });
   p.stdout.on("data", (d) => { out += d.toString(); });
   p.stderr.on("data", (d) => { out += d.toString(); });
   const t = setTimeout(() => { p.kill("SIGTERM"); out += `\n(timed out after ${Math.round((opts.timeoutMs ?? 600_000) / 1000)}s)`; }, opts.timeoutMs ?? 600_000);
@@ -245,11 +257,14 @@ export function workshopGuard(dir: string, appDir?: string): (tool: string, inpu
     }
     if (tool === "Bash") {
       const c = String(input.command ?? "");
-      if (BANNED.test(c)) return "that command isn't allowed in the workshop (no network, no system tools, no secrets): use pnpm, node, git and ordinary file commands";
+      // Prose inside plain quotes (a commit message, an echo) isn't a command; a quoted string that runs something still is.
+      const code = c.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (q) => (/\$\(|`|\$\{/.test(q) ? q : '""'));
+      if (BANNED.test(code)) return "that command isn't allowed in the workshop (no network, no system tools, no secrets): use pnpm, node, git and ordinary file commands";
       if (/\.env\b|\.(pem|key)\b|\/etc\/|\/proc\/|\/root\b|~\/|\$HOME|\/home\//.test(c)) return "the command names a secret, system or home path; the workshop is the only place these tools work";
-      if (live && c.includes(live)) return `the live app at ${live} is off limits; work only in ${dir}`;
-      if (/\.\.\//.test(c)) return "no paths above the workshop";
-      for (const m of c.matchAll(/(?:^|[\s=:"'])(\/[^\s"':;|&)]+)/g)) {
+      // The live app's path, as a whole path (the workshop may live beside it, e.g. /opt/jarvis-workshop).
+      if (live && new RegExp(`${live.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=/|\\s|$|["'])`).test(c.split(path.resolve(dir)).join(""))) return `the live app at ${live} is off limits; work only in ${dir}`;
+      if (/\.\.\//.test(code)) return "no paths above the workshop";
+      for (const m of code.matchAll(/(?:^|[\s=:"'])(\/[^\s"':;|&)]+)/g)) {
         const p = m[1]!;
         if (p === "/dev/null" || p.startsWith("/dev/") || p.startsWith("/tmp/")) continue;
         if (!(path.resolve(p) + path.sep).startsWith(root)) return `absolute paths outside the workshop (${p}) aren't allowed`;

@@ -1,6 +1,7 @@
 import type { AgentRequest, AgentResult, Provider } from "./types.js";
 import { ProviderError } from "./types.js";
 import { BUILTIN_TOOL_NAMES } from "../lookup.js";
+import { scrubEnv } from "../workshop.js";
 import type { ToolDef } from "../tools/index.js";
 
 /** HQ tools go through the in-process MCP server; web_search and web_fetch become Claude's own WebSearch and WebFetch. */
@@ -82,6 +83,8 @@ export function claudeAgentSdkProvider(): Provider {
             settingSources: [],
             abortController: abort,
             cwd: ws?.dir ?? process.env.JARVIS_AGENT_CWD ?? process.cwd(),
+            // In a workshop the CLI and everything it spawns see the shell basics only, never HQ's .env.
+            ...(ws ? { env: scrubEnv() } : {}),
             ...(ws ? { hooks: { PreToolUse: [{ hooks: [async (input) => {
               const i = input as { tool_name?: string; tool_input?: unknown };
               const why = ws.guard(i.tool_name ?? "", (i.tool_input ?? {}) as Record<string, unknown>);
