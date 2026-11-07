@@ -723,10 +723,13 @@ test("phase readiness names what each next-phase agent still lacks; /run starts 
   const { phaseReadiness } = await import("../src/index.js");
   const r2 = phaseReadiness(2, new Set(["Google", "Robinhood"]));
   const munger = r2.find((a) => a.agentId === "munger")!, buffett = r2.find((a) => a.agentId === "buffett")!, lip = r2.find((a) => a.agentId === "lip")!;
-  assert.deepEqual(munger.missing, ["Kubera"]);
-  assert.deepEqual(buffett.missing, ["Kubera"], "Robinhood is connected, Kubera isn't");
+  assert.deepEqual(munger.missing.filter((m) => m !== "X search"), ["Kubera"]);
+  assert.deepEqual(buffett.missing.filter((m) => m !== "X search"), ["Kubera"], "Robinhood is connected, Kubera isn't");
   assert.deepEqual(lip.missing, ["Spotify"]);
   assert.ok(r2.every((a) => !a.missing.includes("Google")));
+  // Reading X needs xAI's X search; once the key is in, nobody lacks it.
+  assert.ok(r2.some((a) => a.missing.includes("X search")), "X-reading agents lack X search until XAI_API_KEY is set");
+  assert.ok(phaseReadiness(2, new Set(["Google", "Robinhood", "X search"])).every((a) => !a.missing.includes("X search")));
   const { jarvis, store } = make();
   assert.match(await jarvis.command("/run"), /Routines: .*stella-leads \(Stella\)/);
   assert.match(await jarvis.command("/run nope"), /No routine or agent called "nope"/);
@@ -861,4 +864,41 @@ test("a pull request in Phil's words is recognised before any model plans it", (
   assert.equal(p("have @lucas pull @a and @b for House's brain"), undefined);
   assert.equal(p("pull @houseofsweeps into nobody's brain"), undefined);
   assert.equal(p("add to House's brain: watch the ESMO abstracts"), undefined);
+});
+
+test("usage pools are dollars against monthly credits: Claude's Agent SDK credit, xAI's budget; Grok runs count where they're paid", async () => {
+  const { usageSummary, allowedToRun, getAgent } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const was = { mode: process.env.GROK_MODE, key: process.env.XAI_API_KEY, usd: process.env.CLAUDE_MONTHLY_USD };
+  try {
+    const now = new Date("2026-11-20T12:00:00Z");
+    const row = (plan: string, agentId: string, costUsd: number, at = "2026-11-10T10:00:00Z") => store.usage.add({ id: `${plan}-${agentId}-${Math.random()}`, at, plan, provider: plan, agentId, inputTokens: 1000, outputTokens: 100, costUsd });
+    await row("claude", "jarvis", 60); await row("claude", "stella", 25); await row("claude", "oscar", 5, "2026-10-28T10:00:00Z"); // last month: not counted
+    await row("xai", "lucas", 2.5); await row("supergrok", "pentoshi", 0);
+    delete process.env.GROK_MODE; delete process.env.XAI_API_KEY;
+    let s = await usageSummary(store, now);
+    const claude = s.plans.find((p) => p.plan === "claude")!;
+    assert.equal(claude.costUsd, 85); assert.ok(Math.abs(claude.used - 0.85) < 1e-9, String(claude.used));
+    assert.match(claude.window, /monthly credit, \$100/);
+    assert.equal(claude.perAgent[0]!.agentId, "jarvis", "sorted by cost");
+    assert.ok(s.plans.some((p) => p.plan === "supergrok"), "CLI mode shows the SuperGrok pool");
+    assert.ok(s.plans.some((p) => p.plan === "xai"), "xAI shows once anything was spent there");
+    // 85% of the credit: scanners (pause-first) wait, research (room) still runs, Phil's asks always run.
+    assert.equal(allowedToRun(getAgent("karol")!, s, false).ok, true, "always");
+    assert.equal(allowedToRun(getAgent("stevon")!, s, false).ok, true, "room holds at 90%");
+    assert.equal(allowedToRun(getAgent("pentoshi")!, s, false).ok, true, "a Grok scout is judged on the Grok pool");
+    // Grok on the API: scouts are judged on the xAI budget instead.
+    process.env.GROK_MODE = "api";
+    await row("xai", "ansem", 25);
+    s = await usageSummary(store, now);
+    assert.ok(!s.plans.some((p) => p.plan === "supergrok"), "API mode hides the CLI pool");
+    const xai = s.plans.find((p) => p.plan === "xai")!;
+    assert.ok(xai.used > 0.9, String(xai.used));
+    assert.match(allowedToRun(getAgent("pentoshi")!, s, false).reason!, /xAI credits .* is at 9\d% of its monthly budget/);
+    assert.equal(allowedToRun(getAgent("pentoshi")!, s, true).ok, true, "direct asks still run");
+  } finally {
+    if (was.mode !== undefined) process.env.GROK_MODE = was.mode; else delete process.env.GROK_MODE;
+    if (was.key !== undefined) process.env.XAI_API_KEY = was.key;
+    if (was.usd !== undefined) process.env.CLAUDE_MONTHLY_USD = was.usd;
+  }
 });

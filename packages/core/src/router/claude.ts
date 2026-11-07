@@ -171,8 +171,7 @@ export function claudeApiProvider(): Provider {
 
 /** Rough list-price estimate so the usage screen has a dollar figure for API fallback runs. */
 export function estimateClaudeCost(model: string, input: number, output: number): number {
-  const opus = /opus/i.test(model);
-  const inRate = opus ? 15 : 3; // $ per 1M input tokens
-  const outRate = opus ? 75 : 15;
+  // List prices: Opus 5.5 $4 / $20, Sonnet 5.5 $2 / $10, Haiku 5.5 $0.10 / $0.50 per 1M tokens.
+  const [inRate, outRate] = /opus/i.test(model) ? [4, 20] : /haiku/i.test(model) ? [0.1, 0.5] : [2, 10];
   return (input * inRate + output * outRate) / 1_000_000;
 }

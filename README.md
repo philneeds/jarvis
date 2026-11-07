@@ -39,14 +39,15 @@ Every agent names its model in `packages/core/src/registry/agents.ts`; swapping 
 | `claude-opus`, `claude-sonnet` | Claude Agent SDK on Phil's Claude plan (`CLAUDE_MODE=agent-sdk`, default) | `claude login` once on the server |
 | same, fallback | Messages API (`CLAUDE_MODE=api`) | `ANTHROPIC_API_KEY` |
 | `grok` | Grok Build CLI, `grok -p` on SuperGrok (`GROK_MODE=cli`, default) | `grok login` once on the server |
-| same, fallback | xAI API (`GROK_MODE=api`) | `XAI_API_KEY` |
+| same, or primary | xAI API (`GROK_MODE=api`) | `XAI_API_KEY` |
+| X, for every model | xAI X search (`x_search`); the Grok CLI has no X search and X blocks servers' page reads | `XAI_API_KEY` |
 | `cursor`, `higgsfield`, `chatgpt-health` | not callable from HQ yet | Jarvis reports it and asks Phil to relay |
 
 The router tries the configured mode first and falls back to the other if it is available. Model ids: `CLAUDE_OPUS_MODEL`, `CLAUDE_SONNET_MODEL`, `GROK_MODEL`.
 
 ### Usage rationing
 
-Both plans have caps, so work is rationed by priority instead of paying for API calls. Pools are estimates until the plans are confirmed (`CLAUDE_WEEKLY_TOKENS`, `GROK_WEEKLY_RUNS`).
+Work is rationed by priority against each pool, so a busy month degrades gracefully instead of stopping or overspending. The Claude pool is the plan's monthly Agent SDK credit in dollars (`CLAUDE_MONTHLY_USD`: Pro 20, Max 5x 100, Max 20x 200); the xAI pool is a monthly budget for X searches and, with `GROK_MODE=api`, Grok runs (`XAI_MONTHLY_USD`); with `GROK_MODE=cli` the Grok CLI has a weekly run pool (`GROK_WEEKLY_RUNS`). Every run is costed at list price so Usage shows dollars per agent.
 
 - **Always run:** Jarvis, Stella's team, anything Phil asks for directly.
 - **Run when there's room:** briefs, holdings reviews, research. Hold at 90% of a pool.

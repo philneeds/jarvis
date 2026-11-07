@@ -92,9 +92,9 @@ export const AGENTS: AgentDef[] = [
     id: "doc", name: "Doc", short: "Health lead", layer: 1, parent: "jarvis", venture: "personal", model: "claude-sonnet", phase: 0, priority: "room",
     desc: "Manages the three-agent health team: sleep, fitness and nutrition. The team coaches inside ChatGPT Health; Doc pulls their summaries back to Jarvis.",
   },
-  { id: "metro", name: "Metro", short: "Sleep & circadian rhythm", layer: 2, parent: "doc", venture: "personal", model: "chatgpt-health", phase: 3, priority: "room", desc: "Sleep optimization and circadian rhythm. " + HEALTH_NOTE },
-  { id: "sean", name: "Sean", short: "Fitness & exercise", layer: 2, parent: "doc", venture: "personal", model: "chatgpt-health", phase: 3, priority: "room", desc: "Physical health, fitness and exercise. " + HEALTH_NOTE },
-  { id: "gordon", name: "Gordon", short: "Nutrition", layer: 2, parent: "doc", venture: "personal", model: "chatgpt-health", phase: 3, priority: "room", desc: "Nutrition: eating, drinking, hydration and everything to do with food. Also uses MyFitnessPal. " + HEALTH_NOTE },
+  { id: "metro", name: "Metro", short: "Sleep & circadian rhythm", layer: 2, parent: "doc", venture: "personal", model: "claude-sonnet", phase: 3, priority: "room", desc: "Sleep optimization and circadian rhythm. " + HEALTH_NOTE },
+  { id: "sean", name: "Sean", short: "Fitness & exercise", layer: 2, parent: "doc", venture: "personal", model: "claude-sonnet", phase: 3, priority: "room", desc: "Physical health, fitness and exercise. " + HEALTH_NOTE },
+  { id: "gordon", name: "Gordon", short: "Nutrition", layer: 2, parent: "doc", venture: "personal", model: "claude-sonnet", phase: 3, priority: "room", desc: "Nutrition: eating, drinking, hydration and everything to do with food. Also uses MyFitnessPal. " + HEALTH_NOTE },
 
   // ---- Money & stocks ----------------------------------------------------
   {

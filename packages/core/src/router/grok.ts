@@ -114,7 +114,7 @@ export function grokApiProvider(): Provider {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${process.env.XAI_API_KEY}` },
         body: JSON.stringify({
-          model: req.model.modelId ?? "grok-4",
+          model: req.model.modelId ?? "grok-4.7",
           messages: [
             { role: "system", content: req.system },
             { role: "user", content: req.prompt },
@@ -137,7 +137,7 @@ export function grokApiProvider(): Provider {
         modelId: j.model ?? req.model.modelId ?? "grok",
         inputTokens: input,
         outputTokens: output,
-        costUsd: (input * 3 + output * 15) / 1_000_000,
+        costUsd: (input * 1.25 + output * 2.5) / 1_000_000, // grok-4.x list price per 1M tokens
         durationMs: Date.now() - t0,
       };
     },

@@ -276,6 +276,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     if (connectors.ghl) connected.add("GoHighLevel");
     if (connectors.discord) connected.add("Discord");
     if (connectors.github) connected.add("GitHub");
+    if (process.env.XAI_API_KEY) connected.add("X search");
     if ((await healthStatus(jarvis.store)).days > 0) connected.add("Apple Health");
     const phase = Math.min(3, Math.max(0, Number(c.req.query("phase") ?? (await jarvis.store.settings.get("phase", 0)) + 1)));
     return c.json({ phase, agents: phaseReadiness(phase, connected) });
@@ -346,6 +347,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     discord: connectors.discord ? await connectors.discord.status() : { configured: false },
     github: connectors.github ? await connectors.github.status() : { configured: false },
     robinhood: connectors.robinhood ? await connectors.robinhood.status() : { configured: false, connected: false },
+    xsearch: { configured: !!process.env.XAI_API_KEY, model: process.env.XAI_SEARCH_MODEL || "grok-4.7", grokMode: process.env.GROK_MODE || "cli" },
     telegram: { configured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) },
     ntfy: { configured: !!process.env.NOTIFY_WEBHOOK_URL },
   }));

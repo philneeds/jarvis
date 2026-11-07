@@ -5,9 +5,9 @@ import { CHARTERS } from "./registry/charters.js";
  * What each agent of a phase still lacks before the switch is flipped: the connections its tools need. Shown on the
  * Build phase card, so Phil knows who starts thin.
  */
-export type Connection = "Google" | "X" | "Spotify" | "Kubera" | "Robinhood" | "GoHighLevel" | "Discord" | "GitHub" | "Apple Health";
+export type Connection = "Google" | "X" | "X search" | "Spotify" | "Kubera" | "Robinhood" | "GoHighLevel" | "Discord" | "GitHub" | "Apple Health";
 const NEEDS: [RegExp, Connection][] = [
-  [/^(gmail_|calendar_|google_)/, "Google"], [/^(x_own_|x_mentions|x_dm_)/, "X"], [/^spotify_/, "Spotify"], [/^kubera_/, "Kubera"],
+  [/^(gmail_|calendar_|google_)/, "Google"], [/^(x_own_|x_mentions|x_dm_)/, "X"], [/^(x_search|x_recent_posts)$/, "X search"], [/^spotify_/, "Spotify"], [/^kubera_/, "Kubera"],
   [/^robinhood_/, "Robinhood"], [/^ghl_/, "GoHighLevel"], [/^discord_/, "Discord"], [/^github_/, "GitHub"], [/^health_/, "Apple Health"],
 ];
 /** The connections an agent's charter tools rely on. */

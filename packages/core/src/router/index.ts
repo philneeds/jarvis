@@ -78,7 +78,11 @@ export class ModelRouter {
 
   async modelForAgent(agent: AgentDef): Promise<ModelSpec> {
     const st = await this.store.agentState.get(agent.id);
-    const key = (st?.modelOverride as ModelKey | undefined) || agent.model;
+    let key = (st?.modelOverride as ModelKey | undefined) || agent.model;
+    // GROK_AGENTS_MODEL=claude-sonnet moves every Grok-routed agent (the scouts and Lucas's team) onto that model in
+    // one line, for when the SuperGrok plan is dropped; a per-agent override in HQ still wins.
+    const swap = process.env.GROK_AGENTS_MODEL as ModelKey | undefined;
+    if (key === "grok" && !st?.modelOverride && swap && MODELS[swap]) key = swap;
     return MODELS[key] ?? MODELS[agent.model];
   }
 
@@ -153,7 +157,8 @@ export class ModelRouter {
         const res = await p.run({ agent, model, system: opts.system, prompt, runId, onDelta: opts.onDelta, signal: opts.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext, images: sees && n ? opts.images : undefined });
         const finishedAt = new Date().toISOString();
         await this.store.runs.update(runId, { status: "done", output: res.text, provider: res.provider, modelId: res.modelId, finishedAt, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd });
-        await this.store.usage.add({ id: randomUUID(), at: finishedAt, plan: model.plan, provider: res.provider, agentId: agent.id, modelId: res.modelId, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd, runId });
+        // A Grok run through the API spends xAI credits, not the SuperGrok plan.
+        await this.store.usage.add({ id: randomUUID(), at: finishedAt, plan: res.provider === "grok:api" ? "xai" : model.plan, provider: res.provider, agentId: agent.id, modelId: res.modelId, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd, runId });
         await this.store.agentState.set(agent.id, { status: "idle", lastRunAt: finishedAt, lastRunId: runId, lastError: "" });
         bus.emitEvent({ type: "agent.status", agentId: agent.id, status: "idle", at: finishedAt, detail: `last run ${res.durationMs}ms on ${res.modelId}` });
         await this.log(agent.id, "run", `${agent.name} ran on ${res.modelId} (${res.provider}) in ${(res.durationMs / 1000).toFixed(1)}s`, runId, { prompt: opts.prompt.slice(0, 500), output: res.text.slice(0, 2000), tokens: res.inputTokens + res.outputTokens });

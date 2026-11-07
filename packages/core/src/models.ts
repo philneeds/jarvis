@@ -31,9 +31,9 @@ export const MODELS: Record<ModelKey, ModelSpec> = {
     why: "Tool work in Phil's accounts at a sustainable cost.",
   },
   grok: {
-    key: "grok", label: "Grok (SuperGrok)", provider: "grok", plan: "supergrok",
-    modelId: env("GROK_MODEL", "grok-4"),
-    why: "Live X data and drafting in Phil's X voice.",
+    key: "grok", label: "Grok", provider: "grok", plan: "supergrok",
+    modelId: env("GROK_MODEL", "grok-4.7"),
+    why: "Scouting and drafting in Phil's X voice; X itself is read through xAI's X search, which HQ runs for every model.",
   },
   cursor: { key: "cursor", label: "Cursor", provider: "manual", plan: "cursor", why: "Second coding brain that builds and reviews alongside Jason." },
   higgsfield: { key: "higgsfield", label: "Higgsfield + image/video models", provider: "manual", plan: "higgsfield", why: "Images, video and visual assets." },
