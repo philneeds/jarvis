@@ -38,6 +38,11 @@ export interface AgentConfig {
   rules: ApprovalRules;
   /** Tool names this agent may call (Claude agents only in this phase). */
   tools: string[];
+  /**
+   * Charter tools Phil switched off for this agent. The charter is the floor: a tool added to it later (a new
+   * connector) reaches the agent even when its settings were saved before, unless Phil turned that tool off himself.
+   */
+  toolsOff?: string[];
   /** Google accounts (emails) this agent may use. Empty = all connected accounts. */
   accounts?: string[];
 }
@@ -55,15 +60,25 @@ export function charterDefaults(id: string): Pick<AgentConfig, "tools" | "rules"
   };
 }
 
+/** The tools an agent may call: its charter's, plus what Phil added, minus what Phil switched off. */
+export function effectiveTools(id: string, saved: Partial<Pick<AgentConfig, "tools" | "toolsOff">>): string[] {
+  const off = new Set(saved.toolsOff ?? []);
+  return [...new Set([...charterDefaults(id).tools, ...(saved.tools ?? [])])].filter((t) => !off.has(t));
+}
+
 export async function getAgentConfig(store: Store, id: string): Promise<AgentConfig> {
   const c = await store.settings.get<Partial<AgentConfig>>(key(id), {});
   const d = charterDefaults(id);
-  return { ...DEFAULT_CONFIG, ...c, persona: { ...DEFAULT_CONFIG.persona, ...(c.persona ?? {}) }, rules: { ...d.rules, ...(c.rules ?? {}) }, tools: c.tools ?? d.tools };
+  return { ...DEFAULT_CONFIG, ...c, persona: { ...DEFAULT_CONFIG.persona, ...(c.persona ?? {}) }, rules: { ...d.rules, ...(c.rules ?? {}) }, tools: effectiveTools(id, c), toolsOff: c.toolsOff ?? [] };
 }
 
 export async function setAgentConfig(store: Store, id: string, patch: Partial<AgentConfig>): Promise<AgentConfig> {
   const cur = await getAgentConfig(store, id);
   const next: AgentConfig = { ...cur, ...patch, persona: { ...cur.persona, ...(patch.persona ?? {}) }, rules: { ...cur.rules, ...(patch.rules ?? {}) } };
+  // Phil's tool list is the whole truth at the moment he saves it: whatever charter tool he left out is off until he
+  // puts it back; a charter tool that doesn't exist yet (a connector added later) is not off, so it arrives on its own.
+  if (patch.tools && !patch.toolsOff) next.toolsOff = charterDefaults(id).tools.filter((t) => !patch.tools!.includes(t));
+  next.tools = effectiveTools(id, next);
   await store.settings.set(key(id), next);
   return next;
 }
