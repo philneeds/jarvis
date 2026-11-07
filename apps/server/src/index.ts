@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { DiscordConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, XConnector, Workshop, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
+import { DiscordConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, Watchers, XConnector, Workshop, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
 import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
 import { authEnabled, isAuthedRequest } from "./auth.js";
@@ -108,7 +108,10 @@ const stale = await jarvis.clearStaleWork();
 void jarvis.finishShip().catch((e) => console.warn("[workshop] finish:", (e as Error).message));
 if (stale.length) console.log(`[boot] cleared stale work: ${stale.join(", ")}`);
 if (process.env.SCHEDULER !== "0") scheduler.start();
+// Watchers: cheap looks at GoHighLevel and the markets every few minutes; a lead wakes only when something new happened.
+const watchers = new Watchers(jarvis, { ghl });
+if (process.env.SCHEDULER !== "0") watchers.start();
 
-const shutdown = async () => { scheduler.stop(); telegram?.stop(); await store.close(); process.exit(0); };
+const shutdown = async () => { scheduler.stop(); watchers.stop(); telegram?.stop(); await store.close(); process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
