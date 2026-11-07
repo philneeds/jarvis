@@ -64,6 +64,13 @@ test("a change goes workshop → commit → approval → push to the live branch
   const block = JSON.parse(out.match(/```approval\n([\s\S]*?)\n```/)![1]!) as { kind: string; title: string; payload: { action: string; sha: string; files: string[] } };
   assert.equal(block.kind, "config"); assert.equal(block.title, "Ship: Make the clap louder"); assert.equal(block.payload.action, "code.ship"); assert.deepEqual(block.payload.files, ["README.md"]);
   assert.equal(git(dir, "rev-parse", "HEAD"), block.payload.sha);
+  // A change to the guard itself is flagged in the title and body.
+  await fs.mkdir(path.join(dir, "packages/core/src"), { recursive: true });
+  await fs.writeFile(path.join(dir, "packages/core/src/workshop.ts"), "// loosened\n");
+  const rails = String(await submit.handler({ title: "Loosen the guard", why: "testing the flag on a guardrail file" }, { store: undefined as never, agentId: "einstein" }));
+  assert.match(rails, /"title":"Ship \(touches guardrails\): Loosen the guard"/);
+  assert.match(rails, /GUARDRAILS TOUCHED: packages\/core\/src\/workshop\.ts/);
+  git(dir, "reset", "-q", "--hard", block.payload.sha);
   assert.match(String(await tools.find((t) => t.name === "hq_logs")!.handler({ lines: 50 }, { store: undefined as never, agentId: "einstein" })), /line1\nkey=\[masked\]/);
   assert.match(String(await tools.find((t) => t.name === "db_query")!.handler({ sql: "select id, text from chat_messages limit 1" }, { store: undefined as never, agentId: "einstein" })), /id \| text\n1 \| hi/);
   assert.match(String(await tools.find((t) => t.name === "db_query")!.handler({ sql: "delete from runs" }, { store: undefined as never, agentId: "einstein" })), /Read-only/);

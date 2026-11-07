@@ -279,6 +279,9 @@ export interface WorkshopToolDeps {
 export const WORKSHOP_HINT = (dir: string, branch: string, base: string) => `You are working in your workshop: ${dir}, a copy of HQ's code on branch ${branch}, started fresh from ${base} (the live branch). Your Read, Edit, Write, Glob, Grep and Bash tools work only inside it; .env, keys and the live app are off limits and git push is refused. The layout: packages/core (the brain: agents, charters, scheduler, tools, connectors), apps/server (API, Telegram, scheduler host), apps/hq (the Next.js screens), deploy/ (server scripts), docs/. Tests: packages/core/tests and apps/server/tests (node --test --import tsx tests/). Read before you change; keep changes small and in the codebase's style; add or adjust a test for behaviour you change.
 When the change is ready: call workshop_verify (build, typecheck, tests across packages; fix anything red), then workshop_submit with a title and why. It commits and returns the approval block to put in your reply, word for word, so Phil can ship it from Needs you. HQ then pushes it to the live branch, redeploys, and rolls back by itself if HQ doesn't come back. Never claim a change is live: it is live only after Phil approves and HQ reports the deploy. If a task needs a secret or a setting only Phil can add, say exactly what (name and where) and stop; never guess a key.`;
 
+/** Files that define what Einstein may do; a change to any of them is flagged on the ship card. */
+export const GUARDRAIL_FILES = /^(packages\/core\/src\/workshop\.ts|packages\/core\/src\/router\/claude\.ts|packages\/core\/src\/jarvis\/prompts\.ts|packages\/core\/src\/jarvis\/orchestrator\.ts|packages\/core\/src\/trading\/|packages\/core\/src\/registry\/charters\.ts|deploy\/|apps\/server\/src\/auth\.ts|apps\/server\/src\/index\.ts)/;
+
 export function workshopTools(w: Workshop, deps: WorkshopToolDeps = {}): ToolDef[] {
   return [
     defineTool({
@@ -304,8 +307,10 @@ export function workshopTools(w: Workshop, deps: WorkshopToolDeps = {}): ToolDef
           const sha = await w.commit(title);
           if (!sha) return "Nothing to submit: the workshop has no changes.";
           const d = await w.describe(sha);
-          const body = `${why.trim()}\n\nFiles: ${d.files.join(", ")}\n${d.stat}\n\nChecks: all green (build, typecheck, tests).`;
-          const block = { kind: "config", title: `Ship: ${title}`, body, payload: { action: "code.ship", sha, title, files: d.files }, context: `Einstein changed ${d.files.length} file${d.files.length === 1 ? "" : "s"} in the workshop on branch ${w.current?.branch ?? "einstein"}; every check passed. Approving pushes commit ${sha.slice(0, 7)} to the live branch and redeploys HQ (two or three minutes, HQ restarts); if HQ doesn't come back it rolls back on its own.` };
+          // A change to the guardrails themselves is still Phil's call, but it must be impossible to miss on the card.
+          const rails = d.files.filter((f) => GUARDRAIL_FILES.test(f));
+          const body = `${rails.length ? `GUARDRAILS TOUCHED: ${rails.join(", ")}. This change edits the code that limits what Einstein can do (the workshop guard, the deploy script, approvals or safety rules). Read the diff before approving.\n\n` : ""}${why.trim()}\n\nFiles: ${d.files.join(", ")}\n${d.stat}\n\nChecks: all green (build, typecheck, tests).`;
+          const block = { kind: "config", title: `${rails.length ? "Ship (touches guardrails)" : "Ship"}: ${title}`, body, payload: { action: "code.ship", sha, title, files: d.files, guardrails: rails }, context: `Einstein changed ${d.files.length} file${d.files.length === 1 ? "" : "s"} in the workshop on branch ${w.current?.branch ?? "einstein"}; every check passed. Approving pushes commit ${sha.slice(0, 7)} to the live branch and redeploys HQ (two or three minutes, HQ restarts); if HQ doesn't come back it rolls back on its own.` };
           return `Committed ${sha.slice(0, 7)}. Put this in your reply, exactly:\n\n\`\`\`approval\n${JSON.stringify(block)}\n\`\`\``;
         } catch (e) { return `Submit failed: ${(e as Error).message}`; }
       },

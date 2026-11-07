@@ -222,7 +222,7 @@ export class Jarvis {
       if (typeof p.sha !== "string" || !/^[0-9a-f]{7,40}$/.test(p.sha)) throw new Error("code.ship needs the commit sha from workshop_submit");
       return w.ship(this.store, p.sha, String(p.title ?? a.title), a.id);
     });
-    this.describers.set("code.ship", (p) => `Pushes Einstein's commit ${String(p.sha ?? "").slice(0, 7)} to the live branch and redeploys HQ (HQ restarts; two or three minutes). If HQ doesn't come back up, the deploy rolls back by itself and the commit is reverted.`);
+    this.describers.set("code.ship", (p) => `Pushes Einstein's commit ${String(p.sha ?? "").slice(0, 7)} to the live branch and redeploys HQ (HQ restarts; two or three minutes). If HQ doesn't come back up, the deploy rolls back by itself and the commit is reverted.${Array.isArray(p.guardrails) && p.guardrails.length ? ` This one changes Einstein's own guardrails (${(p.guardrails as string[]).join(", ")}): read the diff first.` : ""}`);
   }
   /** On boot: report how the last ship went, if one was in flight when HQ restarted. */
   async finishShip(): Promise<string | undefined> {
