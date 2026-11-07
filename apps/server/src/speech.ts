@@ -5,6 +5,8 @@ import { spawn } from "node:child_process";
  * (Whisper), GROQ_API_KEY (Whisper on Groq, free tier). Jarvis's spoken replies need ElevenLabs.
  */
 type Provider = "elevenlabs" | "openai" | "groq";
+/** Names the transcriber would otherwise mangle ("Jarvis" came back as "Jerk It"). Whisper-style services take these as a hint. */
+export const VOICE_VOCABULARY = "Jarvis, Monica, Einstein, Oscar, Adam, Joi, Lip, David, Doc, Munger, Buffett, Mayne, Mantis, Pentoshi, Tux, Cat, Ansem, Claw, Lucas, Block, Boo, ncrypt, Jeff, Poseidon, Paul, Mark, Allmin, Justin, Jason, Stella, Karol, Jake, Bill, Stephanie, Frog, Brian, Stevon, House, Marcus, Exxon, Altman, Armstrong. JD PM, ProEdge, Range.cool, Philneeds, Airdrop Acres, Hyperliquid, Kubera, Robinhood, Kalshi, GoHighLevel, Vest Markets, Backed, Grok, Claude. Approve, reject, to-do, watchlist, brief.";
 /** The services with a key, in the order they're tried. STT_PROVIDER pins one. */
 export function transcriptionProviders(): Provider[] {
   const all: Provider[] = [];
@@ -36,8 +38,8 @@ async function transcribeWith(provider: Provider, audio: Buffer, mime: string, f
   form.append("file", new Blob([new Uint8Array(audio)], { type: mime }), `note.${ext}`);
   let url: string, headers: Record<string, string>;
   if (provider === "elevenlabs") { url = "https://api.elevenlabs.io/v1/speech-to-text"; headers = { "xi-api-key": process.env.ELEVENLABS_API_KEY! }; form.append("model_id", process.env.ELEVENLABS_STT_MODEL || "scribe_v1"); form.append("language_code", "en"); form.append("tag_audio_events", "false"); }
-  else if (provider === "openai") { url = "https://api.openai.com/v1/audio/transcriptions"; headers = { authorization: `Bearer ${process.env.OPENAI_API_KEY}` }; form.append("model", process.env.OPENAI_STT_MODEL || "gpt-4o-mini-transcribe"); form.append("language", "en"); }
-  else { url = "https://api.groq.com/openai/v1/audio/transcriptions"; headers = { authorization: `Bearer ${process.env.GROQ_API_KEY}` }; form.append("model", process.env.GROQ_STT_MODEL || "whisper-large-v3-turbo"); form.append("language", "en"); }
+  else if (provider === "openai") { url = "https://api.openai.com/v1/audio/transcriptions"; headers = { authorization: `Bearer ${process.env.OPENAI_API_KEY}` }; form.append("model", process.env.OPENAI_STT_MODEL || "gpt-4o-mini-transcribe"); form.append("language", "en"); form.append("prompt", VOICE_VOCABULARY); }
+  else { url = "https://api.groq.com/openai/v1/audio/transcriptions"; headers = { authorization: `Bearer ${process.env.GROQ_API_KEY}` }; form.append("model", process.env.GROQ_STT_MODEL || "whisper-large-v3-turbo"); form.append("language", "en"); form.append("prompt", VOICE_VOCABULARY); }
   const res = await f(url, { method: "POST", headers, body: form });
   if (!res.ok) throw new Error(`${provider} ${res.status}: ${(await res.text()).replace(/\s+/g, " ").slice(0, 140)}`);
   const j = (await res.json()) as { text?: string };

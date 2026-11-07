@@ -260,7 +260,7 @@ test("spoken addressing routes to the named agent, and only to a real one", asyn
   assert.ok(chat.some((m) => m.role === "agent" && m.agentId === "stella"), "Stella answered directly");
 });
 
-test("a hand-off runs the right agent and posts its reply", async () => {
+test("a hand-off runs the right agent and its reply goes back to the asker", async () => {
   const { jarvis, store } = make();
   const { mockProvider: mp, ModelRouter: MR, Jarvis: J } = await import("../src/index.js");
   // A provider that makes Monica hand a lead to Stella.
@@ -271,7 +271,8 @@ test("a hand-off runs the right agent and posts its reply", async () => {
   const out = await j2.handle("@monica anything in my mail?");
   assert.ok(out[1]!.text.includes("[Handed to @stella]"));
   const chat = await store.chat.list();
-  assert.ok(chat.some((m) => m.role === "agent" && m.agentId === "stella" && m.via?.includes("monica")));
+  assert.ok(!chat.some((m) => m.role === "agent" && m.agentId === "stella" && m.via?.includes("monica")), "Stella's answer goes back to Monica, not into Phil's chat");
+  assert.ok((await store.activity.list({ agentId: "stella" })).some((e) => e.kind === "run" && /Stella → Monica \(handoff\)/.test(e.summary)));
   const log = await store.activity.list({ agentId: "monica" });
   assert.ok(log.some((e) => e.kind === "delegate" && /Monica → Stella/.test(e.summary)));
   void jarvis;
@@ -740,4 +741,55 @@ test("Jarvis knows how HQ itself works", async () => {
   const p = jarvisSystemPrompt([], "ok");
   assert.match(p, /clap on\/off button at the bottom enables clap-to-wake/);
   assert.match(p, /\/voice on\|off/);
+});
+
+test("one agent can file research into another's brain, and Phil can add to any agent's memory with /brain", async () => {
+  const { jarvis, store } = make();
+  const { agentSystemPrompt, getAgent, extractBlocks } = await import("../src/index.js");
+  // Lucas's reply files context for House.
+  const { remember } = extractBlocks('Filed.\n```remember\n{"scope":"agent:house","key":"vktx-oct","value":"@biotechguy: VKTX phase 3 readout expected Nov 12; sized small."}\n```');
+  assert.equal(remember[0]!.scope, "agent:house");
+  await (jarvis as unknown as { absorb(a: unknown, approvals: unknown[], remember: unknown[], runId?: string): Promise<void> }).absorb(getAgent("lucas"), [], remember);
+  const houseMemory = await store.memory.list("agent:house");
+  assert.equal(houseMemory[0]!.source, "lucas");
+  assert.match(agentSystemPrompt(getAgent("house")!, [...(await store.memory.list("phil")), ...houseMemory]), /VKTX phase 3 readout expected Nov 12/);
+  // Phil adds directly.
+  assert.match(await jarvis.command("/brain house Watch for the ESMO abstracts next week"), /Filed for House/);
+  assert.match(await jarvis.command("/brain house"), /House knows \(2\):[\s\S]*ESMO abstracts/);
+  assert.match(await jarvis.command("/brain nobody x"), /Say \/brain <agent>/);
+  assert.match(agentSystemPrompt(getAgent("lucas")!, []), /scope "agent:<their id>"/);
+});
+
+test("a Grok run cut off by the turn limit gets one finish-up pass; a hand-off's answer goes back to the asker, not Phil", async () => {
+  const { grokCliProvider, getAgent } = await import("../src/index.js");
+  const calls: { prompt: string; maxTurns?: number }[] = [];
+  const once = async (prompt: string, opts?: { maxTurns?: number }) => {
+    calls.push({ prompt, maxTurns: opts?.maxTurns });
+    if (calls.length === 1) return JSON.stringify({ text: "Found @houseofsweeps. I'll page older posts next.", stopReason: "max_turns", num_turns: 14 });
+    return JSON.stringify({ text: "Last 25 posts from @houseofsweeps, Oct 20 to Nov 6: catalyst calls on VKTX, …", stopReason: "end_turn" });
+  };
+  const p = grokCliProvider(once);
+  const r = await p.run({ agent: getAgent("lucas")!, model: { key: "grok", provider: "grok", label: "Grok", plan: "supergrok" } as never, system: "sys", prompt: "Phil asks: pull the last 25 posts" });
+  assert.equal(calls.length, 2, "one finish-up pass");
+  assert.equal(calls[1]!.maxTurns, 3);
+  assert.match(calls[1]!.prompt, /cut off before you answered[\s\S]*Found @houseofsweeps[\s\S]*Do not search again/);
+  assert.match(r.text, /^Last 25 posts from @houseofsweeps/);
+  // Still narrating with no stop reason counts as cut off too.
+  calls.length = 0;
+  const once2 = async () => (calls.push({ prompt: "" }), calls.length === 1 ? JSON.stringify({ text: "Pulling the post and the replies now." }) : JSON.stringify({ text: "Done: 3 posts." }));
+  assert.equal((await grokCliProvider(once2).run({ agent: getAgent("lucas")!, model: { key: "grok", provider: "grok", label: "Grok", plan: "supergrok" } as never, system: "s", prompt: "p" })).text, "Done: 3 posts.");
+
+  // Hand-off: Pentoshi hands the chart to Joi; Joi's note is kept for Pentoshi and Jarvis, not posted to Phil.
+  const { Jarvis, memoryStore, ModelRouter, recentReports } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const fake = { id: "fake", async available() { return { ok: true }; }, async run(req: { agent: { id: string }; prompt: string }) {
+    const text = req.agent.id === "pentoshi" ? 'Skip it.\n```handoff\n{"agent":"joi","task":"read the chart"}\n```' : "Chart read: no vault name shown.";
+    return { text, provider: "fake", modelId: "fake", inputTokens: 1, outputTokens: 1, costUsd: 0, durationMs: 1 };
+  } };
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [fake as never], grok: [fake as never] } }) });
+  const out = await jarvis.runAgent(getAgent("pentoshi")!, "look at this vault", { direct: true });
+  assert.match(out.text, /\[Handed to @joi\]/);
+  assert.ok(!(await store.chat.list(20)).some((m) => m.agentId === "joi"), "Joi's working note isn't posted to Phil");
+  const rep = (await recentReports(store, 1)).find((x) => x.agentId === "joi")!;
+  assert.equal(rep.toId, "pentoshi"); assert.match(rep.text, /no vault name shown/);
 });

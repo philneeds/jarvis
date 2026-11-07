@@ -356,7 +356,11 @@ export class Jarvis {
         if (!to || to.id === agent.id || to.id === "jarvis") continue;
         await this.router.log(agent.id, "delegate", `${agent.name} → ${to.name}: ${h.task.slice(0, 200)}`, r.runId);
         const hr = await this.runAgent(to, h.task, { direct: opts.direct, parentRunId: r.runId, from: agent.name, depth: (opts.depth ?? 0) + 1 });
-        await this.say({ role: "agent", agentId: to.id, text: hr.blocked ? `(${to.name} did not run: ${hr.blocked})` : hr.text, runId: hr.runId, via: [agent.id], kind: "progress" });
+        // The helper's answer goes back up to the agent who asked, not to Phil: it's logged, kept for Jarvis to answer from, and
+        // anything Phil must act on arrived as an approval or to-do from the helper's own run.
+        const { logReports } = await import("../scheduler.js");
+        await logReports(this, agent.id, [{ agent: to, scheduleId: `handoff from ${agent.id}`, text: hr.blocked ? `(did not run: ${hr.blocked})` : hr.text, runId: hr.runId }]);
+        await this.router.log(to.id, "run", `${to.name} → ${agent.name} (handoff): ${(hr.blocked ? `did not run: ${hr.blocked}` : hr.text).slice(0, 200)}`, hr.runId, { report: hr.text });
       }
     }
     return { ...r, text, decks };
@@ -723,9 +727,25 @@ export class Jarvis {
     const arg = rest.join(" ").trim();
     switch ((cmd ?? "").toLowerCase()) {
       case "help":
-        return "Commands: /brief (morning rundown), /status (who's doing what), /run <routine or agent> (run a scheduled routine now; /run alone lists them), /todo <thing> (add to your to-do list; /todo alone lists it), /pause [agent|trading|all], /resume [agent|trading|all], /approvals, /waiting (what needs you), /usage, /memory, /condense (Oscar tidies memory). Talk to any agent with @name.";
+        return "Commands: /brief (morning rundown), /status (who's doing what), /run <routine or agent> (run a scheduled routine now; /run alone lists them), /brain <agent> <text> (add to that agent's memory; /brain <agent> alone shows it), /todo <thing> (add to your to-do list; /todo alone lists it), /pause [agent|trading|all], /resume [agent|trading|all], /approvals, /waiting (what needs you), /usage, /memory, /condense (Oscar tidies memory). Talk to any agent with @name.";
       case "brief":
         return this.brief();
+      case "brain": {
+        // Add to an agent's own memory from chat, or show what's in it.
+        const [who, ...restWords] = arg.split(/\s+/);
+        const target = who ? (getAgent(who.replace(/^@/, "").toLowerCase()) ?? findAgent(who.replace(/^@/, ""))) : undefined;
+        if (!target) return "Say /brain <agent> <what they should know>, or /brain <agent> to see what's there.";
+        const note = restWords.join(" ").trim();
+        const scope = `agent:${target.id}`;
+        if (!note) {
+          const items = await this.store.memory.list(scope);
+          return items.length ? `${target.name} knows (${items.length}):\n${items.slice(-20).map((m) => `- ${m.key}: ${m.value.slice(0, 200)}`).join("\n")}` : `${target.name}'s memory is empty. /brain ${target.id} <text> adds to it.`;
+        }
+        const key = `phil-${new Date().toISOString().slice(0, 10)}-${Math.random().toString(36).slice(2, 6)}`;
+        await this.store.memory.set({ scope, key, value: note.slice(0, 2000), source: "phil" });
+        await this.router.log("jarvis", "memory", `Phil added to ${target.name}'s memory: ${note.slice(0, 120)}`);
+        return `Filed for ${target.name}. They'll have it on their next run.`;
+      }
       case "run": {
         // Run a scheduled routine now, by its id or the agent's name; it reports up the chain as it would on its timer.
         const { withCustom, runRoutine } = await import("../scheduler.js");

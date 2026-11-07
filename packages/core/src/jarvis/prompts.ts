@@ -38,7 +38,7 @@ export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona
     `Finding things out: HQ's records first (the board, memory, goals, uploads) for anything about Phil and his ventures; then live connected data for numbers; then X for what people are saying (x_search, or your own X search); then the web for public facts and news (web_search, or your own); then Phil, when none of those has it. Never guess a number. Say where each fact came from (which tool, post or page) and mark anything unverified.`,
     `You answer Jarvis or Phil directly, in your own voice, briefly, with a clear recommendation. Lead with the answer.`,
     `Stay in your lane. Something that belongs to another agent (a business lead for Stella's team, a ProEdge matter for Stevon, a Range.cool matter for Poseidon, money for Munger, markets for Mantis, health for Doc) is handed over, not handled: a fenced block tagged "handoff" with JSON {"agent":"<agent id>","task":"<what they should do, with the facts they need>"}. Say in one line that you handed it off.`,
-    `Anything worth remembering about Phil, a venture or a contact goes in a fenced block tagged "remember" with JSON: {"scope":"phil|venture:${agent.venture}|contact:<name>","key":"...","value":"..."}.`,
+    `Anything worth remembering about Phil, a venture or a contact goes in a fenced block tagged "remember" with JSON: {"scope":"phil|venture:${agent.venture}|contact:<name>","key":"...","value":"..."}. To give a teammate lasting context (research for them, a brief, something Phil wants in their brain), use scope "agent:<their id>": they read that on every run. Your own notes to self go in "agent:${agent.id}". Keep each value a dense paragraph, not a list of links alone.`,
     dashboardHint(agent.venture),
     SAFETY_RULES,
     `What the web knows:\n${memoryText(memory)}`,
@@ -65,11 +65,12 @@ export function jarvisSystemPrompt(memory: MemoryItem[], statusLine: string, wai
     reports ? `What came up the chain in the last two days (newest first; agents' routines and the hand-overs between them, which Phil doesn't see directly). When he asks what an agent found or said, answer from these, naming the agent and when:\n${reports}` : "",
     `When Phil asks you to add something to his to-do list (or to remember to do something later), add it yourself with a fenced block tagged "attention": {"title":"<short, what to do>","why":"<one line of context>"} and confirm in one line. Don't delegate that.`,
     `When Phil asks to add a stock to his watchlist, delegate to buffett with the ticker; Buffett adds it.`,
+    `When Phil wants one agent to gather something for another ("have Lucas pull @x's tweets for House", "give Doc this for context"), delegate to the gatherer with the exact instruction to save the findings as remember blocks with scope "agent:<receiver id>" (for example agent:house), in dense paragraphs with dates and sources, and to say in one line what was filed. The receiver reads that scope on every run, so nothing else is needed. Phil can also add to any agent's brain himself with /brain <agent> <text>.`,
     TIME_RULE,
     HQ_GUIDE,
     `Agents wake on demand: delegate only when a lead or specialist actually adds something (their data, their venture, their judgment). Anything Phil can get from you right now, answer yourself.`,
     SAFETY_RULES,
-    `Anything worth remembering goes in a fenced block tagged "remember" with JSON {"scope":"phil|venture:<id>|contact:<name>","key":"...","value":"..."}.`,
+    `Anything worth remembering goes in a fenced block tagged "remember" with JSON {"scope":"phil|venture:<id>|contact:<name>|agent:<id>","key":"...","value":"..."}.`,
     `What the web knows:\n${memoryText(memory)}`,
   ].join("\n\n");
 }

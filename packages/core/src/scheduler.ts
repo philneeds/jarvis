@@ -165,7 +165,7 @@ export interface RoutineReport { agent: AgentDef; scheduleId: string; text: stri
 export const REPORTS_LOG_KEY = "reports.log";
 export interface LoggedReport { id: string; agentId: string; toId: string; scheduleId: string; at: string; text: string }
 const LOG_DAYS = 3;
-async function logReports(jarvis: Jarvis, toId: string, reports: RoutineReport[]) {
+export async function logReports(jarvis: Jarvis, toId: string, reports: RoutineReport[]) {
   await withInbox(async () => {
     const cutoff = Date.now() - LOG_DAYS * 86_400_000;
     const log = (await jarvis.store.settings.get<LoggedReport[]>(REPORTS_LOG_KEY, [])).filter((r) => Date.parse(r.at) > cutoff);

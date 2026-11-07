@@ -23,7 +23,11 @@ export function grokProvider(mode = process.env.GROK_MODE || "cli"): Provider {
 }
 
 export const GROK_DENIED_TOOLS = "run_terminal_command,read_file,search_replace,write,list_dir,grep,spawn_subagent,kill_command_or_subagent,get_command_or_subagent_output,scheduler_create,scheduler_delete,scheduler_list,monitor,search_tool,use_tool,workflow,enter_plan_mode,exit_plan_mode,ask_user_question,send_feedback,image_gen,image_edit,image_to_video,reference_to_video";
-export const GROK_DEFAULT_ARGS = `--permission-mode dontAsk --max-turns 8 --output-format json --disallowed-tools ${GROK_DENIED_TOOLS} -p`;
+export const GROK_DEFAULT_ARGS = `--permission-mode dontAsk --max-turns 14 --output-format json --disallowed-tools ${GROK_DENIED_TOOLS} -p`;
+/** The CLI's stop reasons that mean "ran out of turns", in the spellings seen so far. */
+const CUT_SHORT = /max[_ -]?turns|turn[_ -]?limit|max[_ -]?tokens|length/i;
+/** A run that looks like it ended mid-work: narration about what it's about to do, with no result after it. */
+const NARRATING = /(^|\n)\s*(I['’]ll|I will|Next[,:]|Pulling|Opening|Checking|Searching|Let me)\b[^\n]*\.?\s*$/i;
 
 const grokCwd = () => {
   if (process.env.GROK_CWD) return process.env.GROK_CWD;
@@ -54,7 +58,7 @@ export function grokOnce(prompt: string, opts: { signal?: AbortSignal; timeoutMs
   });
 }
 
-export function grokCliProvider(): Provider {
+export function grokCliProvider(once: typeof grokOnce = grokOnce): Provider {
   const bin = process.env.GROK_BIN || "grok";
   return {
     id: "grok:cli",
@@ -69,10 +73,21 @@ export function grokCliProvider(): Provider {
     async run(req: AgentRequest): Promise<AgentResult> {
       const t0 = Date.now();
       const prompt = `${req.system}\n\n---\n\n${req.prompt}`;
-      const text = await grokOnce(prompt, { signal: req.signal });
-      const parsed = parseGrokJson(text);
+      let text = await once(prompt, { signal: req.signal });
+      let parsed = parseGrokJson(text);
+      let finished = (parsed?.text ?? text).trim();
+      // Cut off by the turn limit, or stopped while still narrating: one more short pass to write the answer from what it has.
+      if ((parsed?.stopReason && CUT_SHORT.test(parsed.stopReason)) || NARRATING.test(finished)) {
+        const follow = `${req.system}\n\n---\n\n${req.prompt}\n\n---\n\nYour previous run on this was cut off before you answered. Here is everything you had written so far:\n\n${finished.slice(0, 6000)}\n\nDo not search again. Write the final answer now from what you already found: the result itself (numbers, posts with handles and dates, findings), any remember or handoff blocks, and one line on what you couldn't get. No narration about what you'll do next.`;
+        try {
+          const text2 = await once(follow, { signal: req.signal, maxTurns: 3 });
+          const parsed2 = parseGrokJson(text2);
+          const t2 = (parsed2?.text ?? text2).trim();
+          if (t2) { text = text2; parsed = parsed2 ?? parsed; finished = t2; }
+        } catch { /* keep the first pass */ }
+      }
       return {
-        text: (parsed?.text ?? text).trim(),
+        text: finished,
         provider: "grok:cli",
         modelId: parsed?.model ?? req.model.modelId ?? "grok",
         inputTokens: parsed?.input ?? Math.ceil(prompt.length / 4),

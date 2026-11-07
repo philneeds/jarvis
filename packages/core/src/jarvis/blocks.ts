@@ -41,12 +41,14 @@ export function extractBlocks(text: string): { text: string; approvals: Approval
       return attention.length ? `[Needs you: ${attention.map((a) => a.title).join("; ")}]` : _m;
     }
     if (tag === "handoff") {
+      const mine: string[] = [];
       for (const it of items) {
         const o = it as Partial<HandoffBlock>;
         if (!o || typeof o !== "object" || !o.agent || !o.task) continue;
-        handoffs.push({ agent: String(o.agent).replace(/^@/, "").toLowerCase(), task: String(o.task) });
+        const id = String(o.agent).replace(/^@/, "").toLowerCase();
+        handoffs.push({ agent: id, task: String(o.task) }); mine.push(id);
       }
-      return handoffs.length ? `[Handed to ${handoffs.map((h) => "@" + h.agent).join(", ")}]` : _m;
+      return mine.length ? `[Handed to ${mine.map((h) => "@" + h).join(", ")}]` : _m;
     }
     if (tag === "metric") {
       for (const it of items) {
