@@ -7,6 +7,10 @@ import { authEnabled, isAuthedRequest } from "./auth.js";
 import { notify } from "./notify.js";
 
 const port = Number(process.env.PORT ?? 4000);
+// The commit this process runs. HQ's screens compare it on every reconnect and reload themselves after a deploy,
+// so a tab left open during one of Einstein's ships doesn't break on the next click.
+import { execFileSync } from "node:child_process";
+const BUILD = (() => { try { return execFileSync("git", ["rev-parse", "HEAD"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { return process.env.JARVIS_BUILD ?? "dev"; } })();
 const store = storeFromEnv();
 await store.init();
 const jarvis = new Jarvis({ store, notify });
@@ -63,7 +67,7 @@ app.get(
     onOpen(_evt, ws) {
       sockets.add(ws);
       void (async () => {
-        ws.send(JSON.stringify({ type: "hello", status: await jarvis.systemStatus(), agents: await jarvis.snapshot(), usage: await usageSummary(store) }));
+        ws.send(JSON.stringify({ type: "hello", build: BUILD, status: await jarvis.systemStatus(), agents: await jarvis.snapshot(), usage: await usageSummary(store) }));
       })();
     },
     onClose(_evt, ws) { sockets.delete(ws); },

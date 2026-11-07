@@ -58,6 +58,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [waitForReply]);
   const onEvent = useCallback((fn: (e: JarvisEvent) => void) => { listeners.current.add(fn); return () => { listeners.current.delete(fn); }; }, []);
   const wsRef = useRef<WebSocket | null>(null);
+  const buildRef = useRef<string | undefined>(undefined);
   const [wsGen, setWsGen] = useState(0);
 
   const refresh = useCallback(async () => {
@@ -96,9 +97,16 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       ws.onerror = () => ws?.close();
       ws.onmessage = (ev) => {
         if (ev.data === "pong") return;
-        let e: JarvisEvent | { type: "hello"; status: State["status"]; agents: State["agents"]; usage: State["usage"] };
+        let e: JarvisEvent | { type: "hello"; build?: string; status: State["status"]; agents: State["agents"]; usage: State["usage"] };
         try { e = JSON.parse(ev.data); } catch { return; }
-        if (e.type === "hello") { setState((s) => (s ? { ...s, status: e.status, agents: e.agents, usage: e.usage } : s)); return; }
+        if (e.type === "hello") {
+          // A different build answered than the one this page was loaded from: a deploy happened. Reload so the
+          // page's scripts match the server, rather than failing on the next navigation.
+          if (e.build && buildRef.current && e.build !== buildRef.current) { location.reload(); return; }
+          if (e.build) buildRef.current = e.build;
+          setState((s) => (s ? { ...s, status: e.status, agents: e.agents, usage: e.usage } : s));
+          return;
+        }
         for (const fn of listeners.current) { try { fn(e); } catch { /* a listener's problem */ } }
         switch (e.type) {
           case "agent.status":
