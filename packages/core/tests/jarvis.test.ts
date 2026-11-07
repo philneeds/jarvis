@@ -278,6 +278,46 @@ test("a hand-off runs the right agent and its reply goes back to the asker", asy
   void jarvis;
 });
 
+test("the asker hears the hand-off answer once and closes the loop itself, without handing off again", async () => {
+  const { store } = make();
+  const { mockProvider: mp, ModelRouter: MR, Jarvis: J } = await import("../src/index.js");
+  // Stella hands JD PM's cash question to Munger on every run she gets; the loop must still close after one round.
+  const handing = mp("m");
+  const base = handing.run.bind(handing);
+  handing.run = async (req) => { const r = await base(req); if (req.agent.id === "stella") r.text += '\n\n```handoff\n{"agent":"munger","task":"Confirm JD PM cash position as of today."}\n```'; return r; };
+  const j2 = new J({ store, router: new MR({ store, providers: { claude: [handing], grok: [mp("g")] } }) });
+  await j2.runAgent(getAgent("stella")!, "Morning leads and jobs review.", { direct: false, from: "Scheduler" });
+  const log = await store.activity.list({ agentId: "stella" });
+  const stellaRan = log.filter((e) => e.kind === "run" && /^Stella ran/.test(e.summary));
+  assert.equal(stellaRan.length, 2, "her routine, then one run with Munger's answer");
+  const prompts = await Promise.all(stellaRan.map(async (e) => (await store.runs.get(e.runId!))?.prompt ?? ""));
+  assert.ok(prompts.some((p) => /Charlie Munger asks: Charlie Munger answered what you handed off/.test(p)));
+  assert.equal((await store.activity.list({ agentId: "munger" })).filter((e) => e.kind === "run" && /^Charlie Munger ran/.test(e.summary)).length, 1, "the follow-up run's hand-off is not run again");
+  assert.ok(log.some((e) => e.kind === "run" && /Stella closed the loop on Charlie Munger/.test(e.summary)));
+  assert.equal((await store.memory.list("agent:stella")).length, 0, "nothing parked when she took it herself");
+});
+
+test("when the asker can't run now, the hand-off answer is parked in its memory for the next run", async () => {
+  const { store } = make();
+  const { mockProvider: mp, ModelRouter: MR, Jarvis: J } = await import("../src/index.js");
+  const handing = mp("m");
+  const base = handing.run.bind(handing);
+  let j2: InstanceType<typeof J>;
+  handing.run = async (req) => {
+    const r = await base(req);
+    if (req.agent.id === "stella") r.text += '\n\n```handoff\n{"agent":"munger","task":"Confirm JD PM cash position as of today."}\n```';
+    if (req.agent.id === "munger") await j2.pause("@stella", true); // Stella is paused while Munger works, so her follow-up can't run
+    return r;
+  };
+  j2 = new J({ store, router: new MR({ store, providers: { claude: [handing], grok: [mp("g")] } }) });
+  await j2.runAgent(getAgent("stella")!, "Morning leads and jobs review.", { direct: false, from: "Scheduler" });
+  const parked = (await store.memory.list("agent:stella")).find((m) => m.key === "handoff:munger");
+  assert.ok(parked, "Munger's answer is in Stella's memory");
+  assert.match(parked!.value, /Charlie Munger answered your hand-off on .* \(you haven't acted on it yet\): \(m\) Charlie Munger here/);
+  const log = await store.activity.list({ agentId: "stella" });
+  assert.ok(log.some((e) => e.kind === "system" && /parked in Stella's memory/.test(e.summary)));
+});
+
 test("bulk actions over the item cap wait for Phil even when the kind is auto-approved", async () => {
   const { jarvis, store } = make();
   const { setAgentConfig } = await import("../src/index.js");

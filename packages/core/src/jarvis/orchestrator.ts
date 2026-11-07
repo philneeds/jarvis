@@ -423,6 +423,8 @@ export class Jarvis {
     for (const a of attention) await this.raiseAttention({ ...a, agentId: agent.id, source: { runId: r.runId } });
     // Hand-offs: something that isn't this agent's job goes to the agent whose job it is; the receiver may hand back once.
     if (handoffs.length && (opts.depth ?? 0) < 2) {
+      const { logReports } = await import("../scheduler.js");
+      const answers: import("../scheduler.js").RoutineReport[] = [];
       for (const h of handoffs.slice(0, 6)) {
         const to = getAgent(h.agent) ?? findAgent(h.agent);
         if (!to || to.id === agent.id || to.id === "jarvis") continue;
@@ -430,12 +432,39 @@ export class Jarvis {
         const hr = await this.runAgent(to, h.task, { direct: opts.direct, parentRunId: r.runId, from: agent.name, depth: (opts.depth ?? 0) + 1 });
         // The helper's answer goes back up to the agent who asked, not to Phil: it's logged, kept for Jarvis to answer from, and
         // anything Phil must act on arrived as an approval or to-do from the helper's own run.
-        const { logReports } = await import("../scheduler.js");
         await logReports(this, agent.id, [{ agent: to, scheduleId: `handoff from ${agent.id}`, text: hr.blocked ? `(did not run: ${hr.blocked})` : hr.text, runId: hr.runId }]);
         await this.router.log(to.id, "run", `${to.name} → ${agent.name} (handoff): ${(hr.blocked ? `did not run: ${hr.blocked}` : hr.text).slice(0, 200)}`, hr.runId, { report: hr.text });
+        if (!hr.blocked) answers.push({ agent: to, scheduleId: `handoff from ${agent.id}`, text: hr.text, runId: hr.runId });
+      }
+      // The asker hears the answers once, together, and closes the loop itself (board, memory, an approval if Phil must
+      // act). Only the agent that started the chain does this, so a hand-off never bounces. When Phil is waiting on this
+      // run, the loop closes in the background so his answer isn't held up.
+      if (answers.length && !(opts.depth ?? 0)) {
+        const close = this.closeHandoffs(agent, answers, r.runId).catch((e) => this.router.log(agent.id, "error", `${agent.name} couldn't close the loop on a hand-off: ${(e as Error).message}`));
+        if (!opts.direct) await close;
       }
     }
     return { ...r, text, decks };
+  }
+
+  /**
+   * One short run for the agent who handed work off, with what came back. It goes through the usage caps like any
+   * background run (an agent on "room" waits past 90% of the plan), and it can't hand off again. When the run is held,
+   * the answers are parked in the asker's own memory so its next run picks them up; nothing is lost.
+   */
+  private async closeHandoffs(agent: AgentDef, answers: import("../scheduler.js").RoutineReport[], runId: string) {
+    const names = answers.map((a) => a.agent.name).join(", ");
+    const body = answers.map((a) => `${a.agent.name} answered what you handed off:\n\n${a.text}`).join("\n\n---\n\n");
+    const rr = await this.runAgent(agent, `${body}\n\nThis is the answer to your own hand-off, not a message from Phil: close the loop. Keep what matters in memory (scope venture:${agent.venture}) and on the board, raise an attention or approval block only if Phil himself must act, and reply in one or two lines on what you did with it. You can't hand off again in this run.`, { direct: false, from: answers.length > 1 ? "The team" : answers[0]!.agent.name, parentRunId: runId, depth: 2 });
+    if (rr.blocked) {
+      const when = new Date().toISOString().slice(0, 16).replace("T", " ");
+      for (const a of answers) {
+        await this.store.memory.set({ scope: `agent:${agent.id}`, key: `handoff:${a.agent.id}`, value: `${a.agent.name} answered your hand-off on ${when} UTC (you haven't acted on it yet): ${a.text.replace(/\s+/g, " ").slice(0, 1200)}`, source: a.agent.id });
+      }
+      await this.router.log(agent.id, "system", `${agent.name} couldn't take ${names}'s answer now (${rr.blocked}); parked in ${agent.name}'s memory for the next run`, runId);
+      return;
+    }
+    await this.router.log(agent.id, "run", `${agent.name} closed the loop on ${names}: ${rr.text.slice(0, 200)}`, rr.runId);
   }
 
   private async absorb(agent: AgentDef, approvals: ReturnType<typeof extractBlocks>["approvals"], remember: ReturnType<typeof extractBlocks>["remember"], runId?: string, metrics: ReturnType<typeof extractBlocks>["metrics"] = [], records: ReturnType<typeof extractBlocks>["records"] = []) {
