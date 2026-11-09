@@ -88,10 +88,13 @@ export class Jarvis {
    */
   async clearStaleWork(): Promise<string[]> {
     const stale = (await this.store.agentState.all()).filter((s) => s.status === "working");
+    const now = new Date().toISOString();
+    // The run rows too: a row left "running" forever reads as "still building" to Jarvis and Phil.
+    for (const r of await this.store.runs.running()) await this.store.runs.update(r.id, { status: "error", error: "HQ restarted during this run (a deploy or a crash); the run was lost. Ask again.", finishedAt: now });
     for (const s of stale) {
       await this.store.agentState.set(s.id, { status: "idle", detail: "" });
       await this.router.log(s.id, "system", `${getAgent(s.id)?.name ?? s.id} was mid-run when the server restarted; that run was lost. Ask again.`);
-      bus.emitEvent({ type: "agent.status", agentId: s.id, status: "idle", detail: "", at: new Date().toISOString() });
+      bus.emitEvent({ type: "agent.status", agentId: s.id, status: "idle", detail: "", at: now });
     }
     return stale.map((s) => s.id);
   }

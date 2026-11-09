@@ -49,6 +49,7 @@ export function memoryStore(file?: string): Store {
       async add(r) { s.runs.push(r); if (s.runs.length > 5000) s.runs.splice(0, s.runs.length - 5000); save(); },
       async update(id, patch) { const r = s.runs.find((x) => x.id === id); if (r) Object.assign(r, patch); save(); },
       async get(id) { return s.runs.find((x) => x.id === id); },
+      async running() { return s.runs.filter((x) => x.status === "running"); },
     },
     activity: {
       async add(e) { s.activity.push(e); if (s.activity.length > 20000) s.activity.splice(0, s.activity.length - 20000); save(); },

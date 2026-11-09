@@ -64,6 +64,8 @@ export interface Store {
     add(r: RunRecord): Promise<void>;
     update(id: string, patch: Partial<RunRecord>): Promise<void>;
     get(id: string): Promise<RunRecord | undefined>;
+    /** Runs still marked running (after a restart, the ones that were cut off). */
+    running(): Promise<RunRecord[]>;
   };
   activity: {
     add(e: ActivityEntry): Promise<void>;

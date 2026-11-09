@@ -85,6 +85,14 @@ test("a change goes workshop → commit → approval → push to the live branch
   assert.match(String(await tools.find((t) => t.name === "db_query")!.handler({ sql: "delete from runs" }, { store: undefined as never, agentId: "einstein" })), /Read-only/);
   // Ship: the commit lands on the live branch of "GitHub" and the deploy command runs detached.
   const store = memoryStore(); await store.init();
+  // An agent mid-run holds the restart until it finishes; the push itself happens at once.
+  await store.agentState.set("einstein", { status: "working", detail: "the other task" });
+  const wait = new Workshop({ dir, appDir: app, token: "t0ken", deployCmd: `${process.execPath} -e process.exit(0)`, outcomeFile: outcome, verify: async () => ({ ok: true, report: "" }), pollMs: 20 });
+  const held = await wait.ship(store, block.payload.sha, "Make the clap louder", "appr-0");
+  assert.match(held, /einstein is mid-run, so the restart waits/);
+  assert.equal(git(origin, "rev-parse", "deploy"), block.payload.sha, "pushed before the wait");
+  await store.agentState.set("einstein", { status: "idle", detail: "" });
+  await new Promise((r) => setTimeout(r, 80));
   const msg = await w.ship(store, block.payload.sha, "Make the clap louder", "appr-1");
   assert.match(msg, /Pushed [0-9a-f]{7} to deploy; HQ is rebuilding/);
   assert.equal(git(origin, "rev-parse", "deploy"), block.payload.sha);

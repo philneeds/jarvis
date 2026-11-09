@@ -841,8 +841,11 @@ test("a restart clears agents left 'working' by a run that died with the old pro
   const { jarvis, store } = make();
   await store.agentState.set("lucas", { status: "working", detail: "pulling @houseofsweeps" });
   await store.agentState.set("stella", { status: "idle" });
+  await store.runs.add({ id: "cut", agentId: "lucas", prompt: "p", status: "running", startedAt: new Date().toISOString() });
   assert.deepEqual(await jarvis.clearStaleWork(), ["lucas"]);
   assert.equal((await store.agentState.get("lucas"))?.status, "idle");
+  assert.equal((await store.runs.get("cut"))?.status, "error", "the cut-off run's row is closed too");
+  assert.match((await store.runs.get("cut"))!.error!, /HQ restarted during this run/);
   assert.ok((await store.activity.list({ agentId: "lucas" })).some((e) => /mid-run when the server restarted/.test(e.summary)));
   assert.deepEqual(await jarvis.clearStaleWork(), []);
 });

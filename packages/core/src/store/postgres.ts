@@ -36,6 +36,10 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
         const r = (await db.select().from(t.runs).where(eq(t.runs.id, id)))[0];
         return r ? { id: r.id, agentId: r.agentId, provider: r.provider ?? undefined, modelId: r.modelId ?? undefined, prompt: r.prompt, output: r.output ?? undefined, status: r.status as RunRecord["status"], error: r.error ?? undefined, startedAt: r.startedAt.toISOString(), finishedAt: iso(r.finishedAt), inputTokens: r.inputTokens ?? 0, outputTokens: r.outputTokens ?? 0, costUsd: r.costUsd ?? 0, parentRunId: r.parentRunId ?? undefined } : undefined;
       },
+      async running() {
+        const rows = await db.select().from(t.runs).where(eq(t.runs.status, "running"));
+        return rows.map((r) => ({ id: r.id, agentId: r.agentId, provider: r.provider ?? undefined, modelId: r.modelId ?? undefined, prompt: r.prompt, status: "running" as const, startedAt: r.startedAt.toISOString(), parentRunId: r.parentRunId ?? undefined }));
+      },
     },
     activity: {
       async add(e) {

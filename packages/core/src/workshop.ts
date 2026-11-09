@@ -49,6 +49,9 @@ export interface WorkshopOptions {
   /** The checks a change must pass before it can be submitted; default: build, typecheck and tests of every package. */
   verify?: (dir: string) => Promise<{ ok: boolean; report: string }>;
   now?: () => Date;
+  /** How long a ship waits for agents mid-run before restarting HQ (default 25 minutes; 0 = don't wait). */
+  waitForRunsMs?: number;
+  pollMs?: number;
 }
 export interface WorkshopState { dir: string; branch: string; base: string }
 export interface ShipRecord { at: string; sha: string; title: string; approvalId?: string; previous?: string; status: "shipping" | "done" | "rolled-back" | "failed"; note?: string }
@@ -223,11 +226,20 @@ export class Workshop {
     const cmd = this.opts.deployCmd ?? "sudo -n /usr/local/bin/jarvis-deploy";
     const [bin, ...args] = cmd.split(" ");
     // Detached: the deploy restarts this very process.
-    const p = spawn(bin!, args, { cwd: this.opts.appDir, detached: true, stdio: "ignore", env: { ...process.env, JARVIS_SHIP_SHA: sha } });
-    p.on("error", () => undefined);
-    p.unref();
-    return `Pushed ${sha.slice(0, 7)} to ${branch}; HQ is rebuilding and will restart in two or three minutes. If it doesn't come back up, the deploy rolls back to ${previous.slice(0, 7)} on its own and I'll say so.`;
+    const start = () => { const p = spawn(bin!, args, { cwd: this.opts.appDir, detached: true, stdio: "ignore", env: { ...process.env, JARVIS_SHIP_SHA: sha } }); p.on("error", () => undefined); p.unref(); };
+    // The restart would cut off any agent mid-run (Einstein's other task, a lead's routine), so wait for them first,
+    // up to WAIT_FOR_RUNS_MS; the ship record already says this commit is going out.
+    const busy = (await store.agentState.all()).filter((s) => s.status === "working").map((s) => s.id);
+    if (!busy.length || this.opts.waitForRunsMs === 0) { start(); return `Pushed ${sha.slice(0, 7)} to ${branch}; HQ is rebuilding and will restart in two or three minutes. If it doesn't come back up, the deploy rolls back to ${previous.slice(0, 7)} on its own and I'll say so.`; }
+    const limit = Date.now() + (this.opts.waitForRunsMs ?? Workshop.WAIT_FOR_RUNS_MS);
+    const poll = async () => {
+      const still = (await store.agentState.all().catch(() => [])).filter((s) => s.status === "working");
+      if (!still.length || Date.now() >= limit) start(); else setTimeout(() => void poll(), this.opts.pollMs ?? 15_000);
+    };
+    setTimeout(() => void poll(), this.opts.pollMs ?? 15_000);
+    return `Pushed ${sha.slice(0, 7)} to ${branch}. ${busy.length === 1 ? `${busy[0]} is` : `${busy.join(", ")} are`} mid-run, so the restart waits for that to finish (up to ${Math.round((this.opts.waitForRunsMs ?? Workshop.WAIT_FOR_RUNS_MS) / 60_000)} minutes); then HQ rebuilds and restarts, and rolls back to ${previous.slice(0, 7)} on its own if it doesn't come back up.`;
   }
+  static WAIT_FOR_RUNS_MS = 25 * 60_000;
 
   /** On boot: read the deploy script's verdict for a ship that was in flight, revert the branch if it rolled back. */
   async finish(store: Store): Promise<{ record: ShipRecord; message: string } | undefined> {
