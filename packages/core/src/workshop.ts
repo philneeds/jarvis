@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "./store/types.js";
@@ -81,16 +82,26 @@ export class Workshop {
    * busy and works without code changes; a claim older than LOCK_MS is treated as abandoned.
    */
   static LOCK_MS = 90 * 60_000;
-  private inUse?: { task: string; at: number };
-  claim(task: string) {
+  private inUse?: { id: string; task: string; at: number };
+  private heldBy(u: { task: string; at: number }) { return `the workshop is in use by another run of yours since ${new Date(u.at).toISOString().slice(11, 16)} UTC ("${u.task.replace(/\s+/g, " ").slice(0, 80)}")`; }
+  /** Take the workshop for one run. Returns the claim that run shows to use the workshop tools and to give it back. */
+  claim(task: string): string {
     const now = (this.opts.now?.() ?? new Date()).getTime();
-    if (this.inUse && now - this.inUse.at < Workshop.LOCK_MS) {
-      const since = new Date(this.inUse.at).toISOString().slice(11, 16);
-      throw new Error(`the workshop is in use by another run of yours since ${since} UTC ("${this.inUse.task.replace(/\s+/g, " ").slice(0, 80)}"); it frees up when that run ends`);
-    }
-    this.inUse = { task, at: now };
+    if (this.inUse && now - this.inUse.at < Workshop.LOCK_MS) throw new Error(`${this.heldBy(this.inUse)}; it frees up when that run ends`);
+    const id = randomUUID();
+    this.inUse = { id, task, at: now };
+    return id;
   }
-  release() { this.inUse = undefined; }
+  /** Does this claim hold the workshop right now? A run that was refused, or whose stale claim was taken over, doesn't. */
+  holds(claim?: string): boolean { return !!claim && this.inUse?.id === claim; }
+  /** Why a run with this claim can't use the workshop; nothing when it holds it. */
+  refusal(claim?: string): string | undefined {
+    if (this.holds(claim)) return undefined;
+    if (!this.inUse) return "this run has no workshop open, so there is nothing of yours to show, check or submit";
+    return `${this.heldBy(this.inUse)}, and what is in it is that run's work, not this one's${claim ? " (this run's claim went stale and was taken over)" : ""}`;
+  }
+  /** Give the workshop back. Only the run that holds it can: a run that outlived its claim doesn't free the next run's. */
+  release(claim: string) { if (this.holds(claim)) this.inUse = undefined; }
   get busy(): { task: string; at: string } | undefined { return this.inUse ? { task: this.inUse.task, at: new Date(this.inUse.at).toISOString() } : undefined; }
 
   private git(args: string[], cwd = this.opts.dir, env?: Record<string, string>) { return this.run("git", args, { cwd, env, timeoutMs: 120_000 }); }
@@ -116,10 +127,10 @@ export class Workshop {
   }
 
   /** A clean branch off the deploy branch, dependencies installed; ready for Einstein to work in. */
-  async prepare(task: string): Promise<WorkshopState> {
-    this.claim(task);
-    try { return await this.prepareUnlocked(task); }
-    catch (e) { this.release(); throw e; }
+  async prepare(task: string): Promise<WorkshopState & { claim: string }> {
+    const claim = this.claim(task);
+    try { return { ...(await this.prepareUnlocked(task)), claim }; }
+    catch (e) { this.release(claim); throw e; }
   }
   private async prepareUnlocked(task: string): Promise<WorkshopState> {
     const { branch, remote } = await this.target();
@@ -352,27 +363,35 @@ When the change is ready: call workshop_verify (build, typecheck, tests across p
 export const GUARDRAIL_FILES = /^(packages\/core\/src\/workshop\.ts|packages\/core\/src\/router\/claude\.ts|packages\/core\/src\/jarvis\/prompts\.ts|packages\/core\/src\/jarvis\/orchestrator\.ts|packages\/core\/src\/trading\/|packages\/core\/src\/registry\/charters\.ts|deploy\/|apps\/server\/src\/auth\.ts|apps\/server\/src\/index\.ts)/;
 
 export function workshopTools(w: Workshop, deps: WorkshopToolDeps = {}): ToolDef[] {
+  // The folder is shared, so these three work only for the run that holds the workshop. A run that was told it is busy
+  // would otherwise read, test and commit (git add -A) the other run's files as its own.
+  const refused = (ctx: { workshopClaim?: string }, what: string) => { const why = w.refusal(ctx?.workshopClaim); return why ? `${what}: ${why}. You can't change code this run; say so and work with the tools you have.` : undefined; };
   return [
     defineTool({
       name: "workshop_status",
       description: "Your workshop: the branch, the files changed so far and the diff.",
       schema: {},
-      handler: async () => { try { const s = await w.status(); return s.files.length ? `Branch ${s.branch}\n${s.stat}\n\n${s.diff}` : `Branch ${s.branch}: no changes yet.`; } catch (e) { return `Workshop isn't ready: ${(e as Error).message}`; } },
+      handler: async (_args, ctx) => { const no = refused(ctx, "Not shown"); if (no) return no; try { const s = await w.status(); return s.files.length ? `Branch ${s.branch}\n${s.stat}\n\n${s.diff}` : `Branch ${s.branch}: no changes yet.`; } catch (e) { return `Workshop isn't ready: ${(e as Error).message}`; } },
     }),
     defineTool({
       name: "workshop_verify",
       description: "Build, typecheck and run the tests of every package in the workshop (a few minutes). Fix what's red before submitting.",
       schema: {},
-      handler: async () => { try { const v = await w.verify(); return `${v.ok ? "ALL GREEN" : "RED"}\n${v.report}`; } catch (e) { return `Verify failed to run: ${(e as Error).message}`; } },
+      handler: async (_args, ctx) => { const no = refused(ctx, "Not run"); if (no) return no; try { const v = await w.verify(); return `${v.ok ? "ALL GREEN" : "RED"}\n${v.report}`; } catch (e) { return `Verify failed to run: ${(e as Error).message}`; } },
     }),
     defineTool({
       name: "workshop_submit",
       description: "Commit the change and get the approval block for Phil. Runs the checks first; a red check returns the failures instead. Put the returned block in your reply exactly.",
       schema: { title: z.string().min(8).max(120).describe("one line, imperative, what the change does"), why: z.string().min(10).max(2000).describe("why, what Phil will notice, and anything he must do (a setting, a key)") },
-      handler: async ({ title, why }) => {
+      handler: async ({ title, why }, ctx) => {
+        const no = refused(ctx, "Not submitted");
+        if (no) return no;
         try {
           const v = await w.verify();
           if (!v.ok) return `Not submitted: the checks are red. Fix these, then submit again.\n${v.report}`;
+          // The checks take minutes; the workshop must still be this run's when the commit is made.
+          const lost = refused(ctx, "Not submitted");
+          if (lost) return lost;
           const sha = await w.commit(title);
           if (!sha) return "Nothing to submit: the workshop has no changes.";
           const d = await w.describe(sha);

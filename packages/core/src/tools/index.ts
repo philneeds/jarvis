@@ -19,6 +19,8 @@ export interface ToolDef<S extends z.ZodRawShape = z.ZodRawShape> {
 export interface ToolContext {
   store: Store;
   agentId: string;
+  /** Einstein's claim on the workshop for this run; the workshop tools refuse a run without the current one. */
+  workshopClaim?: string;
 }
 
 /** Keeps each tool's argument types while storing them in one list. */

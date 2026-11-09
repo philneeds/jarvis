@@ -394,9 +394,11 @@ export class Jarvis {
     // Einstein's workshop: a fresh branch of the code for this task, with the file and shell tools inside it.
     let workspace: import("../router/types.js").Workspace | undefined;
     let workshopHint = "";
+    let workshopClaim: string | undefined;
     if (CHARTERS[agent.id]?.workshop && this.workshop) {
       try {
         const w = await this.workshop.prepare(task);
+        workshopClaim = w.claim;
         workspace = { dir: w.dir, guard: workshopGuard(w.dir, process.cwd()) };
         workshopHint = `\n\n${WORKSHOP_HINT(w.dir, w.branch, w.base)}`;
       } catch (e) { workshopHint = `\n\nYour workshop couldn't be opened (${(e as Error).message.slice(0, 200)}), so you can't change code this run; say so and diagnose with the tools you have.`; }
@@ -408,8 +410,8 @@ export class Jarvis {
     const dataImages = cfg.tools.includes("sales_data") ? await recentDataImages(this.store, agent.venture) : [];
     const images = await imageInputs([...(this.convo.getStore()?.images ?? []), ...dataImages]);
     let r: Awaited<ReturnType<ModelRouter["run"]>>;
-    try { r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id }, onDelta: this.streamer(agent.id), images, workspace }); }
-    finally { if (workspace) this.workshop?.release(); } // the workshop is free for the next run once this one's tools are done
+    try { r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id, workshopClaim }, onDelta: this.streamer(agent.id), images, workspace }); }
+    finally { if (workshopClaim) this.workshop?.release(workshopClaim); } // the workshop is free for the next run once this one's tools are done; only this run's own claim is given back
     if (r.blocked) return r;
     if (opts.noBlocks) return r; // the caller reads the reply itself (approval Q&A)
     const { text: said, approvals, remember, metrics, records, handoffs, attention, slides } = extractBlocks(r.text);
