@@ -72,24 +72,6 @@ export class Workshop {
   get dir() { return this.opts.dir; }
   get current() { return this.state; }
 
-  /**
-   * One run at a time. Two of Einstein's runs in the same workshop would check out each other's branches and sweep
-   * each other's uncommitted files into their commits (it happened on Nov 7). The second run is told the workshop is
-   * busy and works without code changes; a claim older than LOCK_MS is treated as abandoned.
-   */
-  static LOCK_MS = 90 * 60_000;
-  private inUse?: { task: string; at: number };
-  claim(task: string) {
-    const now = (this.opts.now?.() ?? new Date()).getTime();
-    if (this.inUse && now - this.inUse.at < Workshop.LOCK_MS) {
-      const since = new Date(this.inUse.at).toISOString().slice(11, 16);
-      throw new Error(`the workshop is in use by another run of yours since ${since} UTC ("${this.inUse.task.replace(/\s+/g, " ").slice(0, 80)}"); it frees up when that run ends`);
-    }
-    this.inUse = { task, at: now };
-  }
-  release() { this.inUse = undefined; }
-  get busy(): { task: string; at: string } | undefined { return this.inUse ? { task: this.inUse.task, at: new Date(this.inUse.at).toISOString() } : undefined; }
-
   private git(args: string[], cwd = this.opts.dir, env?: Record<string, string>) { return this.run("git", args, { cwd, env, timeoutMs: 120_000 }); }
   private async must(args: string[], cwd = this.opts.dir, env?: Record<string, string>) {
     const r = await this.git(args, cwd, env);
@@ -114,11 +96,6 @@ export class Workshop {
 
   /** A clean branch off the deploy branch, dependencies installed; ready for Einstein to work in. */
   async prepare(task: string): Promise<WorkshopState> {
-    this.claim(task);
-    try { return await this.prepareUnlocked(task); }
-    catch (e) { this.release(); throw e; }
-  }
-  private async prepareUnlocked(task: string): Promise<WorkshopState> {
     const { branch, remote } = await this.target();
     const dir = this.opts.dir;
     const exists = await fs.stat(path.join(dir, ".git")).then(() => true).catch(() => false);
