@@ -14,6 +14,7 @@ export { Watchers, WATCHERS, WATCH_STATE_KEY, inQuietHours, ghlInbound, fundingE
 export * from "./uploads.js";
 export * from "./health.js";
 export * from "./xread.js";
+export * from "./video.js";
 export * from "./decks.js";
 export * from "./hyperliquid.js";
 export * from "./lookup.js";

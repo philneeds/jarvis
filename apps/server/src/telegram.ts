@@ -137,13 +137,28 @@ export class TelegramBot {
     // forwarded from another app (which arrives as a document with an audio type).
     const audioDoc = msg.document?.mime_type?.startsWith("audio/") ? msg.document : undefined;
     const voice = msg.voice ?? msg.audio ?? msg.video_note ?? audioDoc;
-    const doc = !imageFile && !audioDoc && msg.document ? msg.document : undefined;
-    const other = msg.sticker ? "sticker" : msg.video ? "video" : msg.animation ? "GIF" : msg.location ? "location" : msg.contact ? "contact card" : msg.poll ? "poll" : undefined;
-    if (!msg.text && !imageFile && !doc && !voice && !other) return;
+    // A video (a saved reel, a screen recording), sent as a video or as a file; a GIF also arrives as an mp4 document, and isn't one.
+    const video = msg.animation ? undefined : msg.video ?? (msg.document?.mime_type?.startsWith("video/") ? msg.document : undefined);
+    const doc = !imageFile && !audioDoc && !video && !msg.animation && msg.document ? msg.document : undefined;
+    const other = msg.sticker ? "sticker" : msg.animation ? "GIF" : msg.location ? "location" : msg.contact ? "contact card" : msg.poll ? "poll" : undefined;
+    if (!msg.text && !imageFile && !doc && !voice && !video && !other) return;
     if (String(msg.chat.id) !== this.opts.chatId) { await this.api("sendMessage", { chat_id: msg.chat.id, text: "This is Phil's Jarvis. Not for you." }).catch(() => undefined); return; }
-    if (!msg.text && !imageFile && !doc && !voice) {
+    if (!msg.text && !imageFile && !doc && !voice && !video) {
       // Said plainly, rather than dropped: Phil once sent a voice memo and heard nothing back.
-      await this.send(`I can't read a ${other} yet. Send it as text, a voice note, a photo or a file.`);
+      await this.send(`I can't read a ${other} yet. Send it as text, a voice note, a photo, a video or a file.`);
+      return;
+    }
+    if (video) {
+      // HQ has it watched (what is said, what is shown, on-screen text) and Jarvis answers with that in hand.
+      const missing = this.jarvis.videoMissing();
+      if (missing) { await this.send(`I can't watch videos yet. ${missing}`); return; }
+      if ((video.file_size ?? 0) > 20 * 1024 * 1024) { await this.send("That video is over 20 MB, the most Telegram lets me download. Send a shorter clip, or trim it first."); return; }
+      await this.send("Got the video. Watching it now; about a minute.");
+      try {
+        const { data } = await this.download(video.file_id);
+        const context = await this.jarvis.watchFile(data, { name: video.file_name, mime: video.mime_type });
+        await this.jarvis.submit(msg.caption?.trim() || "What's in this video?", { channel: "telegram", context });
+      } catch (e) { await this.send(`I couldn't watch that video: ${(e as Error).message}`); }
       return;
     }
     if (voice) {
@@ -200,6 +215,6 @@ export class TelegramBot {
 
 export interface Update {
   update_id: number;
-  message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string; caption?: string; photo?: { file_id: string; width: number; height: number; file_size?: number }[]; document?: { file_id: string; mime_type?: string; file_size?: number; file_name?: string }; voice?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; audio?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; video_note?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; sticker?: { file_id: string; emoji?: string }; video?: { file_id: string }; animation?: { file_id: string }; location?: { latitude: number; longitude: number }; contact?: { phone_number: string }; poll?: { id: string } };
+  message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string; caption?: string; photo?: { file_id: string; width: number; height: number; file_size?: number }[]; document?: { file_id: string; mime_type?: string; file_size?: number; file_name?: string }; voice?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; audio?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; video_note?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; sticker?: { file_id: string; emoji?: string }; video?: { file_id: string; mime_type?: string; duration?: number; file_size?: number; file_name?: string }; animation?: { file_id: string }; location?: { latitude: number; longitude: number }; contact?: { phone_number: string }; poll?: { id: string } };
   callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number } } };
 }

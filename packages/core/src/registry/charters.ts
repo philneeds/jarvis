@@ -363,6 +363,8 @@ for (const [id, s] of Object.entries(SOURCES)) {
   if (s.tools) c.tools = [...new Set([...(c.tools ?? []), ...s.tools])];
 }
 for (const [id, qs] of Object.entries(QUESTIONS)) if (CHARTERS[id]) CHARTERS[id].open = qs;
+/** One shared video reader: every agent that has tools can have a YouTube video its task links to watched. */
+for (const c of Object.values(CHARTERS)) if (c.tools?.length) c.tools = [...new Set([...c.tools, "video_analyze"])];
 
 /** The charter as a prompt section. Phil's own brief, when he filled it in, is shown after it and wins. */
 export function charterText(id: string, name: (id: string) => string): string {
