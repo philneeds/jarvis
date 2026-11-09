@@ -42,15 +42,16 @@ log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
 log "Packages"
 # ffmpeg speeds up Jarvis's spoken replies on Telegram past ElevenLabs's 1.2x.
-apt-get install -y -qq ffmpeg >/dev/null 2>&1 || true
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq curl git ca-certificates gnupg debian-keyring debian-archive-keyring apt-transport-https postgresql postgresql-contrib ufw >/dev/null
+APT="apt-get -o DPkg::Lock::Timeout=600"
+$APT install -y -qq ffmpeg >/dev/null 2>&1 || true
+$APT update -qq
+$APT install -y -qq curl git ca-certificates gnupg debian-keyring debian-archive-keyring apt-transport-https postgresql postgresql-contrib ufw >/dev/null
 
 if ! command -v node >/dev/null || [[ "$(node -v)" != v22* ]]; then
   log "Node 22"
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
-  apt-get install -y -qq nodejs >/dev/null
+  $APT install -y -qq nodejs >/dev/null
 fi
 command -v pnpm >/dev/null || npm install -g pnpm@10 >/dev/null
 command -v claude >/dev/null || { log "Claude Code"; npm install -g @anthropic-ai/claude-code >/dev/null; }
@@ -60,7 +61,7 @@ if ! command -v caddy >/dev/null; then
   log "Caddy"
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
-  apt-get update -qq && apt-get install -y -qq caddy >/dev/null
+  $APT update -qq && $APT install -y -qq caddy >/dev/null
 fi
 
 log "User and checkout"
@@ -136,6 +137,12 @@ if [[ -z "${JARVIS_DEPLOY_DETACHED:-}" ]] && command -v systemd-run >/dev/null; 
   exec systemd-run --quiet --collect --unit "jarvis-deploy-$(date +%s)" --setenv=JARVIS_DEPLOY_DETACHED=1 /usr/local/bin/jarvis-deploy
 fi
 APP=/opt/jarvis; OUT=/var/lib/jarvis/last-deploy.json; LOG=/var/log/jarvis-deploy.log
+# One deploy at a time: approvals given close together queue here instead of colliding over apt and the Next build.
+exec 9>/var/lock/jarvis-deploy.lock
+if ! flock -w 2400 9; then
+  echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) gave up: another deploy held the lock for 40 minutes" >> "$LOG"
+  printf '{"at":"%s","ok":false,"sha":"","previous":"","rolledBackTo":"","error":"another deploy held the lock for 40 minutes"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$OUT"; exit 1
+fi
 BRANCH=$(sudo -u jarvis git -C "$APP" rev-parse --abbrev-ref HEAD)
 PREV=$(sudo -u jarvis git -C "$APP" rev-parse HEAD)
 START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
