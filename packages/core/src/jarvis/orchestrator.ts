@@ -1213,7 +1213,7 @@ export class Jarvis {
     const warm = usage.plans.some((p) => p.used >= 0.7);
     let level: SystemStatus["level"] = "green", text = "all agents running";
     if (kill.all) { level = "red"; text = "whole web paused"; }
-    else if (errors >= 3 || hot) { level = "orange"; text = hot ? "a plan is near its cap" : `${errors} agents in error`; }
+    else if (errors >= 3 || hot) { level = "orange"; text = hot ? (usage.plans.find((p) => /limit reached/.test(p.window))?.window ?? "a plan is near its cap") : `${errors} agents in error`; }
     else if (errors > 0 || warm || kill.trading || kill.agents.length) { level = "yellow"; text = kill.trading ? "trading paused" : errors ? `${errors} agent in error` : warm ? "scouts backing off" : `${kill.agents.length} agent(s) paused`; }
     return { level, text, killSwitch: kill, phase, at: new Date().toISOString() };
   }

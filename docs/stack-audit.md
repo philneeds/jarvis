@@ -39,7 +39,7 @@ So X reads now go through xAI's API for every model, once `XAI_API_KEY` is in `/
 1. **Put the xAI key in** (console.x.ai, load $10–20 of credit). This is the only change that turns X on. Budget `XAI_MONTHLY_USD=30`; HQ holds scouts at 70% and research at 90% of it.
 2. **Move the 15 Grok agents onto Claude Sonnet** with one line in `.env`: `GROK_AGENTS_MODEL=claude-sonnet`. They gain HQ's tools (X search, memory, GitHub, Discord, Hyperliquid) directly instead of through pre-fetched blocks, lose the five-minute timeouts, and cost about $15/mo of the Claude credit at their current schedules. Per-agent overrides in HQ still win, so Boo can stay on Grok (via the API) if his X voice matters.
 3. **Then drop SuperGrok** ($30/mo), unless Phil wants Grok Bot in the X app for himself. If he keeps it, HQ no longer depends on it.
-4. **Confirm the Claude tier** and set `CLAUDE_MONTHLY_USD` to its credit (100 for Max 5x, 200 for Max 20x). The Usage page now shows dollars spent against it, per agent.
+4. **The Claude plan has no dollar pool when HQ is signed in with it** (Phil is on Max 10x): the plan has rolling five-hour and weekly windows, and HQ now holds routines only while the plan has said "limit reached", until its reset time. The Usage page shows spend at list price for information.
 
 Alternative if the Claude credit is Max 5x and runs tight: `GROK_MODE=api` instead of step 2 keeps the scouts on Grok through the xAI API (about $20/mo in tokens on the xAI budget) with the same reliability gain. The Grok API path has no HQ tools, so Sonnet is the better choice when the credit allows.
 

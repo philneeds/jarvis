@@ -4,7 +4,7 @@ import { MODELS, type ModelSpec } from "../models.js";
 import type { AgentDef, ModelKey } from "../registry/agents.js";
 import { getAgent } from "../registry/index.js";
 import type { Store } from "../store/types.js";
-import { allowedToRun, usageSummary } from "../usage/caps.js";
+import { allowedToRun, usageSummary, noteClaudeLimit } from "../usage/caps.js";
 import { claudeAgentSdkProvider, claudeApiProvider, isUsageLimit } from "./claude.js";
 import { grokApiProvider, grokCliProvider } from "./grok.js";
 import { mockProvider } from "./mock.js";
@@ -176,6 +176,11 @@ export class ModelRouter {
           errors.push(`${p.id}${m !== model ? ` on ${m.label}` : ""}: ${msg}`);
           console.warn(`[run] ${agent.id} failed on ${p.id} (${m.modelId}): ${msg.slice(0, 300)}`);
           if (opts.signal?.aborted) break;
+          // The plan said stop: remember until when, so scheduled work waits instead of failing run after run.
+          if (model.provider === "claude" && isUsageLimit(msg)) {
+            const lim = await noteClaudeLimit(this.store, msg).catch(() => undefined);
+            if (lim) await this.log(agent.id, "system", `Claude plan limit reached; routines wait until ${new Date(lim.until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}. Phil's own asks still run.`, runId, { error: msg.slice(0, 300) });
+          }
           const fb = m === model && model.limitFallback && isUsageLimit(msg) ? MODELS[model.limitFallback] : undefined;
           if (!fb || fb.provider !== model.provider) break;
           await this.log(agent.id, "system", `${agent.name} hit the ${model.label} usage limit; retrying on ${fb.label}`, runId, { error: msg.slice(0, 300) });

@@ -51,7 +51,7 @@ Einstein is HQ's engineer. Ask Jarvis for a change or a fix in plain words and J
 
 ### Usage rationing
 
-Work is rationed by priority against each pool, so a busy month degrades gracefully instead of stopping or overspending. The Claude pool is the plan's monthly Agent SDK credit in dollars (`CLAUDE_MONTHLY_USD`: Pro 20, Max 5x 100, Max 20x 200); the xAI pool is a monthly budget for X searches and, with `GROK_MODE=api`, Grok runs (`XAI_MONTHLY_USD`); with `GROK_MODE=cli` the Grok CLI has a weekly run pool (`GROK_WEEKLY_RUNS`). Every run is costed at list price so Usage shows dollars per agent.
+Work is rationed by priority against each pool, so a busy month degrades gracefully instead of stopping or overspending. Signed in with the Claude plan (the default) there is no dollar pool: the plan has rolling five-hour and weekly windows, and when a run is refused with "limit reached, resets at …" HQ holds room and pause-first work until that time while Phil's own asks still run. `CLAUDE_MONTHLY_USD` applies only with an API key from a linked Console account, where the plan's monthly API credit is the pool; the xAI pool is a monthly budget for X searches and, with `GROK_MODE=api`, Grok runs (`XAI_MONTHLY_USD`); with `GROK_MODE=cli` the Grok CLI has a weekly run pool (`GROK_WEEKLY_RUNS`). Every run is costed at list price so Usage shows dollars per agent.
 
 - **Always run:** Jarvis, Stella's team, anything Phil asks for directly.
 - **Run when there's room:** briefs, holdings reviews, research. Hold at 90% of a pool.

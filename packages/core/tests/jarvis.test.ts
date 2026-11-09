@@ -915,7 +915,7 @@ test("usage pools are dollars against monthly credits: Claude's Agent SDK credit
     const row = (plan: string, agentId: string, costUsd: number, at = "2026-11-10T10:00:00Z") => store.usage.add({ id: `${plan}-${agentId}-${Math.random()}`, at, plan, provider: plan, agentId, inputTokens: 1000, outputTokens: 100, costUsd });
     await row("claude", "jarvis", 60); await row("claude", "stella", 25); await row("claude", "oscar", 5, "2026-10-28T10:00:00Z"); // last month: not counted
     await row("xai", "lucas", 2.5); await row("supergrok", "pentoshi", 0);
-    delete process.env.GROK_MODE; delete process.env.XAI_API_KEY;
+    delete process.env.GROK_MODE; delete process.env.XAI_API_KEY; process.env.CLAUDE_MONTHLY_USD = "100"; // an API-key setup with the plan's credit
     let s = await usageSummary(store, now);
     const claude = s.plans.find((p) => p.plan === "claude")!;
     assert.equal(claude.costUsd, 85); assert.ok(Math.abs(claude.used - 0.85) < 1e-9, String(claude.used));
@@ -939,6 +939,38 @@ test("usage pools are dollars against monthly credits: Claude's Agent SDK credit
   } finally {
     if (was.mode !== undefined) process.env.GROK_MODE = was.mode; else delete process.env.GROK_MODE;
     if (was.key !== undefined) process.env.XAI_API_KEY = was.key;
-    if (was.usd !== undefined) process.env.CLAUDE_MONTHLY_USD = was.usd;
+    if (was.usd !== undefined) process.env.CLAUDE_MONTHLY_USD = was.usd; else delete process.env.CLAUDE_MONTHLY_USD;
   }
+});
+
+test("signed in with the plan there is no dollar pool: routines wait only after the plan says 'limit reached', until its reset time", async () => {
+  const { usageSummary, allowedToRun, noteClaudeLimit, parseResetTime, getAgent } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const was = process.env.CLAUDE_MONTHLY_USD; delete process.env.CLAUDE_MONTHLY_USD;
+  try {
+    const now = new Date("2026-11-09T15:00:00");
+    await store.usage.add({ id: "c1", at: "2026-11-09T10:00:00Z", plan: "claude", provider: "claude:agent-sdk", agentId: "einstein", inputTokens: 1000, outputTokens: 100, costUsd: 57 });
+    let s = await usageSummary(store, now);
+    let claude = s.plans.find((p) => p.plan === "claude")!;
+    assert.equal(claude.used, 0, "spend alone never throttles");
+    assert.match(claude.window, /plan windows .*\$57\.00 this week at list price/);
+    assert.equal(allowedToRun(getAgent("pentoshi")!, s, false).ok, true);
+    // The plan refuses a run and names the reset.
+    const lim = await noteClaudeLimit(store, "You've hit your usage limit · resets 4:40pm", now);
+    assert.equal(new Date(lim.until).getHours(), 16); assert.equal(new Date(lim.until).getMinutes(), 40);
+    s = await usageSummary(store, now);
+    claude = s.plans.find((p) => p.plan === "claude")!;
+    assert.equal(claude.used, 1);
+    assert.match(claude.window, /plan limit reached; resets 4:40 PM/);
+    assert.match(allowedToRun(getAgent("stevon")!, s, false).reason!, /plan limit reached/);
+    assert.equal(allowedToRun(getAgent("stevon")!, s, true).ok, true, "Phil's asks still run");
+    assert.equal(allowedToRun(getAgent("karol")!, s, false).ok, true, "always-tier still runs");
+    // After the reset time, everything is free again without anyone clearing it.
+    s = await usageSummary(store, new Date("2026-11-09T16:41:00"));
+    assert.equal(s.plans.find((p) => p.plan === "claude")!.used, 0);
+    // Reset-time parsing.
+    assert.equal(parseResetTime("rate limited, try again in 30 minutes", now).getTime(), now.getTime() + 30 * 60_000);
+    assert.equal(parseResetTime("limit reached, resets 2am", now).getDate(), 10, "a clock time already past today means tomorrow");
+    assert.equal(parseResetTime("429 too many requests", now).getTime(), now.getTime() + 60 * 60_000, "no time given: an hour");
+  } finally { if (was !== undefined) process.env.CLAUDE_MONTHLY_USD = was; }
 });
