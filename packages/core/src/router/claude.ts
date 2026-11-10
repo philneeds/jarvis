@@ -19,6 +19,27 @@ export function isUsageLimit(message: string): boolean {
 }
 
 /**
+ * Tokens a Claude Agent SDK run really consumed, from its result message. The SDK's `usage` is the main loop's
+ * last turn only; `modelUsage` has every model call of the run, with the cached prompt (the system prompt, tools
+ * and transcript re-read on every turn) counted apart as cache reads and writes. HQ counts those as input, so the
+ * Usage screen shows what the model read, not just the uncached slice: without them a 400-second workshop run
+ * reported about 100 input tokens.
+ */
+export function sdkTokens(msg: {
+  usage?: { input_tokens?: number; output_tokens?: number };
+  modelUsage?: Record<string, { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }>;
+}): { input: number; output: number } {
+  const models = Object.values(msg.modelUsage ?? {});
+  if (models.length) {
+    return {
+      input: models.reduce((n, m) => n + (m.inputTokens ?? 0) + (m.cacheReadInputTokens ?? 0) + (m.cacheCreationInputTokens ?? 0), 0),
+      output: models.reduce((n, m) => n + (m.outputTokens ?? 0), 0),
+    };
+  }
+  return { input: msg.usage?.input_tokens ?? 0, output: msg.usage?.output_tokens ?? 0 };
+}
+
+/**
  * Claude provider. Two modes:
  *  - "agent-sdk" (default): runs through the Claude Agent SDK, which uses the Claude Code sign-in on
  *    Phil's plan. Works wherever `claude` is logged in. Set CLAUDE_MODE=agent-sdk.
@@ -116,9 +137,7 @@ export function claudeAgentSdkProvider(): Provider {
             } else {
               error = error ?? msg.subtype;
             }
-            const u = (msg as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
-            input = u?.input_tokens ?? 0;
-            output = u?.output_tokens ?? 0;
+            ({ input, output } = sdkTokens(msg as Parameters<typeof sdkTokens>[0]));
             cost = (msg as { total_cost_usd?: number }).total_cost_usd ?? 0;
           }
         }
