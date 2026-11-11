@@ -96,7 +96,10 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
   onHeardRef.current = opts.onHeard;
 
   useEffect(() => {
-    fetch("/api/tts/status", { credentials: "include" }).then((r) => r.json()).then((j) => setServerTts(!!j.available)).catch(() => setServerTts(false));
+    fetch("/api/tts/status", { credentials: "include" }).then((r) => r.json()).then((j: { available?: boolean; lastFailure?: { detail: string } }) => {
+      setServerTts(!!j.available);
+      if (j.lastFailure) setError(`${j.lastFailure.detail}. Using this device's voice for now.`);
+    }).catch(() => setServerTts(false));
   }, []);
 
   const ctx = () => ctxRef.current ?? (ctxRef.current = new AudioContext());
@@ -149,7 +152,11 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
 
   const fetchTts = useCallback(async (text: string): Promise<Blob | null> => {
     const res = await fetch("/api/tts", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
-    return res.ok ? res.blob() : null;
+    if (res.ok) return res.blob();
+    // Say why the voice changed instead of switching to the browser's voice silently.
+    const j = (await res.json().catch(() => ({}))) as { error?: string };
+    setError(`${(j.error ?? `voice failed: ${res.status}`).replace(/^voice failed: /, "")}. Using this device's voice for now.`);
+    return null;
   }, []);
 
   const playBlob = useCallback(async (blob: Blob) => {
