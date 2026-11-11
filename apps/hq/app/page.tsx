@@ -14,7 +14,7 @@ import { Working } from "@/components/Working";
 import { useLive } from "@/lib/live";
 import { useVoice } from "@/lib/voice";
 import { useClap, type ClapSensitivity } from "@/lib/clap";
-import { PAUSE_LABEL, readPause, savePause, type PauseChoice } from "@/lib/voice";
+import { PAUSE_LABEL, readPause, savePause, type PauseChoice, RATES, rateLabel, readRate, saveRate, type RateChoice } from "@/lib/voice";
 import { api, post, timeAgo } from "@/lib/api";
 import { clip, meaningful, readable } from "@/lib/activity";
 
@@ -74,6 +74,10 @@ export default function HomePage() {
   const [pause, setPause] = useState<PauseChoice>("normal");
   useEffect(() => { setPause(readPause()); }, []);
   const choosePause = (p: PauseChoice) => { setPause(p); savePause(p); };
+  // How fast he talks; read at each spoken reply, so a change applies from the next sentence.
+  const [rate, setRate] = useState<RateChoice>(1);
+  useEffect(() => { setRate(readRate()); }, []);
+  const chooseRate = (r: RateChoice) => { setRate(r); saveRate(r); };
   const [money, setMoney] = useState<{ key: string; value: string }[]>([]);
   const [visual, setVisual] = useState<{ key: string; value: string } | null>(null);
   const [since, setSince] = useState<string>();
@@ -176,6 +180,7 @@ export default function HomePage() {
         )}
         {!voice.conversation && clapOn && <select className="input h-8 w-28 text-[10px] uppercase" aria-label="Clap sensitivity" value={clapSens} onChange={(e) => setSens(e.target.value as ClapSensitivity)}><option value="low">quiet room</option><option value="normal">normal</option><option value="high">big room</option></select>}
         <select className="input h-8 w-28 text-[10px] uppercase" aria-label="Pause before Jarvis answers" title="How long Jarvis waits after you stop talking before he answers" value={pause} onChange={(e) => choosePause(e.target.value as PauseChoice)}>{(Object.keys(PAUSE_LABEL) as PauseChoice[]).map((k) => <option key={k} value={k}>{PAUSE_LABEL[k]}</option>)}</select>
+        <select className="input h-8 w-28 text-[10px] uppercase" aria-label="How fast Jarvis talks" title="How fast Jarvis talks, on this device" value={rate} onChange={(e) => chooseRate(Number(e.target.value) as RateChoice)}>{RATES.map((r) => <option key={r} value={r}>{rateLabel(r)}</option>)}</select>
       </div>
       <Working />
       <Transcript pendingText={heardText ?? (voice.interim || undefined)} />

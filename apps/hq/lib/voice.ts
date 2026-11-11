@@ -77,6 +77,25 @@ export function readPause(): PauseChoice {
 }
 export function savePause(p: PauseChoice) { try { localStorage.setItem("hq.pause", p); } catch { /* ignore */ } }
 
+/**
+ * How fast Jarvis talks, YouTube-style. Remembered per device and used for every spoken reply, the morning brief too.
+ * ElevenLabs renders natively between 0.7x and 1.2x; anything faster is played back faster on top of 1.2x with the
+ * pitch kept. The browser's own voice takes the rate directly.
+ */
+export const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+export type RateChoice = (typeof RATES)[number];
+export const rateLabel = (r: RateChoice) => `speed ${r}x`;
+export function readRate(): RateChoice {
+  try { const v = Number(localStorage.getItem("hq.rate")); if ((RATES as readonly number[]).includes(v)) return v as RateChoice; } catch { /* ignore */ }
+  return 1;
+}
+export function saveRate(r: RateChoice) { try { localStorage.setItem("hq.rate", String(r)); } catch { /* ignore */ } }
+/** Split a rate into ElevenLabs' native speed and the extra playback speed: 1.75x = 1.2 native x ~1.46 playback. */
+export function elevenSpeeds(rate: number): { native: number; playback: number } {
+  const native = Math.min(1.2, Math.max(0.7, rate));
+  return { native, playback: rate / native };
+}
+
 export function useVoice(opts: { onHeard: (text: string) => void | Promise<void> }) {
   const [speaking, setSpeaking] = useState(false);
   const [listening, setListening] = useState(false);
@@ -151,7 +170,7 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
   }, []);
 
   const fetchTts = useCallback(async (text: string): Promise<Blob | null> => {
-    const res = await fetch("/api/tts", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+    const res = await fetch("/api/tts", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, speed: elevenSpeeds(readRate()).native }) });
     if (res.ok) return res.blob();
     // Say why the voice changed instead of switching to the browser's voice silently.
     const j = (await res.json().catch(() => ({}))) as { error?: string };
@@ -161,8 +180,8 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
 
   const playBlob = useCallback(async (blob: Blob) => {
     const audio = new Audio(URL.createObjectURL(blob)); audioRef.current = audio;
-    // ElevenLabs tops out at 1.2x; Phil wants 1.5x, so the rest is playback speed (pitch is kept).
-    audio.playbackRate = Number(process.env.NEXT_PUBLIC_VOICE_PLAYBACK ?? 1.25); audio.preservesPitch = true;
+    // ElevenLabs tops out at 1.2x; above that the rest of the chosen speed is playback speed (pitch is kept).
+    audio.playbackRate = elevenSpeeds(readRate()).playback; audio.preservesPitch = true;
     const c = ctx();
     const src = c.createMediaElementSource(audio); src.connect(c.destination);
     const stop = meter(src, c);
@@ -197,7 +216,8 @@ export function useVoice(opts: { onHeard: (text: string) => void | Promise<void>
       await new Promise<void>((resolve) => {
         const u = new SpeechSynthesisUtterance(text);
         const v = pickVoice(); if (v) u.voice = v;
-        u.rate = 1.5; u.pitch = 0.9;
+        // Natural pitch and the device's chosen speed, so the fallback sounds as close to Jarvis as the device allows.
+        u.rate = readRate(); u.pitch = 1;
         let pulse = 0;
         const timer = setInterval(() => { pulse = (pulse + 1) % 6; setLevel(0.25 + 0.35 * Math.abs(Math.sin(pulse))); }, 120);
         u.onboundary = () => setLevel(0.5 + Math.random() * 0.4);
