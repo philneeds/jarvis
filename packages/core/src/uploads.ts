@@ -44,10 +44,12 @@ export const FILE_MIME = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   csv: "text/csv; charset=utf-8",
   txt: "text/plain; charset=utf-8",
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 } as const;
 export type FileExt = keyof typeof FILE_MIME;
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
-const FILE_ID = /^[0-9a-f-]{36}\.(pptx|xlsx|csv|txt)$/;
+const FILE_ID = /^[0-9a-f-]{36}\.(pptx|xlsx|csv|txt|pdf|docx)$/;
 
 export async function saveFile(buf: Buffer, ext: FileExt): Promise<string> {
   if (!buf.length) throw new Error("empty file");

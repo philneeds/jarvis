@@ -289,12 +289,13 @@ export class Jarvis {
    * Submit a message from Phil and return at once with his message; the work continues in the background and
    * every reply (ack, progress, final) arrives as a chat.message event tagged with replyTo = his message id.
    */
-  async submit(text: string, opts: { channel?: ChatMessage["channel"]; images?: string[]; voice?: boolean; /** What HQ already read for this message (a video Phil sent); it goes to whoever answers, not into the chat. */ context?: string } = {}): Promise<{ message: ChatMessage; done: Promise<ChatMessage[]> }> {
+  async submit(text: string, opts: { channel?: ChatMessage["channel"]; images?: string[]; voice?: boolean; /** What HQ already read for this message (a video or document Phil sent); it goes to whoever answers, not into the chat. */ context?: string; /** Files Phil attached, shown on his message for download. */ files?: { id: string; name: string }[] } = {}): Promise<{ message: ChatMessage; done: Promise<ChatMessage[]> }> {
     const images = opts.images?.slice(0, 4);
-    // A picture on its own is a question too.
-    const trimmed = text.trim() || (images?.length ? "What do you think of this?" : "");
+    const files = opts.files?.slice(0, 5);
+    // A picture or a file on its own is a question too.
+    const trimmed = text.trim() || (files?.length ? `What's in ${files.length === 1 ? "this file" : "these files"}?` : images?.length ? "What do you think of this?" : "");
     if (!trimmed) throw new Error("empty message");
-    const message = await this.say({ role: "phil", text: trimmed, channel: opts.channel ?? "hq", ...(images?.length ? { images } : {}) });
+    const message = await this.say({ role: "phil", text: trimmed, channel: opts.channel ?? "hq", ...(images?.length ? { images } : {}), ...(files?.length ? { files } : {}) });
     const ctx = { channel: opts.channel ?? "hq", replyTo: message.id, images, voice: opts.voice };
     const done = this.convo.run(ctx, async () => {
       // X links: open the posts first, so whoever takes this sees what they say (and their photos).

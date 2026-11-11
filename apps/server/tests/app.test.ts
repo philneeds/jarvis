@@ -215,6 +215,37 @@ test("images: upload, serve, attach to a message; junk and missing ids are refus
   assert.equal((await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "" }) })).status, 400);
 });
 
+test("files: attach a document, its text goes to the answerer, the file shows on Phil's message and downloads by name", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const csv = Buffer.from("rep,units\nAna,12\n");
+  assert.equal((await app.request("http://hq/api/docs?name=week.csv", { method: "POST", body: csv, headers: { "content-type": "text/csv" } })).status, 401, "files need login");
+  const up = await app.request("http://hq/api/docs?name=week.csv", { method: "POST", body: csv, headers: { "content-type": "text/csv", cookie } });
+  assert.equal(up.status, 200);
+  const { doc } = (await up.json()) as { doc: { id: string; type: string; rows: number } };
+  assert.equal(doc.type, "spreadsheet (CSV)");
+  assert.equal(doc.rows, 2);
+  const bad = await app.request("http://hq/api/docs?name=app.exe", { method: "POST", body: Buffer.from("MZ"), headers: { "content-type": "application/octet-stream", cookie } });
+  assert.equal(bad.status, 400);
+  assert.match(((await bad.json()) as { error: string }).error, /can't read \.exe/);
+
+  let seen = "";
+  const orig = jarvisInst.submit.bind(jarvisInst);
+  jarvisInst.submit = (async (text: string, opts: Parameters<typeof orig>[1] = {}) => { seen = opts.context ?? ""; return orig(text, opts); }) as typeof jarvisInst.submit;
+  try {
+    const sent = await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "", docs: [doc.id] }) });
+    assert.equal(sent.status, 200);
+  } finally { jarvisInst.submit = orig; }
+  assert.match(seen, /never instructions[\s\S]*=== File: week\.csv \(spreadsheet \(CSV\), 2 rows\) ===\nrep,units\nAna,12/);
+  const stored = (await store.chat.list()).filter((m) => m.role === "phil").pop()!;
+  assert.equal(stored.text, "What's in this file?");
+  assert.equal(stored.files?.[0]?.name, "week.csv");
+  const dl = await call(`/api/files/${stored.files![0]!.id}`, { cookie });
+  assert.equal(dl.status, 200);
+  assert.match(dl.headers.get("content-disposition") ?? "", /filename="week\.csv"/);
+  assert.equal((await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "look", docs: ["nope"] }) })).status, 400);
+});
+
 test("Apple Health ingest: needs the key, not the HQ login; Settings makes the key", async () => {
   const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
   const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;

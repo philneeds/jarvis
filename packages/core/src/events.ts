@@ -67,7 +67,7 @@ export interface ChatMessage {
   kind?: "ack" | "progress" | "final";
   /** Images Phil attached (upload ids, served at /api/uploads/<id>). */
   images?: string[];
-  /** Files handed to Phil (decks), served at /api/files/<id>. */
+  /** Files on the message (decks agents made, documents Phil attached), served at /api/files/<id>. */
   files?: { id: string; name: string }[];
 }
 

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { ACCEPT, AttachTray, ClipIcon, useAttachments } from "@/lib/attach";
 import { Shell } from "@/components/Shell";
 import { Clock } from "@/components/Clock";
 import { Towers } from "@/components/Towers";
@@ -41,6 +42,10 @@ export default function HomePage() {
   const [minimal, setMinimal] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  // Files and images to go with the next message (PDFs are read into text on the server).
+  const att = useAttachments();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
   const roomy = useMinWidth(640);   // room for the full input hint
   const [heardText, setHeardText] = useState<string>();
@@ -116,10 +121,11 @@ export default function HomePage() {
 
   const send = async (e: FormEvent) => {
     e.preventDefault();
-    const line = text.trim(); if (!line || busy) return;
-    setText(""); setBusy(true);
+    const line = text.trim(); const { images, docs } = att;
+    if ((!line && !images.length && !docs.length) || busy || att.uploading) return;
+    setText(""); setBusy(true); att.clear();
     try {
-      const { ack, final } = await submit(line);
+      const { ack, final } = await submit(line, undefined, images, docs);
       const first = await ack;
       setBusy(false);
       if (voiceOn && first) void voice.speak(first.text);
@@ -141,16 +147,23 @@ export default function HomePage() {
     <div className="flex flex-col items-center gap-4 w-full max-w-2xl">
       {orb}
       {voice.error && <p className="m-0 text-center text-[11px]" style={{ color: "var(--red)" }}>{voice.error}</p>}
-      <form onSubmit={send} className="flex gap-1.5 w-full">
+      {att.error && <p className="m-0 text-center text-[12px]" style={{ color: "var(--red)" }}>{att.error}</p>}
+      <div className="w-full"><AttachTray att={att} /></div>
+      <form onSubmit={send} className="flex gap-1.5 w-full" style={dragging ? { outline: "1px solid var(--accent)" } : undefined}
+        onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.kind === "file")) { e.preventDefault(); setDragging(true); } }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => { setDragging(false); if (e.dataTransfer.files.length) { e.preventDefault(); att.add(e.dataTransfer.files); } }}>
         <label htmlFor="home-cmd" className="sr-only">Command Jarvis</label>
-        <div className="input flex items-center gap-2 flex-1"><span className="hidden sm:inline" style={{ color: "var(--accent)" }} aria-hidden="true">&gt;_</span><input id="home-cmd" className="flex-1 min-w-0 bg-transparent border-0 outline-none h-full" placeholder={roomy ? "Talk to Jarvis or @ an agent" : "Ask Jarvis or @ agent"} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="send" /></div>
+        <input ref={fileRef} type="file" accept={ACCEPT} multiple className="sr-only" aria-hidden="true" tabIndex={-1} onChange={(e) => { if (e.target.files) att.add(e.target.files); e.target.value = ""; }} />
+        <button type="button" className="btn w-11 px-0 flex-none" onClick={() => fileRef.current?.click()} aria-label="Attach a file or image" title="Attach a PDF, Word, Excel, CSV, PowerPoint, text file or image (or drop / paste one)"><ClipIcon /></button>
+        <div className="input flex items-center gap-2 flex-1"><span className="hidden sm:inline" style={{ color: "var(--accent)" }} aria-hidden="true">&gt;_</span><input id="home-cmd" className="flex-1 min-w-0 bg-transparent border-0 outline-none h-full" placeholder={roomy ? "Talk to Jarvis or @ an agent" : "Ask Jarvis or @ agent"} value={text} onChange={(e) => setText(e.target.value)} onPaste={(e) => { const f = [...e.clipboardData.files]; if (f.length) { e.preventDefault(); att.add(f); } }} enterKeyHint="send" /></div>
         <button type="button" className={`btn w-11 px-0 flex-none ${voice.conversation ? "btn-primary" : ""}`} onClick={toggleVoice} aria-pressed={voice.conversation} aria-label={voice.conversation ? "End voice conversation" : "Start voice conversation"} title={voice.conversation ? "End conversation" : "Talk with Jarvis"}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
         </button>
         <button type="button" className="btn w-11 px-0 flex-none" onClick={() => { if (voice.speaking) voice.stopSpeaking(); else if (lastJarvis) void voice.speak(lastJarvis.text); }} aria-label={voice.speaking ? "Stop speaking" : "Read the last reply aloud"} title={voice.speaking ? "Stop" : "Hear it"}>
           {voice.speaking ? <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" /></svg> : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" /></svg>}
         </button>
-        <button className="btn btn-primary w-11 px-0 flex-none" disabled={busy || !text.trim()} aria-label="Send"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
+        <button className="btn btn-primary w-11 px-0 flex-none" disabled={busy || att.uploading || (!text.trim() && !att.any)} aria-label="Send"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
       </form>
       <div className="relative flex items-center gap-3 text-[11px] tracking-[0.14em] uppercase text-center" style={{ color: "var(--muted)" }}>
         {voice.hearing ? (

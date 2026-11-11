@@ -6,7 +6,8 @@ import { fmtTime } from "@/lib/api";
 import type { ChatMessage } from "@/lib/types";
 import { Md } from "./Md";
 import { useVoice } from "@/lib/voice";
-import { imageUrl, uploadImage } from "@/lib/images";
+import { imageUrl } from "@/lib/images";
+import { ACCEPT, AttachTray, ClipIcon, useAttachments } from "@/lib/attach";
 import { Working } from "@/components/Working";
 
 const QUICK = ["/brief", "/status", "/approvals", "/usage", "/pause", "/condense", "/help"];
@@ -28,22 +29,11 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
   const voice = useVoice({ onHeard: async () => undefined });
   const [listening, setListening] = useState(false);
   const [error, setError] = useState<string>();
-  // Images waiting to go with the next message: a local preview until the upload id comes back.
-  const [attached, setAttached] = useState<{ key: string; preview: string; id?: string; failed?: boolean }[]>([]);
+  // Images and files waiting to go with the next message.
+  const att = useAttachments();
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-  const attach = (files: FileList | File[]) => {
-    const imgs = [...files].filter((f) => f.type.startsWith("image/")).slice(0, 4 - attached.length);
-    if (!imgs.length) return;
-    setError(undefined);
-    for (const f of imgs) {
-      const key = Math.random().toString(36).slice(2);
-      setAttached((a) => [...a, { key, preview: URL.createObjectURL(f) }]);
-      uploadImage(f).then((id) => setAttached((a) => a.map((x) => (x.key === key ? { ...x, id } : x))))
-        .catch((e) => { setError((e as Error).message); setAttached((a) => a.map((x) => (x.key === key ? { ...x, failed: true } : x))); });
-    }
-  };
-  const uploading = attached.some((a) => !a.id && !a.failed);
+  const uploading = att.uploading;
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recRef = useRef<Recognition | null>(null);
@@ -84,11 +74,11 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
 
   const send = async (t = text) => {
     const line = t.trim();
-    const images = attached.filter((a) => a.id).map((a) => a.id!);
-    if ((!line && !images.length) || busy || uploading) return;
-    setText(""); setSuggest([]); setBusy(true); setError(undefined); setAttached([]);
+    const { images, docs } = att;
+    if ((!line && !images.length && !docs.length) || busy || uploading) return;
+    setText(""); setSuggest([]); setBusy(true); setError(undefined); att.clear();
     try {
-      const { ack, final } = await submit(line, undefined, images);
+      const { ack, final } = await submit(line, undefined, images, docs);
       // The box frees up as soon as the message is in; Phil can send the next one while this is answered.
       setBusy(false); inputRef.current?.focus();
       const first = await ack;
@@ -183,9 +173,9 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
       </div>
       <div className="px-3 pt-2 empty:hidden"><Working /></div>
       <form onSubmit={onSubmit} className="p-3 flex flex-col gap-2 border-t" style={{ borderColor: dragging ? "var(--accent)" : "var(--line)", background: dragging ? "rgba(60,130,255,0.15)" : "rgba(5,12,32,0.7)" }}
-        onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) { e.preventDefault(); setDragging(true); } }}
+        onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.kind === "file")) { e.preventDefault(); setDragging(true); } }}
         onDragLeave={() => setDragging(false)}
-        onDrop={(e) => { setDragging(false); if (e.dataTransfer.files.length) { e.preventDefault(); attach(e.dataTransfer.files); } }}>
+        onDrop={(e) => { setDragging(false); if (e.dataTransfer.files.length) { e.preventDefault(); att.add(e.dataTransfer.files); } }}>
         {!compact && (
           <div className="flex flex-wrap gap-1.5">
             {QUICK.map((q) => <button key={q} type="button" className="btn btn-sm" onClick={() => (q === "/pause" ? pick(q) : void send(q))}>{q}</button>)}
@@ -196,27 +186,17 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
             {suggest.map((s) => <button key={s} type="button" role="option" aria-selected={false} className="btn btn-sm" onClick={() => pick(s)}>{s.startsWith("/") ? s : `@${s}`}</button>)}
           </div>
         )}
-        {error && <p className="text-[12px]" style={{ color: "var(--red)" }}>{error}</p>}
-        {attached.length > 0 && (
-          <div className="flex flex-wrap gap-2" aria-label="Images to send">
-            {attached.map((a) => (
-              <div key={a.key} className="relative">
-                <img src={a.preview} alt="To send" className="h-16 w-16 object-cover border" style={{ borderColor: a.failed ? "var(--red)" : "var(--accent-soft)", opacity: a.id ? 1 : 0.5 }} />
-                <button type="button" className="absolute -top-2 -right-2 w-6 h-6 rounded-full text-[12px] border" style={{ background: "var(--panel)", borderColor: "var(--line)" }} aria-label="Remove image" onClick={() => setAttached((x) => x.filter((y) => y.key !== a.key))}>×</button>
-              </div>
-            ))}
-            {uploading && <span className="self-center text-[11px]" style={{ color: "var(--muted)" }}>uploading…</span>}
-          </div>
-        )}
+        {(error || att.error) && <p className="text-[12px]" style={{ color: "var(--red)" }}>{error ?? att.error}</p>}
+        <AttachTray att={att} />
         <div className="flex gap-2">
-          <input ref={fileRef} type="file" accept="image/*" multiple className="sr-only" aria-hidden="true" tabIndex={-1} onChange={(e) => { if (e.target.files) attach(e.target.files); e.target.value = ""; }} />
-          <button type="button" className="btn w-11 px-0 flex-none" onClick={() => fileRef.current?.click()} aria-label="Attach an image" title="Attach an image (or paste one)" disabled={attached.length >= 4}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 17l-5-5-8 8" /></svg>
+          <input ref={fileRef} type="file" accept={ACCEPT} multiple className="sr-only" aria-hidden="true" tabIndex={-1} onChange={(e) => { if (e.target.files) att.add(e.target.files); e.target.value = ""; }} />
+          <button type="button" className="btn w-11 px-0 flex-none" onClick={() => fileRef.current?.click()} aria-label="Attach a file or image" title="Attach a PDF, Word, Excel, CSV, PowerPoint, text file or image (or paste / drop one)">
+            <ClipIcon />
           </button>
           <label htmlFor="cmd" className="sr-only">Talk to Jarvis</label>
           <div className="input flex items-center gap-2 flex-1">
             <span style={{ color: "var(--accent)" }}>&gt;_</span>
-            <input ref={inputRef} id="cmd" className="flex-1 min-w-0 bg-transparent border-0 outline-none h-full" placeholder="Talk to Jarvis, @ an agent, / for commands" value={text} onChange={(e) => onChange(e.target.value)} onKeyDown={onKey} onPaste={(e) => { const f = [...e.clipboardData.files].filter((x) => x.type.startsWith("image/")); if (f.length) { e.preventDefault(); attach(f); } }} autoComplete="off" enterKeyHint="send" />
+            <input ref={inputRef} id="cmd" className="flex-1 min-w-0 bg-transparent border-0 outline-none h-full" placeholder="Talk to Jarvis, @ an agent, / for commands" value={text} onChange={(e) => onChange(e.target.value)} onKeyDown={onKey} onPaste={(e) => { const f = [...e.clipboardData.files]; if (f.length) { e.preventDefault(); att.add(f); } }} autoComplete="off" enterKeyHint="send" />
           </div>
           <button type="button" className="btn w-11 px-0 flex-none" onClick={mic} aria-label={listening ? "Stop listening" : "Speak to Jarvis"} aria-pressed={listening} style={listening ? { borderColor: "var(--amber)", color: "var(--amber)" } : undefined}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
@@ -224,7 +204,7 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
           <button type="button" className={`btn w-11 px-0 flex-none ${readAloud ? "btn-primary" : ""}`} onClick={() => { if (voice.speaking) voice.stopSpeaking(); setReadAloud(!readAloud); }} aria-pressed={readAloud} aria-label={readAloud ? "Stop reading replies aloud" : "Read replies aloud"} title={readAloud ? "Voice on" : "Voice off"}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" /></svg>
           </button>
-          <button className="btn btn-primary w-11 px-0 flex-none" disabled={busy || uploading || (!text.trim() && !attached.some((a) => a.id))} aria-label="Send">
+          <button className="btn btn-primary w-11 px-0 flex-none" disabled={busy || uploading || (!text.trim() && !att.any)} aria-label="Send">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
           </button>
         </div>

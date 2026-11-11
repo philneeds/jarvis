@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -51,12 +51,19 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
 
   api.get("/chat", async (c) => c.json({ messages: await jarvis.store.chat.list(Number(c.req.query("limit") ?? 100)) }));
   api.post("/chat", async (c) => {
-    const parsed = z.object({ text: z.string().max(8000), wait: z.boolean().optional(), channel: z.enum(["hq", "telegram", "voice", "schedule"]).optional(), images: z.array(z.string().max(80)).max(4).optional() })
-      .refine((b) => b.text.trim().length > 0 || (b.images?.length ?? 0) > 0)
+    const parsed = z.object({ text: z.string().max(8000), wait: z.boolean().optional(), channel: z.enum(["hq", "telegram", "voice", "schedule"]).optional(), images: z.array(z.string().max(80)).max(4).optional(), docs: z.array(z.string().max(80)).max(5).optional() })
+      .refine((b) => b.text.trim().length > 0 || (b.images?.length ?? 0) > 0 || (b.docs?.length ?? 0) > 0)
       .safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) return c.json({ error: "text required (up to 8000 characters), or an image" }, 400);
+    if (!parsed.success) return c.json({ error: "text required (up to 8000 characters), or an image or file" }, 400);
     for (const id of parsed.data.images ?? []) if (!(await imageExists(id))) return c.json({ error: "image not found; upload it first" }, 400);
-    const { message, done } = await jarvis.submit(parsed.data.text, { channel: parsed.data.channel ?? "hq", images: parsed.data.images });
+    // Files Phil attached: already read into text by POST /docs; the text goes to whoever answers, the files show on his message.
+    const found = await getDocs(jarvis.store, parsed.data.docs ?? []);
+    if (found.some((d) => !d)) return c.json({ error: "file not found; attach it again" }, 400);
+    const docs = found.filter((d) => !!d);
+    const images = [...(parsed.data.images ?? []), ...docs.filter((d) => d.imageId).map((d) => d.imageId!)].slice(0, 4);
+    const files = docs.filter((d) => d.fileId).map((d) => ({ id: d.fileId!, name: d.name }));
+    const context = docsContext(docs) || undefined;
+    const { message, done } = await jarvis.submit(parsed.data.text, { channel: parsed.data.channel ?? "hq", images, ...(files.length ? { files } : {}), ...(context ? { context } : {}) });
     if (parsed.data.wait) return c.json({ messages: await done, replyTo: message.id });
     // Replies stream in over the websocket as chat.message events with replyTo = this message's id.
     return c.json({ messages: [message], replyTo: message.id, pending: true });
@@ -69,6 +76,16 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const buf = Buffer.from(await c.req.arrayBuffer());
     if (buf.length > MAX_IMAGE_BYTES) return c.json({ error: "image is over 5 MB" }, 413);
     try { return c.json({ id: await saveImage(buf, type) }); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
+  // Files Phil attaches to a message (PDF, Word, Excel, CSV, PowerPoint, text, or an image): the raw file in the body,
+  // ?name= its file name. Read into text now, so a file HQ can't read is refused before he hits send.
+  api.post("/docs", async (c) => {
+    const data = Buffer.from(await c.req.arrayBuffer());
+    if (data.length > MAX_FILE_BYTES) return c.json({ error: "file is over 20 MB" }, 413);
+    try {
+      const d = await saveDoc(jarvis.store, await readDocument({ name: c.req.query("name") ?? "file", mime: c.req.header("content-type") ?? "", data }));
+      return c.json({ doc: { id: d.id, name: d.name, kind: d.kind, type: d.type, pages: d.pages, rows: d.rows, slides: d.slides, chars: d.text?.length, imageId: d.imageId } });
+    } catch (e) { return c.json({ error: (e as Error).message }, 400); }
   });
   api.get("/uploads/:id", async (c) => {
     const f = await loadImage(c.req.param("id"));
@@ -531,7 +548,8 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.get("/files/:id", async (c) => {
     const id = c.req.param("id");
     const d = await deckFile(jarvis.store, id);
-    const f = d ?? (await loadFile(id).then((x) => (x ? { name: id, ...x } : undefined)));
+    const named = d ? undefined : (await getDocs(jarvis.store, [id]))[0]?.name;
+    const f = d ?? (await loadFile(id).then((x) => (x ? { name: named ?? id, ...x } : undefined)));
     if (!f) return c.json({ error: "not found" }, 404);
     const ascii = f.name.replace(/[^\x20-\x7e]+/g, "_").replace(/"/g, "'");
     return new Response(new Uint8Array(f.data), { headers: { "content-type": f.mime, "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(f.name)}`, "cache-control": "private, max-age=3600" } });

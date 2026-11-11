@@ -118,6 +118,28 @@ test("a spreadsheet sent on Telegram becomes ProEdge sales data; the deck comes 
   bot.stop();
 });
 
+test("a PDF, Word file or note on Telegram is read and goes to Jarvis with the caption, not into ProEdge data", async () => {
+  const store = memoryStore();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url);
+    if (u.includes("/file/bot")) return new Response("# Site visit\nRoof needs a full tear-off.");
+    const method = u.split("/").pop()!;
+    void init;
+    return new Response(JSON.stringify({ ok: true, result: method === "getFile" ? { file_path: "documents/file_2.md" } : [] }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const bot = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f, pollTimeout: 0 });
+  let seen: { text: string; context?: string; files?: { name: string }[] } | undefined;
+  const orig = jarvis.submit.bind(jarvis);
+  jarvis.submit = (async (text: string, opts: Parameters<typeof orig>[1] = {}) => { seen = { text, context: opts.context, files: opts.files }; return orig(text, opts); }) as typeof jarvis.submit;
+  await bot.handle({ update_id: 1, message: { message_id: 1, chat: { id: 42 }, caption: "@stella quote this", document: { file_id: "n1", file_name: "visit.md", mime_type: "text/markdown" } } });
+  assert.equal(seen?.text, "@stella quote this");
+  assert.match(seen?.context ?? "", /=== File: visit\.md \(text file, \d+ characters\) ===\n# Site visit\nRoof needs a full tear-off\./);
+  assert.equal(seen?.files?.[0]?.name, "visit.md");
+  const { listDataFiles } = await import("@jarvis/core");
+  assert.equal((await listDataFiles(store, "proedge")).length, 0);
+});
+
 test("a voice note on Telegram is transcribed, shown back, answered, and the answer is spoken back too", async () => {
   const store = memoryStore();
   const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });

@@ -1,4 +1,4 @@
-import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent, saveImage, addDataFile, setTemplate, deckFile } from "@jarvis/core";
+import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent, saveImage, addDataFile, setTemplate, deckFile, readDocument, saveDoc, docsContext } from "@jarvis/core";
 import { transcribe as transcribeDefault, synthesize as synthesizeDefault, transcriptionProvider } from "./speech.js";
 
 /**
@@ -177,10 +177,14 @@ export class TelegramBot {
     }
     if (doc) {
       // A spreadsheet is this week's ProEdge sales data for Stevon's deck; a PowerPoint is the deck template.
+      // Anything else (a PDF, a Word file, notes) is read into text and goes to Jarvis with the caption, as in HQ.
       const name = doc.file_name ?? "upload";
       try {
         const { data } = await this.download(doc.file_id);
-        if (/\.pptx$/i.test(name)) {
+        if (!/\.(pptx|xlsx|csv|tsv|txt)$/i.test(name) && !/spreadsheetml|presentationml|^text\/(csv|plain)/.test(doc.mime_type ?? "")) {
+          const d = await saveDoc(this.jarvis.store, await readDocument({ name, mime: doc.mime_type, data }));
+          await this.jarvis.submit(msg.caption ?? "", { channel: "telegram", context: docsContext([d]), ...(d.fileId ? { files: [{ id: d.fileId, name: d.name }] } : {}), ...(d.imageId ? { images: [d.imageId] } : {}) });
+        } else if (/\.pptx$/i.test(name)) {
           const t = await setTemplate(this.jarvis.store, "proedge", name, data);
           await this.send(`Got the template "${name}" (${t.outline.length} slides). Stevon's decks will follow its order, colours and fonts.`);
         } else {
