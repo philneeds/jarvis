@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { JarvisEvent } from "@jarvis/core";
-import { api, post, wsUrl } from "./api";
+import { api, isPublicPath, post, wsUrl } from "./api";
 import type { State, ChatMessage, Approval, ActivityEntry, AttentionItem } from "./types";
 
 interface Live {
@@ -83,10 +83,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Nothing to fetch on the login screen; it would only 401.
-  useEffect(() => { if (typeof window !== "undefined" && location.pathname.startsWith("/login")) return; void refresh(); }, [refresh]);
+  // Nothing to fetch on the public pages (login, about, privacy); it would only 401.
+  useEffect(() => { if (typeof window !== "undefined" && isPublicPath(location.pathname)) return; void refresh(); }, [refresh]);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && isPublicPath(location.pathname)) return;
     let stop = false, retry = 1000, ws: WebSocket | null = null, timer: ReturnType<typeof setTimeout> | undefined;
     const connect = () => {
       if (stop) return;

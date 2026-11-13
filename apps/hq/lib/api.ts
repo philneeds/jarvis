@@ -1,5 +1,9 @@
 "use client";
 
+/** Pages anyone can open without signing in: the login screen, and the About and Privacy pages Google's sign-in links to. */
+export const PUBLIC_PATHS = ["/login", "/about", "/privacy"];
+export const isPublicPath = (p: string) => PUBLIC_PATHS.some((x) => p === x || p.startsWith(`${x}/`));
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -10,7 +14,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     credentials: "include",
     headers: { ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) },
   });
-  if (res.status === 401 && typeof window !== "undefined" && !location.pathname.startsWith("/login")) {
+  if (res.status === 401 && typeof window !== "undefined" && !isPublicPath(location.pathname)) {
     location.href = `/login?next=${encodeURIComponent(location.pathname)}`;
   }
   if (!res.ok) {
