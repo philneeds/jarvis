@@ -73,9 +73,29 @@ export function ApprovalsPanel({ tab, id = "approve" }: { tab: ApprovalsTab; id?
     } catch (e) { setError((e as Error).message); } finally { setAsking(null); }
   };
 
+  // Cards an agent queued in one run are one plan: shown together, with one button for the lot.
+  const runGroups = new Map<string, Approval[]>();
+  if (tab === "pending") for (const a of pending) if (a.runId) runGroups.set(a.runId, [...(runGroups.get(a.runId) ?? []), a]);
+  const decideAll = async (group: Approval[], d: "approve" | "reject") => {
+    setBusy(`group:${group[0]?.runId}`); setError(null);
+    const done: string[] = [];
+    try {
+      for (const a of group) { await post(`/api/approvals/${a.id}/${d}`, {}); done.push(a.id); }
+    } catch (e) { setError((e as Error).message); }
+    finally { setPending((p) => p.filter((x) => !done.includes(x.id))); setBusy(null); }
+  };
+
   const deciders = [...new Set(decided.map((a) => a.agentId))].sort((x, y) => agentName(x).localeCompare(agentName(y)));
   const filtered = decided.filter((a) => (!byAgent || a.agentId === byAgent) && (!outcome || a.status === outcome));
-  const list = tab === "pending" ? pending : filtered;
+  // Keep a run's cards next to each other, in the order the first of them arrived.
+  const seenRuns = new Set<string>();
+  const list = tab !== "pending" ? filtered : pending.flatMap((a) => {
+    const g = a.runId ? runGroups.get(a.runId) ?? [] : [];
+    if (g.length < 2) return [a];
+    if (seenRuns.has(a.runId!)) return [];
+    seenRuns.add(a.runId!);
+    return g;
+  });
   const OUTCOMES = [["", "All"], ["approved", "Approved"], ["edited", "Edited"], ["rejected", "Rejected"]] as const;
 
   return (
@@ -112,8 +132,21 @@ export function ApprovalsPanel({ tab, id = "approve" }: { tab: ApprovalsTab; id?
         const label = inert ? "Approve (records only)" : (ACTION_LABEL[act] ?? "Approve");
         const head = (act && HEADLINE[act] ? HEADLINE[act] : Object.keys(a.payload ?? {}).filter((k) => k !== "action" && k !== "body" && k !== "text")).map((k) => [k, a.payload?.[k]] as const).filter(([, val]) => ["string", "number", "boolean"].includes(typeof val)).slice(0, 5);
         const thread = a.thread ?? [];
+        const group = tab === "pending" && a.runId ? runGroups.get(a.runId) ?? [] : [];
+        const groupHead = group.length > 1 && group[0]?.id === a.id;
         return (
-          <article key={a.id} className="card flex flex-col gap-3" aria-label={a.title} style={{ borderColor: `color-mix(in srgb, ${v?.color ?? "var(--accent)"} 60%, transparent)`, boxShadow: a.status === "pending" ? `0 0 24px color-mix(in srgb, ${v?.color ?? "var(--accent)"} 18%, transparent)` : undefined }}>
+          <div key={a.id} className="contents">
+          {groupHead && (
+            <div className="flex flex-wrap items-center gap-2 border-t pt-3" style={{ borderColor: "var(--line)" }} role="group" aria-label={`${group.length} cards from one ${who} run`}>
+              <span className="text-[11px] tracking-[0.16em] uppercase" style={{ color: v?.color }}>{who} · {group.length} cards, one plan</span>
+              <span className="text-[11px]" style={{ color: "var(--muted)" }}>{group.map((g) => g.title).join(" · ").slice(0, 160)}</span>
+              <span className="ml-auto flex gap-2">
+                <button className="btn btn-sm btn-danger" disabled={busy === `group:${a.runId}`} onClick={() => decideAll(group, "reject")}>Reject all {group.length}</button>
+                <button className="btn btn-sm btn-primary" disabled={busy === `group:${a.runId}`} onClick={() => decideAll(group, "approve")}>Approve all {group.length}</button>
+              </span>
+            </div>
+          )}
+          <article className="card flex flex-col gap-3" aria-label={a.title} style={{ borderColor: `color-mix(in srgb, ${v?.color ?? "var(--accent)"} 60%, transparent)`, boxShadow: a.status === "pending" ? `0 0 24px color-mix(in srgb, ${v?.color ?? "var(--accent)"} 18%, transparent)` : undefined }}>
             <div className="flex flex-wrap items-center gap-2 text-[11px] tracking-[0.16em] uppercase">
               <span style={{ color: v?.color }}>{v?.short} · {who}</span>
               <span className="px-1.5 border" style={{ color: KIND[a.kind], borderColor: KIND[a.kind] }}>{a.kind}</span>
@@ -197,6 +230,7 @@ export function ApprovalsPanel({ tab, id = "approve" }: { tab: ApprovalsTab; id?
               </>
             )}
           </article>
+          </div>
         );
       })}
     </section>

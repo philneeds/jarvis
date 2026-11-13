@@ -221,19 +221,24 @@ export class GoogleConnector {
     });
   }
 
-  private eventBody(ev: { title?: string; start?: string; end?: string; description?: string; location?: string; attendees?: string[] }) {
+  eventBody(ev: { title?: string; start?: string; end?: string; description?: string; location?: string; attendees?: string[]; recurrence?: string | string[]; timeZone?: string }) {
     const allDay = !!ev.start && /^\d{4}-\d{2}-\d{2}$/.test(ev.start);
+    const rules = (Array.isArray(ev.recurrence) ? ev.recurrence : ev.recurrence ? [ev.recurrence] : []).map((r) => String(r).trim()).filter(Boolean).map((r) => (/^(RRULE|EXRULE|RDATE|EXDATE):/i.test(r) ? r : `RRULE:${r}`));
+    // A repeating event needs its zone so 9 AM stays 9 AM across daylight-saving changes.
+    const tz = ev.timeZone || (rules.length ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined);
+    const at = (s: string) => (allDay ? { date: s } : { dateTime: new Date(s).toISOString(), ...(tz && { timeZone: tz }) });
     return {
       ...(ev.title !== undefined && { summary: ev.title }),
       ...(ev.description !== undefined && { description: ev.description }),
       ...(ev.location !== undefined && { location: ev.location }),
-      ...(ev.start && { start: allDay ? { date: ev.start } : { dateTime: new Date(ev.start).toISOString() } }),
-      ...(ev.end && { end: allDay ? { date: ev.end } : { dateTime: new Date(ev.end).toISOString() } }),
+      ...(ev.start && { start: at(ev.start) }),
+      ...(ev.end && { end: at(ev.end) }),
       ...(ev.attendees && { attendees: ev.attendees.map((email) => ({ email })) }),
+      ...(rules.length && { recurrence: rules }),
     };
   }
 
-  async createEvent(ev: { title: string; start: string; end: string; description?: string; location?: string; attendees?: string[]; calendarId?: string; account?: string }) {
+  async createEvent(ev: { title: string; start: string; end: string; description?: string; location?: string; attendees?: string[]; recurrence?: string | string[]; timeZone?: string; calendarId?: string; account?: string }) {
     const cal = encodeURIComponent(ev.calendarId ?? "primary");
     const j = await this.api<{ id: string; htmlLink?: string }>(ev.account, `https://www.googleapis.com/calendar/v3/calendars/${cal}/events`, { method: "POST", body: JSON.stringify(this.eventBody(ev)) });
     return { id: j.id, link: j.htmlLink };
@@ -472,10 +477,10 @@ export class GoogleConnector {
         return `Moved ${n} message(s) to Trash${p.query ? ` matching "${p.query}"` : ""}${p.account ? ` in ${p.account}` : ""} (recoverable for 30 days).`;
       },
       "calendar.create": async (a) => {
-        const p = a.payload as { title?: string; start?: string; end?: string; description?: string; location?: string; attendees?: string[]; account?: string };
+        const p = a.payload as { title?: string; start?: string; end?: string; description?: string; location?: string; attendees?: string[]; recurrence?: string | string[]; timeZone?: string; account?: string };
         if (!p.title || !p.start || !p.end) throw new Error("calendar.create needs title, start and end in the payload");
-        const r = await this.createEvent({ title: p.title, start: p.start, end: p.end, description: p.description, location: p.location, attendees: p.attendees, account: p.account });
-        return `Event "${p.title}" created${r.link ? `: ${r.link}` : ""}.`;
+        const r = await this.createEvent({ title: p.title, start: p.start, end: p.end, description: p.description, location: p.location, attendees: p.attendees, recurrence: p.recurrence, timeZone: p.timeZone, account: p.account });
+        return `Event "${p.title}"${p.recurrence ? " (repeating)" : ""} created${r.link ? `: ${r.link}` : ""}.`;
       },
       "calendar.update": async (a) => {
         const p = a.payload as { id?: string; title?: string; start?: string; end?: string; description?: string; location?: string; account?: string };
@@ -525,7 +530,7 @@ export class GoogleConnector {
       "gmail.archive": (p) => `Archives ${scope(p)} in ${acct(p)}: they leave the inbox but stay in All Mail and search. Nothing is deleted.`,
       "gmail.label": (p) => `Adds the label "${String(p.label ?? "")}" to ${scope(p)} in ${acct(p)}. Nothing moves or is deleted.`,
       "gmail.trash": (p) => `Moves ${scope(p)} in ${acct(p)} to Trash. Gmail empties Trash after 30 days; until then you can restore them.`,
-      "calendar.create": (p) => `Adds "${String(p.title ?? "")}" to the calendar on ${acct(p)} from ${String(p.start ?? "?")} to ${String(p.end ?? "?")}${Array.isArray(p.attendees) && p.attendees.length ? ` and invites ${p.attendees.join(", ")}` : ""}.`,
+      "calendar.create": (p) => `Adds "${String(p.title ?? "")}" to the calendar on ${acct(p)} from ${String(p.start ?? "?")} to ${String(p.end ?? "?")}${p.recurrence ? `, repeating ${String(Array.isArray(p.recurrence) ? p.recurrence.join("; ") : p.recurrence).replace(/^RRULE:/i, "")}` : ""}${Array.isArray(p.attendees) && p.attendees.length ? ` and invites ${p.attendees.join(", ")}` : ""}.`,
       "calendar.update": (p) => `Changes the event "${String(p.title ?? p.id ?? "")}" on ${acct(p)}${p.start ? ` to ${String(p.start)}${p.end ? ` – ${String(p.end)}` : ""}` : ""}.${Array.isArray(p.guests) && p.guests.length ? ` It also changes for ${p.guests.join(", ")}.` : ""}`,
       "calendar.delete": (p) => `Removes the event "${String(p.title ?? p.id ?? "")}" from the calendar on ${acct(p)}.${Array.isArray(p.guests) && p.guests.length ? ` It also disappears for ${p.guests.join(", ")}.` : ""}`,
     };
@@ -533,7 +538,7 @@ export class GoogleConnector {
 
   /** One paragraph for agent prompts on how to write through this connector. */
   static promptHint(): string {
-    return `Google is connected (google_accounts lists which accounts; pass "account" to use one other than the first). Reading: calendar_list_events, gmail_search, gmail_read. Drafting: gmail_create_draft (no approval). Sending mail = an approval block with "kind":"send" and "payload":{"action":"gmail.send","to":"...","subject":"...","body":"...","account":"<email>"}. Calendar changes = an approval block with "kind":"record": create with "payload":{"action":"calendar.create","title":"...","start":"<ISO>","end":"<ISO>"}; move or rename with {"action":"calendar.update","id":"<event id>","start":"<ISO>","end":"<ISO>","title":"..."}; remove with {"action":"calendar.delete","id":"<event id>","title":"..."}. Say in the title what will change. An agent that has calendar_create_event, calendar_update_event and calendar_delete_event (Monica) changes Phil's own events on his personal calendars with those tools straight away, no approval block; they refuse a business calendar and an event with guests, and inviting anyone is always the approval block with "attendees". Mail cleanup = "kind":"record" for archive or label ({"action":"gmail.archive","query":"category:promotions older_than:30d","max":500,"account":"<email>"} / {"action":"gmail.label","query":"...","label":"Receipts"}), and "kind":"other" for trash ({"action":"gmail.trash","query":"...","max":200}), which always waits for Phil. Plan with gmail_senders first and say how many messages the query matches.`;
+    return `Google is connected (google_accounts lists which accounts; pass "account" to use one other than the first). Reading: calendar_list_events, gmail_search, gmail_read. Drafting: gmail_create_draft (no approval). Sending mail = an approval block with "kind":"send" and "payload":{"action":"gmail.send","to":"...","subject":"...","body":"...","account":"<email>"}. Calendar changes = an approval block with "kind":"record": create with "payload":{"action":"calendar.create","title":"...","start":"<ISO>","end":"<ISO>"} (a repeating block adds "recurrence":"RRULE:FREQ=WEEKLY;BYDAY=MO,WE" and "timeZone":"America/New_York"); a revised card replaces your older pending card for the same slot on its own, so never ask Phil to reject the old one; move or rename with {"action":"calendar.update","id":"<event id>","start":"<ISO>","end":"<ISO>","title":"..."}; remove with {"action":"calendar.delete","id":"<event id>","title":"..."}. Say in the title what will change. An agent that has calendar_create_event, calendar_update_event and calendar_delete_event (Monica) changes Phil's own events on his personal calendars with those tools straight away, no approval block; they refuse a business calendar and an event with guests, and inviting anyone is always the approval block with "attendees". Mail cleanup = "kind":"record" for archive or label ({"action":"gmail.archive","query":"category:promotions older_than:30d","max":500,"account":"<email>"} / {"action":"gmail.label","query":"...","label":"Receipts"}), and "kind":"other" for trash ({"action":"gmail.trash","query":"...","max":200}), which always waits for Phil. Plan with gmail_senders first and say how many messages the query matches.`;
   }
 }
 

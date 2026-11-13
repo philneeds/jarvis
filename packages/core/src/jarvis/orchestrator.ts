@@ -8,6 +8,7 @@ import { usageSummary } from "../usage/caps.js";
 import { extractBlocks, parsePlan } from "./blocks.js";
 import { agentSystemPrompt, briefPrompt, condensePrompt, dayStart, jarvisSystemPrompt, leadBriefTask, planPrompt, synthesisPrompt } from "./prompts.js";
 import { memoryLine } from "./readable.js";
+import { supersedes } from "./overlap.js";
 import { getAgentConfig } from "../config.js";
 import { VENTURES, type VentureId } from "../registry/ventures.js";
 import { VENTURE_DASH, recordKind } from "../ventures/dashboards.js";
@@ -1138,8 +1139,16 @@ export class Jarvis {
         return refused;
       }
     }
-    const approval: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "pending", ...a, effect: a.effect ?? this.effectOf(a) };
+    // A revised card replaces the agent's older pending card for the same thing, so Phil never approves both.
+    const replaced = (await this.store.approvals.list("pending")).filter((old) => supersedes(a, old));
+    const effect0 = a.effect ?? this.effectOf(a);
+    const approval: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "pending", ...a, effect: replaced.length ? `${effect0 ?? ""}${effect0 ? " " : ""}Replaces ${replaced.length === 1 ? "the older card" : `${replaced.length} older cards`}: ${replaced.map((r) => `"${r.title}"`).join(", ")}.` : effect0 };
     await this.store.approvals.add(approval);
+    for (const old of replaced) {
+      const done = await this.store.approvals.update(old.id, { status: "rejected", decidedAt: new Date().toISOString(), note: `superseded: replaced by the newer card "${approval.title}"` });
+      await this.router.log(a.agentId, "system", `${getAgent(a.agentId)?.name ?? a.agentId}: "${old.title}" replaced by the newer card "${approval.title}"`, a.runId, { approvalId: old.id, supersededBy: approval.id });
+      if (done) bus.emitEvent({ type: "approval.decided", approval: done });
+    }
     // Phil's per-agent rules: low-risk kinds under the dollar cap go through on their own, logged.
     const rules = (await getAgentConfig(this.store, a.agentId)).rules;
     const pay = (a.payload ?? {}) as { amount?: unknown; max?: unknown; ids?: unknown };
