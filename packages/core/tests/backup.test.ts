@@ -13,7 +13,9 @@ test("backup: the JSON store is gzipped into the backup folder, old files are pr
   await fs.writeFile(dataFile, JSON.stringify({ settings: { goals: [{ name: "Launch v2" }] } }));
   // A stale file from 20 days ago, and a fresh one from yesterday.
   const old = path.join(dir, "jarvis-20261017-0315.json.gz"), fresh = path.join(dir, "jarvis-20261105-0315.json.gz");
-  await fs.writeFile(old, "x"); await fs.utimes(old, new Date(Date.now() - 20 * 86_400_000), new Date(Date.now() - 20 * 86_400_000));
+  // Aged from the backup's own clock (below), not the real one, or the test expires as the calendar moves on.
+  const at = Date.parse("2026-11-06T03:15:00Z") - 20 * 86_400_000;
+  await fs.writeFile(old, "x"); await fs.utimes(old, new Date(at), new Date(at));
   await fs.writeFile(fresh, "x");
   const uploads: { name: string; bytes: number; mime: string }[] = [];
   let pruned = 0;

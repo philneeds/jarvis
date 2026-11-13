@@ -107,7 +107,7 @@ test("Monica changes Phil's own events directly; events with guests go to Phil",
     if (String(u).includes("/events/e9") && (i?.method ?? "GET") === "GET") return new Response(JSON.stringify({ id: "e9", attendees: [{ email: "phil@example.com", self: true }, { email: "smith@example.com" }] }), { headers: { "content-type": "application/json" } });
     return f(u, i);
   }) as typeof fetch;
-  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: withGuests });
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: withGuests, personalCalendars: ["phil@example.com"], businessCalendars: { "info@jdpm.example.com": { venture: "JD PM", lead: "stella" } } });
   await g.exchangeCode("c1");
   const { CHARTERS } = await import("../src/index.js");
   for (const name of ["calendar_create_event", "calendar_update_event", "calendar_delete_event"]) {
@@ -133,6 +133,40 @@ test("Monica changes Phil's own events directly; events with guests go to Phil",
   assert.ok(log.some((e) => /Monica added "Dentist"/.test(e.summary) && /phil@example.com/.test(e.summary)));
   assert.ok(log.some((e) => /Monica changed "Smith kitchen walkthrough" to 2026-11-05T15:00/.test(e.summary)));
   assert.ok(log.some((e) => /Monica removed "Smith kitchen walkthrough"/.test(e.summary)));
+});
+
+test("Monica's direct calendar changes stay on Phil's personal calendars; business calendars refuse", async () => {
+  const store = memoryStore(); await store.init();
+  const { f, calls } = fakeGoogle();
+  // Business account connected first, so an implicit default must still land on the personal one.
+  let n = 0;
+  const order = (async (u: string | URL | Request, i?: RequestInit) => {
+    if (String(u).includes("/userinfo")) { n++; return new Response(JSON.stringify({ email: n === 1 ? "info@jdpm.example.com" : "phil@example.com" }), { headers: { "content-type": "application/json" } }); }
+    return f(u, i);
+  }) as typeof fetch;
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: order, personalCalendars: ["phil@example.com"], businessCalendars: { "info@jdpm.example.com": { venture: "JD PM", lead: "stella" } } });
+  await g.exchangeCode("c1"); await g.exchangeCode("c2");
+  const tool = (name: string) => g.tools().find((t) => t.name === name)!;
+  const ctx = { store, agentId: "monica" };
+  const writes = () => calls.filter((c) => c.url.includes("/calendar/v3/") && (c.init?.method ?? "GET") !== "GET").length;
+  // Writes to the business calendar refuse, name the lead and the approval path, and never reach Google.
+  assert.match(await tool("calendar_create_event").handler({ title: "Tracy install", start: "2026-11-18T08:00:00-05:00", end: "2026-11-18T12:00:00-05:00", account: "info@jdpm.example.com" }, ctx), /Nothing changed: info@jdpm\.example\.com is JD PM's calendar.*Stella \(stella\).*calendar\.create/);
+  assert.match(await tool("calendar_update_event").handler({ id: "e1", start: "2026-11-05T15:00:00-05:00", account: "jdpm" }, ctx), /Nothing changed.*JD PM.*calendar\.update/);
+  assert.match(await tool("calendar_delete_event").handler({ id: "e1", account: "info@jdpm.example.com" }, ctx), /Nothing changed.*calendar\.delete/);
+  assert.equal(writes(), 0);
+  // No account given: the first personal calendar, not the first connected account.
+  assert.match(await tool("calendar_create_event").handler({ title: "Gym", start: "2026-11-14T07:00:00-05:00", end: "2026-11-14T08:00:00-05:00" }, ctx), /Added "Gym"/);
+  assert.equal(writes(), 1);
+  const log = await store.activity.list({ agentId: "monica" });
+  assert.ok(log.some((e) => /added "Gym".*phil@example\.com/.test(e.summary)));
+  // Reading the business calendar still works.
+  assert.match(await tool("calendar_list_events").handler({ account: "info@jdpm.example.com" }, ctx), /Smith kitchen walkthrough/);
+});
+
+test("the live personal-calendar list is Phil's two personal accounts", async () => {
+  const { PERSONAL_CALENDARS, BUSINESS_CALENDARS } = await import("../src/index.js");
+  assert.deepEqual(PERSONAL_CALENDARS, ["philneedsofficial@gmail.com", "pmarino9081@gmail.com"]);
+  assert.deepEqual(Object.keys(BUSINESS_CALENDARS).sort(), ["info@jdpmrenovations.com", "pmarino@getproedge.com", "rangedotzone@gmail.com"]);
 });
 
 test("legacy single-account tokens are picked up", async () => {
