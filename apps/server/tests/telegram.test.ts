@@ -296,3 +296,15 @@ test("a video sent on Telegram is uploaded to Gemini, read and deleted there, an
     assert.equal(asked.at(-1), "vid2");
   } finally { bot.stop(); }
 });
+
+test("tapping Approve on a card a newer one replaced says so, and runs nothing", async () => {
+  const store = memoryStore();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
+  const { f, sent } = fakeTelegram();
+  const bot = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f, pollTimeout: 0 });
+  const old = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Reply to Ana", body: "v1", runId: "r1", payload: { action: "ghl.message", contactId: "ana", message: "v1" } });
+  await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Reply to Ana (better)", body: "v2", runId: "r2", payload: { action: "ghl.message", contactId: "ana", message: "v2" } });
+  await bot.handle({ update_id: 9, callback_query: { id: "cq", from: { id: 42 }, data: `apr:${old.id}:approved`, message: { message_id: 8, chat: { id: 42 } } } });
+  assert.equal((await store.approvals.get(old.id))?.status, "rejected", "still the replaced card, not approved");
+  assert.ok(sent.some((s) => s.method === "editMessageText" && /Replaced by a newer card/.test(String(s.body.text))));
+});

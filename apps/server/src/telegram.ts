@@ -124,9 +124,15 @@ export class TelegramBot {
       }
       const m = q.data?.match(/^apr:([^:]+):(approved|rejected)$/);
       if (m) {
+        // Read the card's state before deciding (a store may hand back the very object decide() then changes).
+        const before = await this.jarvis.store.approvals.get(m[1]!);
+        const was = before ? { status: before.status, note: before.note ?? "" } : undefined;
         const a = await this.jarvis.decide(m[1]!, m[2] as "approved" | "rejected", "via Telegram");
-        await this.api("answerCallbackQuery", { callback_query_id: q.id, text: a ? `${m[2]}` : "not found" }).catch(() => undefined);
-        if (a && q.message) await this.api("editMessageText", { chat_id: q.message.chat.id, message_id: q.message.message_id, text: `${m[2] === "approved" ? "✅ Approved" : "❌ Rejected"} · ${a.title}${a.note ? `\n${a.note}` : ""}` }).catch(() => undefined);
+        // Already decided elsewhere (in HQ, or replaced by a newer card): say what actually happened, not what was tapped.
+        const already = !!was && was.status !== "pending";
+        const label = already ? (/^superseded/.test(was!.note) ? "↪ Replaced by a newer card" : `Already ${was!.status}`) : m[2] === "approved" ? "✅ Approved" : "❌ Rejected";
+        await this.api("answerCallbackQuery", { callback_query_id: q.id, text: a ? (already ? label : `${m[2]}`) : "not found" }).catch(() => undefined);
+        if (a && q.message) await this.api("editMessageText", { chat_id: q.message.chat.id, message_id: q.message.message_id, text: `${label} · ${a.title}${a.note ? `\n${a.note}` : ""}` }).catch(() => undefined);
       }
       return;
     }

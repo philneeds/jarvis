@@ -28,3 +28,19 @@ test("a charter tool Phil switches off stays off; one he adds stays on; a tool h
   assert.ok(effectiveTools("karol", { tools: ["memory_search"], toolsOff: ["ghl_contact"] }).includes("ghl_conversations"));
   assert.ok(!effectiveTools("karol", { tools: ["memory_search"], toolsOff: ["ghl_contact"] }).includes("ghl_contact"));
 });
+
+test("saving rules or persona never freezes the tool list; only Phil's own additions and removals are stored", async () => {
+  const { memoryStore, setAgentConfig, getAgentConfig, CHARTERS } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  await setAgentConfig(store, "karol", { rules: { autoApprove: [], maxAutoDollars: 50 } });
+  const raw = await store.settings.get<{ tools?: string[]; toolsOff?: string[] }>("agentcfg:karol", {});
+  assert.equal(raw.tools, undefined, "a rules-only save stores no tool list");
+  const charter = CHARTERS.karol!.tools!;
+  await setAgentConfig(store, "karol", { tools: [...charter.filter((t) => t !== "web_search"), "github_repos"] });
+  const raw2 = await store.settings.get<{ tools?: string[]; toolsOff?: string[] }>("agentcfg:karol", {});
+  assert.deepEqual(raw2.tools, ["github_repos"], "only the addition");
+  assert.deepEqual(raw2.toolsOff, ["web_search"], "only the removal");
+  await setAgentConfig(store, "karol", { persona: { job: "x" } });
+  const cfg = await getAgentConfig(store, "karol");
+  assert.ok(cfg.tools.includes("github_repos") && !cfg.tools.includes("web_search"), "a persona save keeps both");
+});

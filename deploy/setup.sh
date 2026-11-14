@@ -212,6 +212,23 @@ $DOMAIN {
 EOF
 systemctl daemon-reload
 systemctl enable --now jarvis-server jarvis-hq >/dev/null
+# Don't cut off an agent mid-run (Einstein editing code, a lead's routine): wait for live runs, up to 20 minutes.
+# FORCE=1 skips the wait. Runs older than 70 minutes are ignored; HQ ends every run well before that.
+wait_for_runs() {
+  [[ -n "${FORCE:-}" ]] && return 0
+  systemctl is-active -q jarvis-server || return 0
+  local url n i
+  url="$(grep -oP '^DATABASE_URL=\K.*' "$APP_DIR/.env" 2>/dev/null || true)"
+  [[ -z "$url" ]] && return 0
+  for i in $(seq 1 80); do
+    n="$(psql "$url" -tAc "select count(*) from runs where status='running' and started_at > now() - interval '70 minutes'" 2>/dev/null | tr -d '[:space:]')"
+    [[ -z "$n" || "$n" == "0" ]] && return 0
+    [[ $i -eq 1 ]] && log "Waiting for $n agent run(s) to finish before restarting (up to 20 minutes; FORCE=1 to skip)"
+    sleep 15
+  done
+  log "Runs still going after 20 minutes; restarting anyway (they'll show as lost and can be asked again)"
+}
+wait_for_runs
 systemctl restart jarvis-server jarvis-hq caddy
 
 log "Firewall"

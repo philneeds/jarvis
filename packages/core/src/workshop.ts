@@ -52,10 +52,15 @@ export interface WorkshopOptions {
   now?: () => Date;
   /** How long a ship waits for agents mid-run before restarting HQ (default 25 minutes; 0 = don't wait). */
   waitForRunsMs?: number;
+  /** How often the ship and a queued run check again (default 15 s and 10 s). */
   pollMs?: number;
+  /** How long a second code task waits for the workshop (default WORKSHOP_WAIT_MS, 45 minutes; 0 = don't wait). */
+  queueWaitMs?: number;
 }
 export interface WorkshopState { dir: string; branch: string; base: string }
-export interface ShipRecord { at: string; sha: string; title: string; approvalId?: string; previous?: string; status: "shipping" | "done" | "rolled-back" | "failed"; note?: string }
+/** A deploy in flight: one of Einstein's commits ("ship"), or bringing HQ up to its branch on GitHub ("update"). */
+export interface ShipRecord { at: string; sha: string; title: string; approvalId?: string; previous?: string; status: "shipping" | "done" | "rolled-back" | "failed"; note?: string; kind?: "ship" | "update" }
+export interface PendingUpdate { branch: string; live: string; tip: string; commits: { sha: string; author: string; title: string }[] }
 /** What the deploy script writes after each run: Einstein's ships and deploys by hand alike. */
 export interface DeployOutcome { at: string; ok: boolean; sha?: string; previous?: string; rolledBackTo?: string; error?: string }
 export interface DeployStatus { last: DeployOutcome | null; live: { sha: string; branch: string } | null }
@@ -78,8 +83,8 @@ export class Workshop {
 
   /**
    * One run at a time. Two of Einstein's runs in the same workshop would check out each other's branches and sweep
-   * each other's uncommitted files into their commits (it happened on Nov 7). The second run is told the workshop is
-   * busy and works without code changes; a claim older than LOCK_MS is treated as abandoned.
+   * each other's uncommitted files into their commits (it happened on Nov 7). A second run waits its turn
+   * (prepareWhenFree); a claim older than LOCK_MS is treated as abandoned.
    */
   static LOCK_MS = 90 * 60_000;
   private inUse?: { id: string; task: string; at: number };
@@ -124,6 +129,24 @@ export class Workshop {
   private auth(): Record<string, string> | undefined {
     if (!this.opts.token) return undefined;
     return { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.extraHeader", GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`x-access-token:${this.opts.token}`).toString("base64")}`, GIT_TERMINAL_PROMPT: "0" };
+  }
+
+  /**
+   * Wait for the workshop instead of working without it: a second code task queues behind the one in the workshop
+   * (polling, up to waitMs; default WORKSHOP_WAIT_MS, 45 minutes), then prepares as usual. Runs end within
+   * WORKSHOP_RUN_TIMEOUT_MS, so the wait is bounded. onWait is told once, with what the workshop is busy with.
+   */
+  async prepareWhenFree(task: string, opts: { waitMs?: number; pollMs?: number; onWait?: (busy: { task: string; at: string }) => unknown } = {}): Promise<WorkshopState & { claim: string }> {
+    const deadline = Date.now() + (opts.waitMs ?? this.opts.queueWaitMs ?? Number(process.env.WORKSHOP_WAIT_MS ?? 45 * 60_000));
+    let told = false;
+    for (;;) {
+      try { return await this.prepare(task); }
+      catch (e) {
+        if (!/in use by another run/.test((e as Error).message) || Date.now() >= deadline) throw e;
+        if (!told && this.busy) { told = true; await opts.onWait?.(this.busy); }
+        await new Promise((r) => setTimeout(r, opts.pollMs ?? this.opts.pollMs ?? 10_000));
+      }
+    }
   }
 
   /** A clean branch off the deploy branch, dependencies installed; ready for Einstein to work in. */
@@ -232,8 +255,36 @@ export class Workshop {
       sha = moved;
     }
     if (push.code !== 0) throw new Error(`push to ${branch} failed: ${push.out.trim().slice(-300)}`);
-    const rec: ShipRecord = { at: new Date().toISOString(), sha, title, approvalId, previous, status: "shipping" };
+    const rec: ShipRecord = { at: new Date().toISOString(), sha, title, approvalId, previous, status: "shipping", kind: "ship" };
     await store.settings.set(SHIP_KEY, rec);
+    return this.startDeploy(store, `Pushed ${sha.slice(0, 7)} to ${branch}`, sha, previous);
+  }
+
+  /**
+   * Commits on the deploy branch on GitHub that HQ isn't running yet (pushed from a Claude Code session, or merged by
+   * hand). Empty when HQ is current. Reads GitHub; changes nothing.
+   */
+  async behind(): Promise<PendingUpdate> {
+    const { branch } = await this.target();
+    await this.must(["fetch", "-q", "origin", branch], this.opts.appDir, this.auth());
+    const live = await this.must(["rev-parse", "HEAD"], this.opts.appDir);
+    const tip = await this.must(["rev-parse", `origin/${branch}`], this.opts.appDir);
+    const log = live === tip ? "" : await this.must(["log", "--format=%H%x1f%an%x1f%s", `HEAD..origin/${branch}`], this.opts.appDir);
+    const commits = log.split("\n").filter(Boolean).map((l) => { const [sha, author, title] = l.split("\x1f"); return { sha: sha!, author: author!, title: title! }; });
+    return { branch, live, tip, commits };
+  }
+
+  /** Phil approved an update card: deploy the branch's tip, with the same wait-for-runs and rollback as a ship. */
+  async update(store: Store, sha: string, title: string, approvalId?: string): Promise<string> {
+    const b = await this.behind();
+    if (!b.commits.length) return `HQ is already running ${b.live.slice(0, 7)}, the newest commit on ${b.branch}; nothing to update.`;
+    const rec: ShipRecord = { at: new Date().toISOString(), sha: b.tip, title, approvalId, previous: b.live, status: "shipping", kind: "update" };
+    await store.settings.set(SHIP_KEY, rec);
+    return this.startDeploy(store, `Updating to ${b.tip.slice(0, 7)}${b.tip.startsWith(sha) ? "" : ` (newer than the card's ${sha.slice(0, 7)})`}, ${b.commits.length} change${b.commits.length === 1 ? "" : "s"}`, b.tip, b.live);
+  }
+
+  /** Start the deploy script, after any agent mid-run has finished (up to WAIT_FOR_RUNS_MS). */
+  private async startDeploy(store: Store, lead: string, sha: string, previous: string): Promise<string> {
     const cmd = this.opts.deployCmd ?? "sudo -n /usr/local/bin/jarvis-deploy";
     const [bin, ...args] = cmd.split(" ");
     // Detached: the deploy restarts this very process.
@@ -241,14 +292,14 @@ export class Workshop {
     // The restart would cut off any agent mid-run (Einstein's other task, a lead's routine), so wait for them first,
     // up to WAIT_FOR_RUNS_MS; the ship record already says this commit is going out.
     const busy = (await store.agentState.all()).filter((s) => s.status === "working").map((s) => s.id);
-    if (!busy.length || this.opts.waitForRunsMs === 0) { start(); return `Pushed ${sha.slice(0, 7)} to ${branch}; HQ is rebuilding and will restart in two or three minutes. If it doesn't come back up, the deploy rolls back to ${previous.slice(0, 7)} on its own and I'll say so.`; }
+    if (!busy.length || this.opts.waitForRunsMs === 0) { start(); return `${lead}; HQ is rebuilding and will restart in two or three minutes. If it doesn't come back up, the deploy rolls back to ${previous.slice(0, 7)} on its own and I'll say so.`; }
     const limit = Date.now() + (this.opts.waitForRunsMs ?? Workshop.WAIT_FOR_RUNS_MS);
     const poll = async () => {
       const still = (await store.agentState.all().catch(() => [])).filter((s) => s.status === "working");
       if (!still.length || Date.now() >= limit) start(); else setTimeout(() => void poll(), this.opts.pollMs ?? 15_000);
     };
     setTimeout(() => void poll(), this.opts.pollMs ?? 15_000);
-    return `Pushed ${sha.slice(0, 7)} to ${branch}. ${busy.length === 1 ? `${busy[0]} is` : `${busy.join(", ")} are`} mid-run, so the restart waits for that to finish (up to ${Math.round((this.opts.waitForRunsMs ?? Workshop.WAIT_FOR_RUNS_MS) / 60_000)} minutes); then HQ rebuilds and restarts, and rolls back to ${previous.slice(0, 7)} on its own if it doesn't come back up.`;
+    return `${lead}. ${busy.length === 1 ? `${busy[0]} is` : `${busy.join(", ")} are`} mid-run, so the restart waits for that to finish (up to ${Math.round((this.opts.waitForRunsMs ?? Workshop.WAIT_FOR_RUNS_MS) / 60_000)} minutes); then HQ rebuilds and restarts, and rolls back to ${previous.slice(0, 7)} on its own if it doesn't come back up.`;
   }
   static WAIT_FOR_RUNS_MS = 25 * 60_000;
 
@@ -263,7 +314,11 @@ export class Workshop {
     const fresh = outcome.at && rec.at && outcome.at >= rec.at;
     let message: string;
     if (live.startsWith(rec.sha) || (fresh && outcome.ok)) {
-      rec.status = "done"; message = `Shipped "${rec.title}" (${rec.sha.slice(0, 7)}): HQ is back up on the new code.`;
+      rec.status = "done"; message = rec.kind === "update" ? `Updated: HQ is back up on ${rec.sha.slice(0, 7)}, the newest code on its branch.` : `Shipped "${rec.title}" (${rec.sha.slice(0, 7)}): HQ is back up on the new code.`;
+    } else if (fresh && outcome.ok === false && rec.kind === "update") {
+      // An update is several commits from the branch; nothing is reverted, the branch stays as it is for a fix.
+      rec.status = "rolled-back";
+      message = `The update to ${rec.sha.slice(0, 7)} was rolled back: HQ didn't come up on it${outcome.error ? ` (${outcome.error.slice(0, 200)})` : ""}. Running ${(outcome.rolledBackTo ?? rec.previous ?? "").slice(0, 7)} again. Ask Einstein to look at /var/log/jarvis-deploy.log.`;
     } else if (fresh && outcome.ok === false) {
       rec.status = "rolled-back";
       // Take the bad commit back off the branch so the next deploy doesn't pick it up again.
@@ -360,7 +415,7 @@ export const WORKSHOP_HINT = (dir: string, branch: string, base: string) => `You
 When the change is ready: call workshop_verify (build, typecheck, tests across packages; fix anything red), then workshop_submit with a title and why. It commits and returns the approval block to put in your reply, word for word, so Phil can ship it from Needs you. HQ then pushes it to the live branch, redeploys, and rolls back by itself if HQ doesn't come back. Never claim a change is live: it is live only after Phil approves and HQ reports the deploy. If a task needs a secret or a setting only Phil can add, say exactly what (name and where) and stop; never guess a key.`;
 
 /** Files that define what Einstein may do; a change to any of them is flagged on the ship card. */
-export const GUARDRAIL_FILES = /^(packages\/core\/src\/workshop\.ts|packages\/core\/src\/router\/claude\.ts|packages\/core\/src\/jarvis\/prompts\.ts|packages\/core\/src\/jarvis\/orchestrator\.ts|packages\/core\/src\/trading\/|packages\/core\/src\/registry\/charters\.ts|deploy\/|apps\/server\/src\/auth\.ts|apps\/server\/src\/index\.ts)/;
+export const GUARDRAIL_FILES = /^(packages\/core\/src\/workshop\.ts|packages\/core\/src\/router\/|packages\/core\/src\/jarvis\/(prompts|orchestrator|rules|overlap)\.ts|packages\/core\/src\/(config|watchers)\.ts|packages\/core\/src\/usage\/|packages\/core\/src\/trading\/|packages\/core\/src\/connectors\/|packages\/core\/src\/registry\/charters\.ts|packages\/core\/src\/store\/|deploy\/|apps\/server\/src\/(auth|index|app|telegram)\.ts|\.github\/|package\.json$|pnpm-lock\.yaml$|[^/]+\/package\.json$|[^/]+\/[^/]+\/package\.json$)/;
 
 export function workshopTools(w: Workshop, deps: WorkshopToolDeps = {}): ToolDef[] {
   // The folder is shared, so these three work only for the run that holds the workshop. A run that was told it is busy

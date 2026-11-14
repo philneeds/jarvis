@@ -30,3 +30,26 @@ test("the JD PM team works inside GoHighLevel on its own; anything a customer se
   assert.equal(isOutbound({ kind: "other", payload: { action: "ghl.deal.create", name: "x" } }), false);
   assert.equal(isOutbound({ kind: "send", payload: { action: "ghl.message", contactId: "c1" } }), true);
 });
+
+test("no agent can get a trade, an order or a business-calendar change auto-approved by labelling the card 'record'", async () => {
+  const { jarvis } = make();
+  for (const [agentId, payload] of [
+    ["stella", { action: "robinhood.call", tool: "place_order", args: { symbol: "TSLA", qty: 10 } }],
+    ["monica", { action: "trade.execute", symbol: "ETH", side: "long", sizeUsd: 500 }],
+    ["lip", { action: "strategy.enable", name: "yolo" }],
+    ["karol", { action: "trade.close", positionId: "p1", pnlUsd: -300 }],
+    ["jake", { action: "ghl.invoice.send", id: "i1" }],
+    ["monica", { action: "calendar.delete", id: "e1", account: "pmarino@getproedge.com" }],
+    ["monica", { action: "calendar.update", id: "e1", account: "philneedsofficial@gmail.com", start: "2026-11-20T10:00:00" }],
+    ["monica", { action: "calendar.create", title: "Ops sync", start: "2026-11-20T10:00:00", end: "2026-11-20T11:00:00", account: "rangedotzone@gmail.com" }],
+    ["monica", { action: "calendar.create", title: "Gym", start: "2026-11-20T10:00:00", end: "2026-11-20T11:00:00" }],
+  ] as const) {
+    const a = await jarvis.requestApproval({ agentId, kind: "record", title: `t ${payload.action}`, body: "", payload: { ...payload } });
+    assert.equal(a.status, "pending", `${agentId} ${payload.action} ${"account" in payload ? payload.account : ""}`);
+  }
+  // Still fine: a guest-free new event on a personal calendar, named; an archive; a record with no action (only records the decision).
+  const gym = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Gym", body: "", payload: { action: "calendar.create", title: "Gym", start: "2026-11-20T10:00:00", end: "2026-11-20T11:00:00", account: "PMarino9081@gmail.com" } });
+  assert.notEqual(gym.status, "pending");
+  const arch = await jarvis.requestApproval({ agentId: "monica", kind: "other", title: "Archive promos", body: "", payload: { action: "gmail.archive", query: "category:promotions", max: 20 } });
+  assert.notEqual(arch.status, "pending");
+});

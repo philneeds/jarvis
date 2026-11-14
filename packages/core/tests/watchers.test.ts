@@ -7,9 +7,10 @@ function make() {
   const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
   return { store, jarvis };
 }
-const at = (h: number, m: number) => { const d = new Date("2026-11-09T12:00:00Z"); d.setHours(h, m, 0, 0); return d; };
+// Phil's clock: Eastern, which is UTC-5 on Nov 9. The server's own clock (UTC on the droplet) doesn't matter.
+const at = (h: number, m: number) => new Date(Date.UTC(2026, 10, 9, h + 5, m));
 
-test("quiet hours: the window crosses midnight and is server-local", () => {
+test("quiet hours: the window crosses midnight and is on Phil's clock, not the server's", () => {
   assert.equal(inQuietHours(at(23, 0), "22:00-06:30"), true);
   assert.equal(inQuietHours(at(3, 0), "22:00-06:30"), true);
   assert.equal(inQuietHours(at(6, 29), "22:00-06:30"), true);
@@ -17,6 +18,7 @@ test("quiet hours: the window crosses midnight and is server-local", () => {
   assert.equal(inQuietHours(at(12, 0), "22:00-06:30"), false);
   assert.equal(inQuietHours(at(13, 0), "12:00-14:00"), true);
   assert.equal(inQuietHours(at(13, 0), "garbage"), false);
+  assert.equal(inQuietHours(new Date("2026-11-10T00:00:00Z"), "22:00-06:30"), false, "midnight UTC is 7 pm Eastern: awake");
 });
 
 test("GoHighLevel inbound: the first look only sets the cursor; later looks return what customers wrote since", () => {
@@ -89,7 +91,7 @@ test("a watcher wakes its agent only on an event, respects its timer, phase and 
   await ws.tick(at(9, 40));
   assert.equal((await stellaRuns()).length, 2, "two wakes today, then held");
   const parked = (await store.memory.list("agent:stella")).find((m) => m.key === "watch:t-leads");
-  assert.ok(parked && /you haven't acted on it yet \(2 wakes today already\)/.test(parked.value));
+  assert.ok(parked && /you haven't acted on them yet[\s\S]*\(2 wakes today already\)/.test(parked.value));
   const held = (await store.activity.list({ agentId: "stella" })).filter((e) => /has woken 2 times today/.test(e.summary));
   assert.equal(held.length, 1);
   // A new day resets the count.
@@ -117,4 +119,20 @@ test("a source that is down is reported once, and a paused agent's event is park
   const parked = (await store.memory.list("agent:stella")).find((m) => m.key === "watch:t-src");
   assert.ok(parked && /Stella is paused/.test(parked.value));
   assert.ok((await store.activity.list({ agentId: "stella" })).some((e) => /reading its source again/.test(e.summary)));
+});
+
+test("parked events add up instead of overwriting, and the agent's next completed run clears them", async () => {
+  const { store, jarvis } = make();
+  await store.init();
+  const { getAgent } = await import("../src/index.js");
+  const scope = "agent:stella", key = "watch:t-leads";
+  const w = new Watchers(jarvis, [] as Watcher[]);
+  const park = (w as unknown as { park(w: Watcher, e: string, why: string): Promise<void> }).park.bind(w);
+  const watcher = { id: "t-leads", agentId: "stella" } as Watcher;
+  await park(watcher, "Ana: can you come Tuesday?", "2 wakes today already");
+  await park(watcher, "Mike: what's the gutter price?", "2 wakes today already");
+  const v = (await store.memory.get(scope, key))!.value;
+  assert.match(v, /Ana: can you come Tuesday\?[\s\S]*Mike: what's the gutter price\?/, "both kept, oldest first");
+  await jarvis.runAgent(getAgent("stella")!, "morning routine", { direct: true });
+  assert.equal(await store.memory.get(scope, key), undefined, "seen in the run, so cleared");
 });

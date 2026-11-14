@@ -101,7 +101,7 @@ test("workshop_status, verify and submit work only for the run that holds the wo
   assert.equal(git(dir, "rev-parse", "HEAD"), head);
 });
 
-test("two Einstein runs at once: the first gets the claim in its tool context, the second gets none and doesn't free the first's", async () => {
+test("two Einstein runs at once: the second queues for the workshop, shows it's queued, and gets it when the first ends", async () => {
   const { root, app } = await repo();
   const store = memoryStore(); await store.init();
   const seen: { prompt: string; claim?: string; workspace: boolean }[] = [];
@@ -115,19 +115,34 @@ test("two Einstein runs at once: the first gets the claim in its tool context, t
     return mockProvider("mock-claude").run(req);
   } };
   const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [probe], grok: [mockProvider("mock-grok")] } }) });
-  const w = new Workshop({ dir: path.join(root, "workshop"), appDir: app, verify: async () => ({ ok: true, report: "" }) });
+  const w = new Workshop({ dir: path.join(root, "workshop"), appDir: app, verify: async () => ({ ok: true, report: "" }), pollMs: 20 });
   jarvis.useWorkshop(w);
   const einstein = getAgent("einstein")!;
   const first = jarvis.runAgent(einstein, "the first task", { direct: true });
   await firstIsRunning;
-  await jarvis.runAgent(einstein, "the second task", { direct: true });
-  const a = seen.find((s) => /first task/.test(s.prompt))!; const b = seen.find((s) => /second task/.test(s.prompt))!;
+  const second = jarvis.runAgent(einstein, "the second task", { direct: true });
+  await new Promise((r) => setTimeout(r, 120));
+  const a = seen.find((s) => /first task/.test(s.prompt))!;
   assert.ok(a.claim && a.workspace, "the first run holds the workshop");
-  assert.equal(b.claim, undefined); assert.equal(b.workspace, false);
-  // The second run has ended; the first still holds the workshop.
-  assert.ok(w.holds(a.claim), "the second run ending did not free the first run's claim");
-  assert.equal(w.busy?.task, "the first task");
+  assert.equal(seen.find((s) => /second task/.test(s.prompt)), undefined, "the second run hasn't started: it's queued");
+  assert.match((await store.agentState.get("einstein"))?.detail ?? "", /queued for the workshop behind "the first task"/);
+  assert.ok(w.holds(a.claim));
   letFirstFinish();
-  await first;
-  assert.equal(w.busy, undefined, "the first run gave it back when it ended");
+  await first; await second;
+  const b = seen.find((s) => /second task/.test(s.prompt))!;
+  assert.ok(b.claim && b.workspace, "the second run got the workshop once the first ended");
+  assert.notEqual(b.claim, a.claim);
+  assert.equal(w.busy, undefined, "both gave it back");
+});
+
+test("a queued run gives up after its wait and runs without code access, saying why", async () => {
+  const { root, app } = await repo();
+  const w = new Workshop({ dir: path.join(root, "workshop"), appDir: app, verify: async () => ({ ok: true, report: "" }), pollMs: 10, queueWaitMs: 50 });
+  const held = w.claim("a long refactor");
+  let told = "";
+  await assert.rejects(w.prepareWhenFree("a quick fix", { onWait: (b) => { told = b.task; } }), /in use by another run of yours/);
+  assert.equal(told, "a long refactor");
+  w.release(held);
+  const ok = await w.prepareWhenFree("a quick fix");
+  assert.ok(w.holds(ok.claim));
 });

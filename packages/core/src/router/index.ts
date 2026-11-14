@@ -39,7 +39,12 @@ export interface RunOptions {
   images?: import("../uploads.js").ImageInput[];
   /** Einstein's workshop: file and shell tools inside one directory, guarded. */
   workspace?: import("./types.js").Workspace;
+  /** Wall-clock limit for the whole run. Default RUN_TIMEOUT_MS (20 min), or WORKSHOP_RUN_TIMEOUT_MS (60 min) in a workshop. */
+  timeoutMs?: number;
 }
+
+/** A run that hangs (a stuck SDK call, a dead connection) must still end: it would hold its agent's status and Einstein's workshop forever. */
+export const runTimeoutMs = (workspace: boolean) => Number(workspace ? process.env.WORKSHOP_RUN_TIMEOUT_MS ?? 60 * 60_000 : process.env.RUN_TIMEOUT_MS ?? 20 * 60_000);
 
 export interface RunOutcome extends AgentResult {
   runId: string;
@@ -149,7 +154,19 @@ export class ModelRouter {
         catch (e) { prefetched += `\n\n---\nHQ's X search failed: ${(e as Error).message.slice(0, 160)}. Say the X read is missing.`; }
       } else if (!/x_recent_posts/.test(prefetched)) prefetched += `\n\n---\nNo X search is configured in HQ (no XAI_API_KEY), so nothing from X is in this task. Say the X read is missing; don't fetch x.com.`;
     }
+    // One clock for the whole run, across providers and retries. Phil's own abort still works through opts.signal.
+    const limitMs = opts.timeoutMs ?? runTimeoutMs(!!opts.workspace);
+    const ctl = new AbortController();
+    const onOuterAbort = () => ctl.abort();
+    opts.signal?.addEventListener("abort", onOuterAbort);
+    const timer = setTimeout(() => ctl.abort(new Error(`timed out after ${Math.round(limitMs / 60_000)} minutes`)), limitMs);
+    timer.unref?.(); // the server keeps running anyway; a limit alone shouldn't keep a finished process (a test) alive
+    // A provider that ignores the abort still can't hold the run: the race ends it.
+    const stopped = new Promise<never>((_, rej) => ctl.signal.addEventListener("abort", () => rej(new ProviderError(ctl.signal.reason instanceof Error ? ctl.signal.reason.message : "stopped", "hq")), { once: true }));
+    stopped.catch(() => undefined);
+    try {
     for (const p of chain) {
+      if (ctl.signal.aborted) break;
       const avail = await p.available();
       if (!avail.ok) { errors.push(`${p.id}: ${avail.reason}`); continue; }
       // When the model's usage limit is hit (Fable's cap), the same provider gets one more go on the model's
@@ -160,7 +177,7 @@ export class ModelRouter {
           const sees = model.provider === "claude";
           const n = opts.images?.length ?? 0;
           const prompt = (n && !sees ? `${opts.prompt}\n\n(Phil attached ${n} image${n > 1 ? "s" : ""} you can't see. Say so, and hand anything visual to Joi.)` : opts.prompt) + prefetched;
-          const res = await p.run({ agent, model: m, system: opts.system, prompt, runId, onDelta: opts.onDelta, signal: opts.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext, images: sees && n ? opts.images : undefined, workspace: opts.workspace });
+          const res = await Promise.race([p.run({ agent, model: m, system: opts.system, prompt, runId, onDelta: opts.onDelta, signal: ctl.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext, images: sees && n ? opts.images : undefined, workspace: opts.workspace }), stopped]);
           const finishedAt = new Date().toISOString();
           await this.store.runs.update(runId, { status: "done", output: res.text, provider: res.provider, modelId: res.modelId, finishedAt, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd });
           // A Grok run through the API spends xAI credits, not the SuperGrok plan.
@@ -175,7 +192,7 @@ export class ModelRouter {
           const msg = e instanceof ProviderError ? e.message : (e as Error).message;
           errors.push(`${p.id}${m !== model ? ` on ${m.label}` : ""}: ${msg}`);
           console.warn(`[run] ${agent.id} failed on ${p.id} (${m.modelId}): ${msg.slice(0, 300)}`);
-          if (opts.signal?.aborted) break;
+          if (ctl.signal.aborted) break;
           // The plan said stop: remember until when, so scheduled work waits instead of failing run after run.
           if (model.provider === "claude" && isUsageLimit(msg)) {
             const lim = await noteClaudeLimit(this.store, msg).catch(() => undefined);
@@ -187,8 +204,9 @@ export class ModelRouter {
           m = fb;
         }
       }
-      if (opts.signal?.aborted) break;
+      if (ctl.signal.aborted) break;
     }
+    } finally { clearTimeout(timer); opts.signal?.removeEventListener("abort", onOuterAbort); }
     const err = errors.join(" | ") || `no provider configured for ${model.label}`;
     const finishedAt = new Date().toISOString();
     await this.store.runs.update(runId, { status: "error", error: err, finishedAt });

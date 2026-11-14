@@ -106,6 +106,8 @@ const scheduler = new Scheduler(jarvis);
 const stale = await jarvis.clearStaleWork();
 // A ship that was in flight when HQ restarted: say how it went.
 void jarvis.finishShip().catch((e) => console.warn("[workshop] finish:", (e as Error).message));
+// Hourly: new code on GitHub that HQ isn't running becomes one "Update HQ" card under Needs you.
+if (workshop) jarvis.tasks.set("update-check", () => jarvis.checkForUpdate());
 if (stale.length) console.log(`[boot] cleared stale work: ${stale.join(", ")}`);
 if (process.env.SCHEDULER !== "0") scheduler.start();
 // Watchers: cheap looks at GoHighLevel and the markets every few minutes; a lead wakes only when something new happened.

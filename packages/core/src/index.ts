@@ -7,7 +7,7 @@ export * from "./usage/caps.js";
 export * from "./jarvis/prompts.js";
 export * from "./jarvis/blocks.js";
 export * from "./jarvis/readable.js";
-export { Jarvis, isOutbound, type JarvisOptions } from "./jarvis/orchestrator.js";
+export { Jarvis, isOutbound, alwaysWaits, AUTO_SHIP_KEY, type JarvisOptions } from "./jarvis/orchestrator.js";
 export { Scheduler, SCHEDULES, runRoutine, withCustom, scheduleView, REPORT_INBOX_KEY, REPORTS_LOG_KEY, withInbox, deliverReports, logReports, recentReports, reportsText, type QueuedReport, type RoutineReport, type LoggedReport, describeWhen, nextRun, type Schedule, type ScheduleView } from "./scheduler.js";
 export * from "./config.js";
 export { Watchers, WATCHERS, WATCH_STATE_KEY, inQuietHours, ghlInbound, fundingExtremes, type Watcher, type WatchDeps, type WatchResult, type WatchState, type WatcherView } from "./watchers.js";

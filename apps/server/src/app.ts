@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
@@ -365,7 +365,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     github: connectors.github ? await connectors.github.status() : { configured: false },
     robinhood: connectors.robinhood ? await connectors.robinhood.status() : { configured: false, connected: false },
     xsearch: { configured: !!process.env.XAI_API_KEY, model: process.env.XAI_SEARCH_MODEL || "grok-4.7", grokMode: process.env.GROK_MODE || "cli" },
-    workshop: { configured: !!connectors.workshop, dir: connectors.workshop?.dir, canShip: !!process.env.GITHUB_PUSH_TOKEN, last: await jarvis.store.settings.get("workshop.ship", null) },
+    workshop: { configured: !!connectors.workshop, dir: connectors.workshop?.dir, canShip: !!process.env.GITHUB_PUSH_TOKEN, last: await jarvis.store.settings.get("workshop.ship", null), autoShip: await jarvis.store.settings.get(AUTO_SHIP_KEY, false) },
     telegram: { configured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) },
     ntfy: { configured: !!process.env.NOTIFY_WEBHOOK_URL },
   }));
@@ -483,6 +483,15 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     ship: await jarvis.store.settings.get(SHIP_KEY, null),
     startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
   }));
+  // Phil's auto-ship switch for Einstein's guardrail-free changes; and "check for an update now".
+  api.post("/workshop/autoship", async (c) => {
+    const p = z.object({ on: z.boolean() }).safeParse(await c.req.json().catch(() => ({})));
+    if (!p.success) return c.json({ error: "on: true or false" }, 400);
+    await jarvis.store.settings.set(AUTO_SHIP_KEY, p.data.on);
+    await jarvis.router.log("einstein", "system", `Phil turned auto-ship ${p.data.on ? "on: Einstein's changes that touch no guardrails go out once their checks pass (3 a day at most)" : "off: every change waits for Phil"}`);
+    return c.json({ on: p.data.on });
+  });
+  api.post("/update/check", async (c) => c.json({ result: await jarvis.checkForUpdate() }));
   api.post("/backup", async (c) => {
     const fn = jarvis.tasks.get("backup");
     if (!fn) return c.json({ error: "backups aren't set up on this server" }, 400);

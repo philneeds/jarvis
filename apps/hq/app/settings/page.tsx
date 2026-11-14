@@ -9,7 +9,7 @@ import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 
 interface Passkey { id: string; label: string; createdAt: string }
-interface Connectors { workshop?: { configured: boolean; dir?: string; canShip: boolean; last?: { at: string; sha: string; title: string; status: string; note?: string } | null }; xsearch?: { configured: boolean; model: string; grokMode: string }; google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; robinhood?: { configured: boolean; connected: boolean; connectedAt?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
+interface Connectors { workshop?: { configured: boolean; dir?: string; canShip: boolean; autoShip?: boolean; last?: { at: string; sha: string; title: string; status: string; note?: string } | null }; xsearch?: { configured: boolean; model: string; grokMode: string }; google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; robinhood?: { configured: boolean; connected: boolean; connectedAt?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
 
 export default function SettingsPage() {
   const { state, refresh } = useLive();
@@ -21,6 +21,7 @@ export default function SettingsPage() {
   const [conn, setConn] = useState<Connectors | null>(null);
   const [googleMsg, setGoogleMsg] = useState<string>();
 
+  const [wsMsg, setWsMsg] = useState<string>();
   const load = () => Promise.all([
     api<{ passkeys: Passkey[]; rpID: string }>("/api/passkeys").then((r) => { setPasskeys(r.passkeys); setRpID(r.rpID); }),
     api<Connectors>("/api/connectors").then(setConn),
@@ -239,6 +240,16 @@ export default function SettingsPage() {
                 : <span className="ml-auto" style={{ color: "var(--amber)" }}>can prepare changes but not ship: add GITHUB_PUSH_TOKEN (fine-grained, Contents read and write on the jarvis repo) to .env and restart.</span>}
             </div>
             {conn?.workshop?.last?.note && <p className="m-0 pl-6" style={{ color: conn.workshop.last.status === "done" ? "var(--ink)" : "var(--red)" }}>{conn.workshop.last.note}</p>}
+            {conn?.workshop?.canShip && (
+              <div className="flex flex-wrap items-center gap-3 pl-6">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={!!conn.workshop.autoShip} onChange={async (e) => { await post("/api/workshop/autoship", { on: e.target.checked }).catch(() => undefined); await load(); }} />
+                  <span>Auto-ship: Einstein&apos;s changes go out on their own once every check passes, unless they touch his guardrails (approvals, money, connectors, deploy). 3 a day at most; HQ still rolls back by itself if a change breaks it.</span>
+                </label>
+                <button className="btn btn-sm ml-auto" onClick={async () => { const r = await post<{ result: string }>("/api/update/check", {}).catch((e) => ({ result: (e as Error).message })); setWsMsg(r.result.replace(/^update check: /, "")); }}>Check for update</button>
+              </div>
+            )}
+            {wsMsg && <p className="m-0 pl-6" style={{ color: "var(--ink)" }}>{wsMsg}</p>}
           </div>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="X search">
             <div className="flex flex-wrap items-center gap-3">

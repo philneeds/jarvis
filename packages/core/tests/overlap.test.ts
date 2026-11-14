@@ -71,3 +71,38 @@ test("calendar.create keeps the repeat rule and the zone", () => {
   assert.equal(once.recurrence, undefined);
   assert.equal(once.start?.timeZone, undefined);
 });
+
+test("never replaced: different customers, money and trades, same title on another day, all-day vs timed, a card Phil edited", async () => {
+  const { jarvis, store } = make();
+  const ask = (agentId: string, runId: string, title: string, payload: Record<string, unknown>, kind: "record" | "send" | "money" = "record") => jarvis.requestApproval({ agentId, kind, title, body: "", payload, runId });
+  await ask("stephanie", "r1", "Reply to new lead", { action: "ghl.message", contactId: "A", message: "hi A" }, "send");
+  await ask("stephanie", "r2", "Reply to new lead", { action: "ghl.message", contactId: "B", message: "hi B" }, "send");
+  await ask("mayne", "r3", "Long ETH", { action: "trade.execute", symbol: "ETH", side: "long", sizeUsd: 100, strategy: "A" }, "money");
+  await ask("mayne", "r4", "Long ETH", { action: "trade.execute", symbol: "ETH", side: "long", sizeUsd: 50, strategy: "B" }, "money");
+  const gymMon = await ask("lip", "r5", "Gym", { action: "calendar.create", account: "philneedsofficial@gmail.com", title: "Gym", start: "2026-11-16T07:00:00", end: "2026-11-16T08:00:00", attendees: ["coach@x.com"] });
+  await ask("lip", "r6", "Gym", { action: "calendar.create", account: "philneedsofficial@gmail.com", title: "Gym", start: "2026-11-19T07:00:00", end: "2026-11-19T08:00:00", attendees: ["coach@x.com"] });
+  await ask("lip", "r7", "Birthday", { action: "calendar.create", account: "philneedsofficial@gmail.com", title: "Mom's birthday", start: "2026-11-16", end: "2026-11-17", attendees: ["mom@x.com"] });
+  assert.equal((await store.approvals.list("pending")).length, 7, "nothing replaced anything");
+  // Phil edits a card; a revision of it from a later run doesn't throw his edit away.
+  await jarvis.updateApproval(gymMon.id, { body: "Make it 6:30" });
+  await ask("lip", "r8", "Gym (revised)", { action: "calendar.create", account: "philneedsofficial@gmail.com", title: "Gym", start: "2026-11-16T07:00:00", end: "2026-11-16T08:00:00", attendees: ["coach@x.com"] });
+  assert.equal((await store.approvals.get(gymMon.id))?.status, "pending");
+});
+
+test("replaced: the same slot written in two time formats, the same customer thread, the newest memory condense", async () => {
+  const { jarvis, store } = make();
+  const ask = (agentId: string, runId: string, title: string, payload: Record<string, unknown>, kind: "record" | "send" = "record") => jarvis.requestApproval({ agentId, kind, title, body: "", payload, runId });
+  const utc = await ask("monica", "r1", "Call", cal("Call", "2026-11-18T19:00:00Z", "2026-11-18T20:00:00Z"));
+  await ask("monica", "r2", "Call", cal("Call", "2026-11-18T14:00:00-05:00", "2026-11-18T15:00:00-05:00"));
+  assert.equal((await store.approvals.get(utc.id))?.status, "rejected", "2pm Eastern is 19:00 UTC");
+  const t1 = await ask("stephanie", "r3", "Reply to Ana", { action: "ghl.message", contactId: "ana", message: "v1" }, "send");
+  await ask("stephanie", "r4", "Reply to Ana (better)", { action: "ghl.message", contactId: "ana", message: "v2" }, "send");
+  assert.equal((await store.approvals.get(t1.id))?.status, "rejected");
+  const c1 = await ask("oscar", "r5", "Condense memory 40 → 30", { action: "memory.replace", keep: [] });
+  await ask("oscar", "r6", "Condense memory 41 → 31", { action: "memory.replace", keep: [] });
+  assert.equal((await store.approvals.get(c1.id))?.status, "rejected");
+  // Times written in Phil's own clock and in UTC compare correctly.
+  assert.equal(slotsOverlap(slot({ start: "2026-11-18T09:00:00", end: "2026-11-18T10:00:00" }), slot({ start: "2026-11-18T14:00:00Z", end: "2026-11-18T15:00:00Z" })), true);
+  assert.equal(slotsOverlap(slot({ start: "2026-11-18", end: "2026-11-19" }), slot({ start: "2026-11-18T09:00:00", end: "2026-11-18T10:00:00" })), false);
+  assert.equal(slotsOverlap(slot({ start: "2026-11-02T09:00:00", end: "2026-11-02T10:00:00", recurrence: "RRULE:FREQ=MONTHLY" }), slot({ start: "2026-11-09T09:00:00", end: "2026-11-09T10:00:00" })), false, "monthly isn't weekly");
+});

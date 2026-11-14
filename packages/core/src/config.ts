@@ -73,14 +73,22 @@ export async function getAgentConfig(store: Store, id: string): Promise<AgentCon
 }
 
 export async function setAgentConfig(store: Store, id: string, patch: Partial<AgentConfig>): Promise<AgentConfig> {
+  const raw = await store.settings.get<Partial<AgentConfig>>(key(id), {});
   const cur = await getAgentConfig(store, id);
-  const next: AgentConfig = { ...cur, ...patch, persona: { ...cur.persona, ...(patch.persona ?? {}) }, rules: { ...cur.rules, ...(patch.rules ?? {}) } };
-  // Phil's tool list is the whole truth at the moment he saves it: whatever charter tool he left out is off until he
-  // puts it back; a charter tool that doesn't exist yet (a connector added later) is not off, so it arrives on its own.
-  if (patch.tools && !patch.toolsOff) next.toolsOff = charterDefaults(id).tools.filter((t) => !patch.tools!.includes(t));
-  next.tools = effectiveTools(id, next);
-  await store.settings.set(key(id), next);
-  return next;
+  const saved: Partial<AgentConfig> = { ...raw, ...patch, persona: { ...cur.persona, ...(patch.persona ?? {}) }, rules: { ...cur.rules, ...(patch.rules ?? {}) } };
+  // What's stored is only Phil's difference from the charter: tools he added (tools) and charter tools he switched off
+  // (toolsOff). The charter itself is never copied in, so a tool later added to or dropped from the charter reaches
+  // the agent, and a save that only touches rules or persona leaves the tools as they were.
+  const charter = charterDefaults(id).tools;
+  if (patch.tools) {
+    saved.toolsOff = patch.toolsOff ?? charter.filter((t) => !patch.tools!.includes(t));
+    saved.tools = patch.tools.filter((t) => !charter.includes(t));
+  } else {
+    saved.tools = raw.tools;
+    saved.toolsOff = raw.toolsOff;
+  }
+  await store.settings.set(key(id), saved);
+  return getAgentConfig(store, id);
 }
 
 export function personaText(p: Persona): string {

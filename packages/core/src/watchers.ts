@@ -85,11 +85,13 @@ export const WATCHERS: Watcher[] = [
   },
 ];
 
-/** Is `now` inside the quiet window "HH:MM-HH:MM" (server-local, may cross midnight)? */
-export function inQuietHours(now: Date, spec = process.env.WATCH_QUIET ?? "22:00-06:30"): boolean {
+/** Is `now` inside the quiet window "HH:MM-HH:MM" on Phil's clock (PHIL_TZ, default America/New_York; may cross midnight)? */
+export function inQuietHours(now: Date, spec = process.env.WATCH_QUIET ?? "22:00-06:30", tz = process.env.PHIL_TZ || "America/New_York"): boolean {
   const m = spec.match(/^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/);
   if (!m) return false;
-  const start = Number(m[1]) * 60 + Number(m[2]), end = Number(m[3]) * 60 + Number(m[4]), t = now.getHours() * 60 + now.getMinutes();
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", hour: "2-digit", minute: "2-digit" }).formatToParts(now);
+  const hh = Number(parts.find((p) => p.type === "hour")?.value), mm = Number(parts.find((p) => p.type === "minute")?.value);
+  const start = Number(m[1]) * 60 + Number(m[2]), end = Number(m[3]) * 60 + Number(m[4]), t = hh * 60 + mm;
   return start <= end ? t >= start && t < end : t >= start || t < end;
 }
 
@@ -169,7 +171,16 @@ export class Watchers {
   private async park(w: Watcher, event: string, why: string) {
     const agent = getAgent(w.agentId)!;
     const when = new Date().toISOString().slice(0, 16).replace("T", " ");
-    await this.jarvis.store.memory.set({ scope: `agent:${agent.id}`, key: `watch:${w.id}`, value: `${w.id} watcher saw this on ${when} UTC and you haven't acted on it yet (${why}): ${event.replace(/\s+/g, " ").slice(0, 1500)}`, source: "watcher" });
+    // Events add up under one key (newest last, oldest dropped past the cap) instead of overwriting each other; the
+    // agent's next completed run clears them, so nothing is acted on twice.
+    const scope = `agent:${agent.id}`, key = `watch:${w.id}`;
+    const prev = (await this.jarvis.store.memory.get(scope, key))?.value;
+    const line = `- ${when} UTC (${why}): ${event.replace(/\s+/g, " ").slice(0, 900)}`;
+    const head = `${w.id} watcher saw these and you haven't acted on them yet:`;
+    const lines = [...(prev ? prev.split("\n").slice(1) : []), line];
+    let value = [head, ...lines].join("\n");
+    while (value.length > 4000 && lines.length > 1) { lines.shift(); value = [head, `- (older events dropped)`, ...lines].join("\n"); }
+    await this.jarvis.store.memory.set({ scope, key, value, source: "watcher" });
     await this.jarvis.router.log(agent.id, "system", `Watcher ${w.id}: ${agent.name} couldn't take it now (${why}); parked in ${agent.name}'s memory for the next run.`);
   }
 

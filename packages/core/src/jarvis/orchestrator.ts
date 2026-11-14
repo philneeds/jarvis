@@ -21,7 +21,10 @@ import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { LOOKUP_TOOLS } from "../lookup.js";
 import { INSTAGRAM_LINE, VideoAnalyzer, videoCaps, videoLogLine, videoRefs, videoText, videoTools, withoutInstagramLinks, type VideoDeps, type VideoRef } from "../video.js";
 import { DECK_HINT, makeDeck, normalizeDeck, type Deck } from "../decks.js";
-import { WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
+import { GUARDRAIL_FILES, WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
+/** Settings keys for Phil's auto-ship switch and the day's auto-ships. */
+export const AUTO_SHIP_KEY = "workshop.autoShip";
+const AUTO_SHIP_LOG_KEY = "workshop.autoShipLog";
 
 export interface JarvisOptions {
   store: Store;
@@ -49,23 +52,8 @@ export function spokenAddress(text: string): RegExpMatchArray | null {
   return [m[0]!, agent.id, m[2]!] as unknown as RegExpMatchArray;
 }
 
-/** Actions that reach another person. */
-const OUTBOUND_ACTIONS = new Set(["gmail.send", "x.post", "x.reply", "x.dm", "ghl.message"]);
-
-/** Does this approval reach anyone besides Phil: a message, a post, or a calendar change other people will see? */
-export function isOutbound(a: Pick<Approval, "kind" | "payload">): boolean {
-  const p = (a.payload ?? {}) as { action?: unknown; attendees?: unknown; guests?: unknown; public?: unknown };
-  if (a.kind === "send" || a.kind === "post") return true;
-  if (p.public === true) return true;
-  if (typeof p.action === "string" && OUTBOUND_ACTIONS.has(p.action)) return true;
-  if (Array.isArray(p.attendees) && p.attendees.length) return true;
-  if (Array.isArray(p.guests) && p.guests.length) return true;
-  // A record change is HQ's own board or memory: approving records it, and an action no connector handles does nothing.
-  if (a.kind === "record") return false;
-  // An action no connector recognises is treated as outbound: when unsure, ask.
-  // GoHighLevel's internal writes (a note, a deal, a contact record) stay inside JD PM's CRM; ghl.message reaches the customer.
-  return typeof p.action !== "string" || !/^(gmail\.(archive|label|trash)|calendar\.(create|update|delete)|spotify\.playlist\.(create|add)|goals\.(update|benchmarks)|watchlist\.add|memory\.replace|record\.|ghl\.(note|contact\.create|deal\.(create|move)))/.test(p.action);
-}
+export { isOutbound, alwaysWaits } from "./rules.js";
+import { isOutbound, alwaysWaits } from "./rules.js";
 
 /** Something Phil deleted, kept for a while so he can undo it. */
 interface TrashEntry { id: string; at: string; kind: "memory" | "record" | "metric" | "goal"; label: string; data: unknown; index?: number }
@@ -267,8 +255,60 @@ export class Jarvis {
       if (typeof p.sha !== "string" || !/^[0-9a-f]{7,40}$/.test(p.sha)) throw new Error("code.ship needs the commit sha from workshop_submit");
       return w.ship(this.store, p.sha, String(p.title ?? a.title), a.id);
     });
+    this.executors.set("hq.update", async (a) => {
+      const p = (a.payload ?? {}) as { sha?: unknown };
+      return w.update(this.store, String(p.sha ?? ""), a.title, a.id);
+    });
+    this.describers.set("hq.update", (p) => `Deploys the newest code on HQ's branch (${Number(p.count ?? 0)} change${Number(p.count) === 1 ? "" : "s"}, up to ${String(p.sha ?? "").slice(0, 7)}): HQ waits for any agent mid-run, rebuilds and restarts (two or three minutes), and rolls back by itself if it doesn't come back up. Nothing else changes.`);
     this.describers.set("code.ship", (p) => `Pushes Einstein's commit ${String(p.sha ?? "").slice(0, 7)} to the live branch and redeploys HQ (HQ restarts; two or three minutes). If HQ doesn't come back up, the deploy rolls back by itself and the commit is reverted.${Array.isArray(p.guardrails) && p.guardrails.length ? ` This one changes Einstein's own guardrails (${(p.guardrails as string[]).join(", ")}): read the diff first.` : ""}`);
   }
+  /**
+   * Is there code on GitHub HQ isn't running? Then one "Update HQ" card waits under Needs you (and on Telegram), listing
+   * the changes; approving it deploys them. An older update card is replaced; when HQ is current it's withdrawn. Run
+   * hourly by the scheduler and by /update. Returns a line for the log.
+   */
+  async checkForUpdate(): Promise<string> {
+    if (!this.workshop) return "update check: no workshop configured";
+    let b: Awaited<ReturnType<Workshop["behind"]>>;
+    try { b = await this.workshop.behind(); } catch (e) { return `update check: couldn't read GitHub (${(e as Error).message.slice(0, 160)})`; }
+    const pending = (await this.store.approvals.list("pending")).filter((p) => (p.payload as { action?: unknown } | undefined)?.action === "hq.update");
+    const withdraw = async (why: string) => {
+      for (const p of pending) { const d = await this.store.approvals.update(p.id, { status: "rejected", decidedAt: new Date().toISOString(), note: `superseded: ${why}` }); if (d) bus.emitEvent({ type: "approval.decided", approval: d }); }
+    };
+    if (!b.commits.length) { await withdraw("HQ is already up to date"); return `update check: HQ is current (${b.live.slice(0, 7)})`; }
+    if (pending.some((p) => (p.payload as { sha?: unknown }).sha === b.tip)) return `update check: the card for ${b.tip.slice(0, 7)} is already waiting`;
+    await withdraw("a newer update card");
+    const n = b.commits.length;
+    const list = b.commits.slice(0, 15).map((c) => `• ${c.title} (${c.author}, ${c.sha.slice(0, 7)})`).join("\n");
+    await this.requestApproval({
+      agentId: "einstein", kind: "config", title: `Update HQ: ${n} new change${n === 1 ? "" : "s"}`,
+      body: `HQ is running ${b.live.slice(0, 7)}; ${b.branch} on GitHub has ${n} newer commit${n === 1 ? "" : "s"}:\n${list}${n > 15 ? `\n… and ${n - 15} more` : ""}`,
+      payload: { action: "hq.update", sha: b.tip, count: n },
+      context: "These are already on GitHub (pushed from a Claude Code session, or merged by hand). Approving deploys them the way Einstein's ships deploy: it waits for any agent mid-run, health-checks HQ, and rolls back by itself if HQ doesn't come back.",
+    });
+    return `update check: ${n} new change${n === 1 ? "" : "s"} on ${b.branch}; card queued`;
+  }
+
+  /**
+   * Phil's auto-ship switch (Settings → Einstein's workshop, off by default): a ship card goes through on its own when
+   * the commit's own files (read from git, not from the card) touch none of Einstein's guardrails, and fewer than
+   * AUTO_SHIP_PER_DAY (default 3) went out today. The deploy's health check and rollback still apply. Returns why not.
+   */
+  private async autoShipRefusal(a: Approval): Promise<string | undefined> {
+    if (!this.workshop || !(await this.store.settings.get<boolean>(AUTO_SHIP_KEY, false))) return "auto-ship is off";
+    const sha = String((a.payload as { sha?: unknown } | undefined)?.sha ?? "");
+    let files: string[];
+    try { files = (await this.workshop.describe(sha)).files; } catch { return "the commit isn't in the workshop"; }
+    const rails = files.filter((f) => GUARDRAIL_FILES.test(f));
+    if (rails.length) return `it touches guardrails (${rails.join(", ")})`;
+    const today = new Date().toISOString().slice(0, 10);
+    const log = (await this.store.settings.get<string[]>(AUTO_SHIP_LOG_KEY, [])).filter((d) => d.startsWith(today));
+    const cap = Number(process.env.AUTO_SHIP_PER_DAY ?? 3);
+    if (log.length >= cap) return `${cap} changes already auto-shipped today`;
+    await this.store.settings.set(AUTO_SHIP_LOG_KEY, [...log, new Date().toISOString()]);
+    return undefined;
+  }
+
   /** On boot: report how the last ship went, if one was in flight when HQ restarted. */
   async finishShip(): Promise<string | undefined> {
     if (!this.workshop) return undefined;
@@ -370,7 +410,7 @@ export class Jarvis {
     const status = await this.systemStatus();
     const recent = (await this.store.chat.list(12)).slice(0, -1).map((m) => `${m.role === "phil" ? "Phil" : m.agentId ?? "Jarvis"}: ${m.text.slice(0, 300)}`).join("\n");
     const { recentReports, reportsText } = await import("../scheduler.js");
-    const system = jarvisSystemPrompt(memory, status.text, await this.attentionText(), reportsText(await recentReports(this.store, 48)));
+    const system = jarvisSystemPrompt(memory, `${status.text}\n${await this.liveWorkText()}`, await this.attentionText(), reportsText(await recentReports(this.store, 48)));
 
     const imageIds = this.convo.getStore()?.images ?? [];
     const byVoice = this.convo.getStore()?.voice ? "\n\n(Phil said this as a voice note; it was transcribed, so an odd word may be a mishearing. Don't say you can't tell how it arrived.)" : "";
@@ -451,9 +491,13 @@ export class Jarvis {
     let workshopClaim: string | undefined;
     if (CHARTERS[agent.id]?.workshop && this.workshop) {
       try {
-        const w = await this.workshop.prepare(task);
+        // Queue behind a code task already in the workshop rather than run without it; the Working strip says so.
+        const w = await this.workshop.prepareWhenFree(task, { onWait: (b) => this.router.setStatus(agent.id, "working", `queued for the workshop behind "${b.task.replace(/\s+/g, " ").slice(0, 60)}"`) });
         workshopClaim = w.claim;
-        workspace = { dir: w.dir, guard: workshopGuard(w.dir, process.cwd()) };
+        // Every file and shell call checks the claim first: a run that lost the workshop (its claim went stale and
+        // another run took over) can no longer write into the other run's branch.
+        const base = workshopGuard(w.dir, process.cwd()), ws = this.workshop;
+        workspace = { dir: w.dir, guard: (tool, input) => (ws.holds(w.claim) || !/^(Edit|Write|MultiEdit|NotebookEdit|Bash)$/.test(tool) ? base(tool, input) : "this run no longer holds the workshop (its claim expired and another run took over); stop changing files and say what you got done") };
         workshopHint = `\n\n${WORKSHOP_HINT(w.dir, w.branch, w.base)}`;
       } catch (e) { workshopHint = `\n\nYour workshop couldn't be opened (${(e as Error).message.slice(0, 200)}), so you can't change code this run; say so and diagnose with the tools you have.`; }
     }
@@ -467,6 +511,9 @@ export class Jarvis {
     try { r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id, workshopClaim }, onDelta: this.streamer(agent.id), images, workspace }); }
     finally { if (workshopClaim) this.workshop?.release(workshopClaim); } // the workshop is free for the next run once this one's tools are done; only this run's own claim is given back
     if (r.blocked) return r;
+    // Parked watcher events and hand-off answers were in this run's memory; it has now seen and handled them, so they
+    // go, rather than nag (and be acted on again) in every later run.
+    for (const m of memory) if (m.scope === `agent:${agent.id}` && /^(watch|handoff):/.test(m.key)) await this.store.memory.remove(m.scope, m.key).catch(() => undefined);
     if (opts.noBlocks) return r; // the caller reads the reply itself (approval Q&A)
     const { text: said, approvals, remember, metrics, records, handoffs, attention, slides } = extractBlocks(r.text);
     let text = said;
@@ -523,7 +570,9 @@ export class Jarvis {
     if (rr.blocked) {
       const when = new Date().toISOString().slice(0, 16).replace("T", " ");
       for (const a of answers) {
-        await this.store.memory.set({ scope: `agent:${agent.id}`, key: `handoff:${a.agent.id}`, value: `${a.agent.name} answered your hand-off on ${when} UTC (you haven't acted on it yet): ${a.text.replace(/\s+/g, " ").slice(0, 1200)}`, source: a.agent.id });
+        const key = `handoff:${a.agent.id}`, prev = (await this.store.memory.get(`agent:${agent.id}`, key))?.value;
+        const v = `${prev ? `${prev}\n\n` : ""}${a.agent.name} answered your hand-off on ${when} UTC (you haven't acted on it yet): ${a.text.replace(/\s+/g, " ").slice(0, 1200)}`;
+        await this.store.memory.set({ scope: `agent:${agent.id}`, key, value: v.slice(-4000), source: a.agent.id });
       }
       await this.router.log(agent.id, "system", `${agent.name} couldn't take ${names}'s answer now (${rr.blocked}); parked in ${agent.name}'s memory for the next run`, runId);
       return;
@@ -953,7 +1002,7 @@ export class Jarvis {
     const arg = rest.join(" ").trim();
     switch ((cmd ?? "").toLowerCase()) {
       case "help":
-        return "Commands: /brief (morning rundown), /status (who's doing what), /run <routine or agent> (run a scheduled routine now; /run alone lists them), /brain <agent> <text> (add to that agent's memory; /brain <agent> alone shows it), /todo <thing> (add to your to-do list; /todo alone lists it), /pause [agent|trading|all], /resume [agent|trading|all], /approvals, /waiting (what needs you), /usage, /memory, /condense (Oscar tidies memory). Talk to any agent with @name.";
+        return "Commands: /brief (morning rundown), /status (who's doing what), /run <routine or agent> (run a scheduled routine now; /run alone lists them), /update (check GitHub for new HQ code; an Update HQ card if there is some), /brain <agent> <text> (add to that agent's memory; /brain <agent> alone shows it), /todo <thing> (add to your to-do list; /todo alone lists it), /pause [agent|trading|all], /resume [agent|trading|all], /approvals, /waiting (what needs you), /usage, /memory, /condense (Oscar tidies memory). Talk to any agent with @name.";
       case "brief":
         return this.brief();
       case "brain": {
@@ -975,10 +1024,15 @@ export class Jarvis {
         await this.router.log("jarvis", "memory", `Phil added to ${target.name}'s memory: ${note.slice(0, 120)}`);
         return `Filed for ${target.name}. They'll have it on their next run.`;
       }
+      case "update": {
+        // Is there new code on GitHub? Then the Update HQ card is (re)queued under Needs you.
+        const r = await this.checkForUpdate();
+        return r.replace(/^update check: /, "").replace(/; card queued$/, ": an Update HQ card is waiting under Needs you; approve it to deploy.").replace(/^HQ is current/, "HQ is up to date").replace(/is already waiting$/, "is already waiting under Needs you.");
+      }
       case "run": {
         // Run a scheduled routine now, by its id or the agent's name; it reports up the chain as it would on its timer.
-        const { withCustom, runRoutine } = await import("../scheduler.js");
-        const all = (await withCustom(this.store)).filter((s) => s.task !== "brief" && s.task !== "condense" && s.task !== "backup");
+        const { withCustom, runRoutine, HOUSEKEEPING } = await import("../scheduler.js");
+        const all = (await withCustom(this.store)).filter((s) => !HOUSEKEEPING.has(s.task));
         const q = arg.toLowerCase().replace(/^@/, "");
         if (!q) return `Routines: ${all.map((s) => `${s.id} (${getAgent(s.agentId)?.name ?? s.agentId})`).join(", ")}. Say /run <id> or /run <agent>.`;
         const s = all.find((x) => x.id === q) ?? all.find((x) => x.agentId === q || (getAgent(x.agentId)?.name ?? "").toLowerCase() === q || (getAgent(x.agentId)?.name ?? "").toLowerCase().split(" ").includes(q));
@@ -1149,6 +1203,16 @@ export class Jarvis {
       await this.router.log(a.agentId, "system", `${getAgent(a.agentId)?.name ?? a.agentId}: "${old.title}" replaced by the newer card "${approval.title}"`, a.runId, { approvalId: old.id, supersededBy: approval.id });
       if (done) bus.emitEvent({ type: "approval.decided", approval: done });
     }
+    // Phil's auto-ship switch: one of Einstein's green, guardrail-free commits goes out without waiting.
+    if ((a.payload as { action?: unknown } | undefined)?.action === "code.ship" && this.workshop) {
+      const why = await this.autoShipRefusal(approval);
+      if (!why) {
+        await this.router.log(a.agentId, "approval", `Einstein: "${a.title}" auto-shipped by Phil's rule (no guardrail files)`, a.runId, { kind: a.kind });
+        const done = await this.decide(approval.id, "approved", "auto: Phil's auto-ship rule");
+        return done ?? approval;
+      }
+      if (why !== "auto-ship is off") await this.store.approvals.update(approval.id, { note: `Not auto-shipped: ${why}.` });
+    }
     // Phil's per-agent rules: low-risk kinds under the dollar cap go through on their own, logged.
     const rules = (await getAgentConfig(this.store, a.agentId)).rules;
     const pay = (a.payload ?? {}) as { amount?: unknown; max?: unknown; ids?: unknown };
@@ -1160,9 +1224,9 @@ export class Jarvis {
     const action = (a.payload as { action?: unknown } | undefined)?.action;
     // Phil's outbound rule: internal work goes through; anything reaching another person waits. Trash and money always
     // wait, and Phil's dollar cap for the agent still holds.
-    const auto = asksFor === "everything" ? false : asksFor === "outbound"
-      ? !isOutbound(a) && a.kind !== "money" && a.kind !== "strategy" && action !== "gmail.trash" && amount <= rules.maxAutoDollars && items <= itemCap
-      : a.kind !== "money" && a.kind !== "strategy" && rules.autoApprove.includes(a.kind) && amount <= rules.maxAutoDollars && items <= itemCap;
+    const auto = asksFor === "everything" || alwaysWaits(a) ? false : asksFor === "outbound"
+      ? !isOutbound(a) && action !== "gmail.trash" && amount <= rules.maxAutoDollars && items <= itemCap
+      : rules.autoApprove.includes(a.kind) && amount <= rules.maxAutoDollars && items <= itemCap;
     if (auto) {
       await this.router.log(a.agentId, "approval", `${getAgent(a.agentId)?.name ?? a.agentId}: "${a.title}" auto-approved by Phil's rule (${a.kind}${amount ? `, $${amount}` : ""})`, a.runId, { kind: a.kind, body: a.body });
       const done = await this.decide(approval.id, "approved", "auto: Phil's rule");
@@ -1272,6 +1336,22 @@ export class Jarvis {
   }
 
   // ---- Status -------------------------------------------------------------
+
+  /**
+   * What is actually running right now, from the runs table, plus Einstein's workshop queue and any deploy in flight.
+   * Jarvis answers "how's Einstein doing?" from this, not from older chat: a run that isn't listed has ended.
+   */
+  async liveWorkText(now = Date.now()): Promise<string> {
+    const mins = (iso: string) => Math.max(0, Math.round((now - Date.parse(iso)) / 60_000));
+    const runs = (await this.store.runs.running()).filter((r) => r.agentId !== "jarvis");
+    const lines = runs.map((r) => `- ${getAgent(r.agentId)?.name ?? r.agentId}: working for ${mins(r.startedAt)} min on "${r.prompt.replace(/^[^:]{0,40}?asks:\s*/i, "").replace(/\s+/g, " ").slice(0, 110)}"`);
+    const queued = (await this.store.agentState.all()).filter((s) => s.status === "working" && /^queued for the workshop/.test(s.detail ?? "") && !runs.some((r) => r.agentId === s.id));
+    for (const q of queued) lines.push(`- ${getAgent(q.id)?.name ?? q.id}: ${q.detail}`);
+    const { SHIP_KEY } = await import("../workshop.js");
+    const ship = await this.store.settings.get<{ status?: string; title?: string; at?: string } | null>(SHIP_KEY, null);
+    if (ship?.status === "shipping" && ship.at) lines.push(`- Deploy in progress for "${ship.title}" (started ${mins(ship.at)} min ago; HQ restarts when it lands)`);
+    return lines.length ? `Working right now (live; anything not listed has finished or stopped, so don't call it "building" or "in progress"):\n${lines.join("\n")}` : "Working right now: nothing. No agent run is in progress; anything earlier has finished or stopped.";
+  }
 
   async systemStatus(): Promise<SystemStatus> {
     const kill = await this.store.settings.get("killSwitch", { all: false, trading: false, agents: [] as string[] });
