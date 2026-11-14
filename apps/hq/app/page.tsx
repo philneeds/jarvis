@@ -11,14 +11,11 @@ import { Skyline } from "@/components/Skyline";
 import { Core, type CoreState } from "@/components/Core";
 import { Transcript } from "@/components/Transcript";
 import { Working } from "@/components/Working";
-import { Now } from "@/components/Now";
-import { AgentPicker } from "@/components/AgentPicker";
-import { addressee, readdress } from "@jarvis/core/home";
 import { useLive } from "@/lib/live";
 import { useVoice } from "@/lib/voice";
 import { useClap, type ClapSensitivity } from "@/lib/clap";
 import { PAUSE_LABEL, readPause, savePause, type PauseChoice, RATES, rateLabel, readRate, saveRate, type RateChoice } from "@/lib/voice";
-import { api, timeAgo } from "@/lib/api";
+import { api, post, timeAgo } from "@/lib/api";
 import { clip, meaningful, readable } from "@/lib/activity";
 
 const FILLERS = ["One moment.", "Let me look.", "On it.", "Checking."];
@@ -43,9 +40,6 @@ export default function HomePage() {
   const [on, setOn] = useState(true);
   // Minimal: the clock, the orb and the conversation, nothing else. Remembered per device, like Display off.
   const [minimal, setMinimal] = useState(false);
-  // "More on home": towers, Money pulse, Joi, goals and Since you left, below the fold. Remembered per device.
-  const [more, setMore] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   // Files and images to go with the next message (PDFs are read into text on the server).
@@ -90,7 +84,7 @@ export default function HomePage() {
   const [background, setBackground] = useState<string | null>(null);
 
   useEffect(() => {
-    try { setOn(localStorage.getItem("hq.display") !== "off"); setMinimal(localStorage.getItem("hq.layout") === "minimal"); setMore(localStorage.getItem("hq.homeMore") === "1"); setSince(localStorage.getItem("hq.lastSeen") ?? undefined); } catch { /* ignore */ }
+    try { setOn(localStorage.getItem("hq.display") !== "off"); setMinimal(localStorage.getItem("hq.layout") === "minimal"); setSince(localStorage.getItem("hq.lastSeen") ?? undefined); } catch { /* ignore */ }
     const mark = () => { try { localStorage.setItem("hq.lastSeen", new Date().toISOString()); } catch { /* ignore */ } };
     window.addEventListener("pagehide", mark);
     api<{ metrics: { key: string; label: string; unit?: string; latest?: number }[] }>("/api/ventures/money").then((r) => setMoney(r.metrics.filter((m) => m.latest !== undefined).slice(0, 3).map((m) => ({ key: m.label, value: m.unit === "$" ? `$${m.latest!.toLocaleString("en-US", { maximumFractionDigits: 0 })}` : String(m.latest) })))).catch(() => undefined);
@@ -99,17 +93,26 @@ export default function HomePage() {
     return () => window.removeEventListener("pagehide", mark);
   }, []);
   const toggle = () => { setOn(!on); try { localStorage.setItem("hq.display", on ? "off" : "on"); } catch { /* ignore */ } };
-  const toggleMore = () => { setMore(!more); try { localStorage.setItem("hq.homeMore", more ? "0" : "1"); } catch { /* ignore */ } };
-  const pick = (agentId: string) => { setText((t) => readdress(t, agentId)); inputRef.current?.focus(); };
-  const toId = addressee(text);
-  const toName = toId === "jarvis" ? "Jarvis" : state?.agents.find((a) => a.id === toId || a.name.toLowerCase() === toId)?.name;
   const toggleMinimal = () => { setMinimal(!minimal); try { localStorage.setItem("hq.layout", minimal ? "full" : "minimal"); } catch { /* ignore */ } };
 
   const lastJarvis = [...messages].reverse().find((m) => m.role === "jarvis" && m.kind !== "ack");
   const errors = state?.agents.filter((a) => a.status === "error") ?? [];
   const openItems = attention.filter((i) => i.status === "open");
   const agentOf = (id: string) => state?.agents.find((a) => a.id === id);
+  // Venture tag for a line: RANGE, HQ, PROEDGE… in the venture's colour.
+  const tagOf = (venture?: string) => {
+    const v = state?.ventures[(venture ?? "root") as keyof NonNullable<typeof state>["ventures"]];
+    const word = !venture || venture === "root" || venture === "command" ? "HQ" : (v?.short ?? venture.toUpperCase()).split(/[.\s]/)[0]!;
+    return { word, color: v?.color ?? "var(--accent)" };
+  };
   const waiting = openItems.length + pending.length;
+  // A preview, not a second inbox: approvals first (they block an agent), then the oldest to-dos. Three lines.
+  const preview = [
+    ...pending.map((p) => ({ id: p.id, kind: "approve" as const, text: p.title, ...tagOf(agentOf(p.agentId)?.venture) })),
+    ...[...openItems].sort((a, b) => (a.at < b.at ? -1 : 1)).map((i) => ({ id: i.id, kind: "todo" as const, text: i.title, ...tagOf(i.venture ?? agentOf(i.agentId)?.venture) })),
+  ].slice(0, 3);
+  const [ticking, setTicking] = useState<string | null>(null);
+  const tick = async (id: string) => { setTicking(id); try { await post(`/api/attention/${id}/done`); } finally { setTicking(null); } };
   const sinceAt = since ? new Date(since).getTime() : 0;
   // Only what's worth reading counts: hand-offs, approvals, errors, memory, schedules that did something. Not every
   // model run, and not what's already sitting in Needs you.
@@ -144,9 +147,10 @@ export default function HomePage() {
   const coreLabel = coreState === "paused" ? "PAUSED" : coreState === "speaking" ? "SPEAKING" : voice.hearing ? "HEARING YOU" : coreState === "thinking" ? "THINKING" : voice.listening ? "LISTENING" : voice.conversation ? "READY" : "STANDING BY";
 
   const orb = <Core state={coreState} level={voice.level} label={coreLabel} />;
-  const command = (
-    <>
-      {voice.error &&<p className="m-0 text-center text-[11px]" style={{ color: "var(--red)" }}>{voice.error}</p>}
+  const core = (
+    <div className="flex flex-col items-center gap-4 w-full max-w-2xl">
+      {orb}
+      {voice.error && <p className="m-0 text-center text-[11px]" style={{ color: "var(--red)" }}>{voice.error}</p>}
       {att.error && <p className="m-0 text-center text-[12px]" style={{ color: "var(--red)" }}>{att.error}</p>}
       <div className="w-full"><AttachTray att={att} /></div>
       <form onSubmit={send} className="flex gap-1.5 w-full" style={dragging ? { outline: "1px solid var(--accent)" } : undefined}
@@ -156,8 +160,7 @@ export default function HomePage() {
         <label htmlFor="home-cmd" className="sr-only">Command Jarvis</label>
         <input ref={fileRef} type="file" accept={ACCEPT} multiple className="sr-only" aria-hidden="true" tabIndex={-1} onChange={(e) => { if (e.target.files) att.add(e.target.files); e.target.value = ""; }} />
         <button type="button" className="btn w-11 px-0 flex-none" onClick={() => fileRef.current?.click()} aria-label="Attach a file or image" title="Attach a PDF, Word, Excel, CSV, PowerPoint, text file or image (or drop / paste one)"><ClipIcon /></button>
-        <AgentPicker text={text} onPick={pick} />
-        <div className="input flex items-center gap-2 flex-1 min-w-0"><span className="hidden sm:inline" style={{ color: "var(--accent)" }} aria-hidden="true">&gt;_</span><input ref={inputRef} id="home-cmd" aria-describedby="home-cmd-hint" className="flex-1 min-w-0 bg-transparent border-0 outline-none h-full" placeholder={roomy ? "Type to Jarvis · start with @name for an agent" : "Type to Jarvis, or @name"} value={text} onChange={(e) => setText(e.target.value)} onPaste={(e) => { const f = [...e.clipboardData.files]; if (f.length) { e.preventDefault(); att.add(f); } }} enterKeyHint="send" /></div>
+        <div className="input flex items-center gap-2 flex-1"><span className="hidden sm:inline" style={{ color: "var(--accent)" }} aria-hidden="true">&gt;_</span><input id="home-cmd" className="flex-1 min-w-0 bg-transparent border-0 outline-none h-full" placeholder={roomy ? "Talk to Jarvis or @ an agent" : "Ask Jarvis or @ agent"} value={text} onChange={(e) => setText(e.target.value)} onPaste={(e) => { const f = [...e.clipboardData.files]; if (f.length) { e.preventDefault(); att.add(f); } }} enterKeyHint="send" /></div>
         <button type="button" className={`btn w-11 px-0 flex-none ${voice.conversation ? "btn-primary" : ""}`} onClick={toggleVoice} aria-pressed={voice.conversation} aria-label={voice.conversation ? "End voice conversation" : "Start voice conversation"} title={voice.conversation ? "End conversation" : "Talk with Jarvis"}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
         </button>
@@ -166,12 +169,7 @@ export default function HomePage() {
         </button>
         <button className="btn btn-primary w-11 px-0 flex-none" disabled={busy || att.uploading || (!text.trim() && !att.any)} aria-label="Send"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button>
       </form>
-      <p id="home-cmd-hint" className="m-0 -mt-2 w-full text-[11px] text-left" style={{ color: "var(--muted)" }}>
-        {toId === "jarvis"
-          ? <>To <span style={{ color: "var(--ink-strong)" }}>Jarvis</span>, who hands it to the right agent. Start with <span style={{ color: "var(--accent)" }}>@name</span> or pick someone to talk to them directly.</>
-          : <>Straight to <span style={{ color: "var(--ink-strong)" }}>{toName ?? `@${toId}`}</span>{toName ? "" : " (no agent by that name yet)"}. Pick Jarvis to go back.</>}
-      </p>
-      <div className="relative flex flex-wrap justify-center items-center gap-3 text-[11px] tracking-[0.14em] uppercase text-center" style={{ color: "var(--muted)" }}>
+      <div className="relative flex items-center gap-3 text-[11px] tracking-[0.14em] uppercase text-center" style={{ color: "var(--muted)" }}>
         {voice.hearing ? (
           <button type="button" className="btn btn-sm btn-primary" onClick={voice.finishTurn} aria-label="Send what I said now">Send now</button>
         ) : (
@@ -184,11 +182,10 @@ export default function HomePage() {
         <select className="input h-8 w-28 text-[10px] uppercase" aria-label="Pause before Jarvis answers" title="How long Jarvis waits after you stop talking before he answers" value={pause} onChange={(e) => choosePause(e.target.value as PauseChoice)}>{(Object.keys(PAUSE_LABEL) as PauseChoice[]).map((k) => <option key={k} value={k}>{PAUSE_LABEL[k]}</option>)}</select>
         <select className="input h-8 w-28 text-[10px] uppercase" aria-label="How fast Jarvis talks" title="How fast Jarvis talks, on this device" value={rate} onChange={(e) => chooseRate(Number(e.target.value) as RateChoice)}>{RATES.map((r) => <option key={r} value={r}>{rateLabel(r)}</option>)}</select>
       </div>
-    </>
-  );
-  const transcript = <Transcript pendingText={heardText ?? (voice.interim || undefined)} />;
-  // What changed while Phil was away. Hidden when nothing did.
-  const sinceYouLeft = changes.length > 0 && (
+      <Working />
+      <Transcript pendingText={heardText ?? (voice.interim || undefined)} />
+      {/* What changed while Phil was away, right under the input. Hidden when nothing did. */}
+      {changes.length > 0 && (
         <section aria-label="Since you left" className="w-full flex flex-col gap-2 mt-2 text-left">
           <div className="flex items-baseline justify-between gap-3 flex-wrap">
             <h2 className="label m-0 font-normal">Since you left · {quiet} {quiet === 1 ? "thing" : "things"}</h2>
@@ -211,27 +208,8 @@ export default function HomePage() {
             })}
           </ul>
         </section>
-  );
-  // Minimal mode, as before: the orb, the command line, who's working, the conversation and what changed.
-  const core = (
-    <div className="flex flex-col items-center gap-4 w-full max-w-2xl">
-      {orb}
-      {command}
-      <Working />
-      {transcript}
-      {sinceYouLeft}
+      )}
     </div>
-  );
-  // Needs you, one line: counts that open the page.
-  const needsLine = (
-    <Link href="/attention" className="panel w-full flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-[12px] tracking-[0.12em] uppercase" aria-label={`Needs you: ${pending.length} to approve, ${openItems.length} to do${errors.length ? `, ${errors.length} in error` : ""}. Opens Needs you.`}>
-      <span className={`label ${waiting ? "label-amber" : ""}`}>Needs you</span>
-      <span style={{ color: pending.length ? "var(--amber)" : "var(--muted)" }}>{pending.length} to approve</span>
-      <span style={{ color: "var(--dim)" }}>·</span>
-      <span style={{ color: openItems.length ? "var(--amber)" : "var(--muted)" }}>{openItems.length} to do</span>
-      {errors.length > 0 && <><span style={{ color: "var(--dim)" }}>·</span><span style={{ color: "var(--red)" }}>{errors.length} in error</span></>}
-      <span className="ml-auto" style={{ color: "var(--accent)" }}>Open ›</span>
-    </Link>
   );
 
   const power = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" /></svg>;
@@ -260,58 +238,67 @@ export default function HomePage() {
             {minimal ? (
               <div className="flex-1 flex flex-col items-center justify-center py-6">{core}</div>
             ) : (
-            <>
-            <div className="w-full max-w-5xl mx-auto flex flex-col gap-4">
-              {/* 1. Now: who's working on what, who's waiting on Phil, what just finished. */}
-              <Now />
-              {/* 2. The command line: to Jarvis by default, @name or the picker for an agent. The orb shows voice. */}
-              <section aria-label="Talk" className="flex flex-col sm:flex-row items-center sm:items-start gap-4 w-full">
-                <div className="flex-none"><Core state={coreState} level={voice.level} label={coreLabel} size={96} /></div>
-                <div className="flex flex-col items-center gap-4 flex-1 min-w-0 w-full">{command}{transcript}</div>
-              </section>
-              {/* 3. Needs you, one line. */}
-              {needsLine}
-              {/* 4. Everything else, below the fold. */}
-              <button type="button" className="self-center min-h-8 px-3 text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--accent)" }} onClick={toggleMore} aria-expanded={more} aria-controls="home-more">
-                {more ? "Less on home ▴" : `More on home ▾${quiet ? ` · ${quiet} since you left` : ""}`}
-              </button>
-            </div>
-            {more && (
-              <div id="home-more" className={`grid gap-6 ${COLS} lg:items-start`}>
-                <div data-col="left" className="flex flex-col gap-5 order-2 lg:order-1 min-w-0">
-                  <section aria-label="Money pulse" className="flex flex-col gap-2">
-                    <span className="label">❬ Money pulse · Munger</span>
-                    {money.length === 0
-                      ? <Link href="/ventures/money" className="text-[12px]" style={{ color: "var(--accent)" }}>Add net worth →</Link>
-                      : money.map((m) => <Link key={m.key} href="/ventures/money" className="flex justify-between gap-3 text-[12px]"><span style={{ color: "var(--muted)" }}>{m.key.toUpperCase()}</span><span style={{ color: "var(--ink-bright)" }}>{m.value}</span></Link>)}
-                    {state?.status.killSwitch.trading && <span className="text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--amber)" }}>Mayne · trading paused</span>}
-                  </section>
-                  <section aria-label="Visuals from Joi" className="flex flex-col gap-2">
-                    <Link href="/agents/joi" className="label">❬ Visuals · Joi</Link>
-                    <div className="panel h-36 flex items-center justify-center px-4 text-[11px] tracking-[0.14em] uppercase text-center" style={{ color: "var(--muted)", backgroundImage: visual ? undefined : "repeating-linear-gradient(135deg, rgba(124,196,255,0.08) 0 1px, transparent 1px 10px)" }}>
-                      {visual ? <img src={visual.value} alt={visual.key} className="max-h-full max-w-full object-contain" /> : "Joi's latest visual shows here"}
-                    </div>
-                  </section>
-                </div>
-                <div data-col="centre" className="flex flex-col gap-5 order-1 lg:order-2 min-w-0">
-                  <Objective />
-                  {sinceYouLeft || <span className="text-[12px] text-center" style={{ color: "var(--muted)" }}>Nothing new since you left.</span>}
-                </div>
-                <div data-col="right" className="flex flex-col gap-5 order-3 min-w-0">
-                  <Towers />
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-full border-2 flex items-center justify-center" style={{ borderColor: "var(--accent)", boxShadow: "0 0 12px rgba(124,196,255,0.6)" }}><span className="display font-bold text-lg" style={{ color: "var(--ink-strong)" }}>P</span></div>
-                    <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.12em]"><span style={{ color: "var(--ink-strong)" }}>PHIL</span><span style={{ color: "var(--muted)" }}>RECOVERY — · DOC</span></div>
+            <div className={`grid gap-6 ${COLS} lg:items-start`}>
+              <div data-col="left" className="flex flex-col gap-5 order-2 lg:order-1 min-w-0">
+                <section aria-label="Needs your attention" className="flex flex-col gap-2">
+                  <Link href="/attention" className={`label ${waiting ? "label-amber" : ""}`}>❬ Needs your attention · {waiting}</Link>
+                  {waiting === 0 ? <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing waiting.</span> : (
+                    <>
+                      <div className="flex gap-3 text-[11px] tracking-[0.12em] uppercase">
+                        {pending.length > 0 && <Link href="/attention#approve" style={{ color: "var(--amber)" }}>Approve {pending.length}</Link>}
+                        {pending.length > 0 && <span style={{ color: "var(--dim)" }}>·</span>}
+                        <Link href="/attention#todo" style={{ color: openItems.length ? "var(--amber)" : "var(--muted)" }}>To do {openItems.length}</Link>
+                      </div>
+                      <ul className="m-0 p-0 list-none flex flex-col gap-1.5">
+                        {preview.map((n) => (
+                          <li key={n.id} className="flex items-center gap-2 text-[12px] leading-snug min-w-0">
+                            <span className="w-16 flex-none text-[10px] tracking-[0.1em] truncate" style={{ color: n.color }}>{n.word}</span>
+                            <Link href={`/attention#${n.kind}`} className="flex-1 min-w-0 truncate" style={{ color: "var(--ink-bright)" }} title={n.text}>{n.text}</Link>
+                            {n.kind === "todo"
+                              ? <button className="btn btn-sm h-7 w-7 px-0 flex-none" disabled={ticking === n.id} onClick={() => void tick(n.id)} aria-label={`Done: ${n.text}`} title="Done">✓</button>
+                              : <Link href="/attention#approve" className="btn btn-sm h-7 px-2 flex-none" aria-label={`Review ${n.text}`}>Review</Link>}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  {errors.length > 0 && <Link href={`/web?agent=${errors[0]!.id}`} className="text-[12px]" style={{ color: "var(--red)" }}>{errors.length === 1 ? `${errors[0]!.name} hit an error ›` : `${errors.length} agents hit errors ›`}</Link>}
+                </section>
+                <section aria-label="Money pulse" className="flex flex-col gap-2">
+                  <span className="label">❬ Money pulse · Munger</span>
+                  {money.length === 0
+                    ? <Link href="/ventures/money" className="text-[12px]" style={{ color: "var(--accent)" }}>Add net worth →</Link>
+                    : money.map((m) => <Link key={m.key} href="/ventures/money" className="flex justify-between gap-3 text-[12px]"><span style={{ color: "var(--muted)" }}>{m.key.toUpperCase()}</span><span style={{ color: "var(--ink-bright)" }}>{m.value}</span></Link>)}
+                  {state?.status.killSwitch.trading && <span className="text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--amber)" }}>Mayne · trading paused</span>}
+                </section>
+                <section aria-label="Visuals from Joi" className="flex flex-col gap-2">
+                  <Link href="/agents/joi" className="label">❬ Visuals · Joi</Link>
+                  <div className="panel h-36 flex items-center justify-center px-4 text-[11px] tracking-[0.14em] uppercase text-center" style={{ color: "var(--muted)", backgroundImage: visual ? undefined : "repeating-linear-gradient(135deg, rgba(124,196,255,0.08) 0 1px, transparent 1px 10px)" }}>
+                    {visual ? <img src={visual.value} alt={visual.key} className="max-h-full max-w-full object-contain" /> : "Joi's latest visual shows here"}
                   </div>
-                </div>
+                </section>
               </div>
-            )}
-            </>
+
+              <div data-col="centre" className="flex flex-col items-center order-1 lg:order-2 min-w-0">{core}</div>
+
+              <div data-col="right" className="flex flex-col gap-5 order-3 min-w-0">
+                <Towers />
+              </div>
+            </div>
             )}
 
-            <div className="flex gap-2 justify-end mt-auto">
-              <button className="btn btn-sm" onClick={toggleMinimal} aria-pressed={minimal} title={minimal ? "Bring back Now, Needs you and the rest" : "Just the clock, the orb and the conversation"}>{minimal ? "Full" : "Minimal"}</button>
-              <button className="btn btn-sm" onClick={toggle}>{power}Display off</button>
+            <div className={`grid gap-4 ${COLS} items-end mt-auto`}>
+              <div className="flex items-center gap-3 order-2 lg:order-1">
+                {!minimal && <>
+                  <div className="w-11 h-11 rounded-full border-2 flex items-center justify-center" style={{ borderColor: "var(--accent)", boxShadow: "0 0 12px rgba(124,196,255,0.6)" }}><span className="display font-bold text-lg" style={{ color: "var(--ink-strong)" }}>P</span></div>
+                  <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.12em]"><span style={{ color: "var(--ink-strong)" }}>PHIL</span><span style={{ color: "var(--muted)" }}>RECOVERY — · DOC</span></div>
+                </>}
+              </div>
+              <div className="order-1 lg:order-2 w-full max-w-2xl justify-self-center min-w-0">{!minimal && <Objective />}</div>
+              <div className="order-3 flex gap-2 lg:justify-end">
+                <button className="btn btn-sm" onClick={toggleMinimal} aria-pressed={minimal} title={minimal ? "Bring back the panels, towers and goals" : "Just the clock, the orb and the conversation"}>{minimal ? "Full" : "Minimal"}</button>
+                <button className="btn btn-sm" onClick={toggle}>{power}Display off</button>
+              </div>
             </div>
           </>
         ) : (
