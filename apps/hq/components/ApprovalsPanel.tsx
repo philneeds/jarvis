@@ -24,6 +24,13 @@ const HEADLINE: Record<string, string[]> = {
 };
 const LABEL: Record<string, string> = { to: "To", account: "From", subject: "Subject", query: "Matching", max: "Up to", label: "Label", start: "Start", end: "End", title: "Event", replyTo: "Reply to", sizeUsd: "Size $", pnlUsd: "P&L $", positionId: "Position", backtestReturn: "Backtest", winRate: "Win rate", maxDrawdown: "Max drawdown", paperDays: "Paper days", symbol: "Symbol", side: "Side", strategy: "Strategy", name: "Name", type: "Channel", tool: "Tool", phone: "Phone", email: "Email", source: "Source", stage: "Stage", value: "Value $", status: "Status" };
 
+/** What the approve button says for a card. When nothing can act on it, the button must not promise a send. */
+export function approveLabel(a: Approval): string {
+  const act = typeof a.payload?.action === "string" ? a.payload.action : undefined;
+  const inert = !act || /^(No connector handles|Nothing happens)/.test(a.effect ?? "");
+  return inert ? "Approve (records only)" : (ACTION_LABEL[act] ?? "Approve");
+}
+
 export type ApprovalsTab = "pending" | "decided";
 
 /** Every draft waiting on Phil (and, under Decided, what he did with the rest). Moved out of the old Approvals page so Needs you can show it as its Approve section, unchanged. */

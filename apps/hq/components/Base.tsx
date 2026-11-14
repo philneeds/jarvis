@@ -1,0 +1,408 @@
+"use client";
+
+import Link from "next/link";
+import { useMemo, useState } from "react";
+import { useLive } from "@/lib/live";
+import { post } from "@/lib/api";
+import type { AgentLive, Approval, AttentionItem } from "@/lib/types";
+import type { CoreState } from "@/components/Core";
+import { approveLabel } from "@/components/ApprovalsPanel";
+
+/**
+ * Home as a base: Jarvis's core in the middle, one building per venture, and the agents who are working or
+ * waiting on Phil standing outside. Everything shown is live state HQ already has; nothing here is scored or
+ * invented. A venture whose agents aren't live yet is an empty lot.
+ */
+
+export interface BaseTarget { id: string; name: string }
+
+type Pt = [number, number];
+const OX = 720, OY = 100, HW = 37, HH = 18.5, N = 15;
+/** The part of the drawing that's shown; everything is placed in these units and scales with the page. */
+const VB = { x: 150, y: 70, w: 1140, h: 630 };
+const P = (i: number, j: number, z = 0): Pt => [OX + (i - j) * HW, OY + (i + j) * HH - z];
+const pts = (a: Pt[]) => a.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+const poly = (a: Pt[], fill: string, extra = "") => `<polygon points="${pts(a)}" fill="${fill}" ${extra}/>`;
+const seg = (p: Pt, q: Pt, stroke: string, w = 2, extra = "") => `<line x1="${p[0].toFixed(1)}" y1="${p[1].toFixed(1)}" x2="${q[0].toFixed(1)}" y2="${q[1].toFixed(1)}" stroke="${stroke}" stroke-width="${w}" stroke-linecap="round" ${extra}/>`;
+/** Venture colours come from the registry; anything that isn't a plain hex falls back to the accent. */
+const hex = (c?: string) => (c && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : "#7CC4FF");
+
+/** Where each venture sits: tile column, tile row, footprint. Live ventures ring the front; the back row fills in as phases open. */
+const SPOTS: { id: string; i: number; j: number; f: number }[] = [
+  { id: "money", i: 0, j: 3.5, f: 2 }, { id: "philneeds", i: 3.5, j: 0, f: 2 }, { id: "range", i: 6.6, j: 0, f: 2 }, { id: "acres", i: 0.25, j: 13.75, f: 1 },
+  { id: "command", i: 3, j: 12, f: 2 }, { id: "personal", i: 7.75, j: 12.25, f: 2 }, { id: "jdpm", i: 12, j: 12, f: 2 }, { id: "crypto", i: 12.25, j: 7.75, f: 2 }, { id: "proedge", i: 12, j: 3, f: 2 },
+];
+/** Back to front, with the core in its place, so nearer buildings draw over farther ones. */
+const ORDER = [...SPOTS.map((s) => ({ ...s, key: s.i + s.j + s.f * 2 })), { id: "core", i: 6, j: 6, f: 3, key: 18 }].sort((a, b) => a.key - b.key);
+
+type Light = "working" | "needs" | "idle";
+function rng(seed: number) { let s = seed; return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; }; }
+const seedOf = (id: string) => [...id].reduce((n, c) => n + c.charCodeAt(0), 7);
+
+function box(i: number, j: number, a: number, b: number, z0: number, H: number, work: boolean, col: string, roofA = 0.3) {
+  const A = P(i, j, z0 + H), B = P(i + a, j, z0 + H), C = P(i + a, j + b, z0 + H), D = P(i, j + b, z0 + H), Bb = P(i + a, j, z0), Cb = P(i + a, j + b, z0), Db = P(i, j + b, z0);
+  return poly([D, C, Cb, Db], work ? "#21407F" : "#1B2C52") + poly([C, B, Bb, Cb], work ? "#152D62" : "#111E3D") + poly([A, B, C, D], "#24386A") + poly([A, B, C, D], col, `fill-opacity="${roofA}"`) + `<polyline points="${pts([D, C, B])}" fill="none" stroke="${col}" stroke-width="2"/>`;
+}
+function wall(f: Pt, t: Pt, z0: number, z1: number, cols: number, rows: number, pick: () => string) {
+  let s = "";
+  const at = (u: number, z: number) => P(f[0] + (t[0] - f[0]) * u, f[1] + (t[1] - f[1]) * u, z);
+  for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
+    const u1 = (k + 0.22) / cols, u2 = (k + 0.78) / cols, za = z0 + ((r + 0.25) / rows) * (z1 - z0), zb = z0 + ((r + 0.75) / rows) * (z1 - z0), fill = pick();
+    if (fill) s += poly([at(u1, za), at(u2, za), at(u2, zb), at(u1, zb)], fill);
+  }
+  return s;
+}
+const walls = (i: number, j: number, a: number, b: number, z0: number, z1: number, cols: number, rows: number, pick: () => string) => wall([i, j + b], [i + a, j + b], z0, z1, cols, rows, pick) + wall([i + a, j + b], [i + a, j], z0, z1, cols, rows, pick);
+/** Window lights: mostly blue while someone is working, warm otherwise, a few amber when something waits on Phil. */
+const lights = (st: Light, r: () => number) => () => { if (r() > (st === "working" ? 0.8 : 0.42)) return "rgba(255,255,255,.07)"; return st === "working" ? (r() < 0.7 ? "#A8D6FF" : "rgba(255,226,170,.85)") : st === "needs" && r() < 0.35 ? "#FFB547" : "rgba(255,226,170,.8)"; };
+function gable(i: number, j: number, a: number, b: number, z0: number, R: number, col: string) {
+  const A = P(i, j, z0), B = P(i + a, j, z0), C = P(i + a, j + b, z0), D = P(i, j + b, z0), R1 = P(i, j + b / 2, z0 + R), R2 = P(i + a, j + b / 2, z0 + R);
+  return poly([A, B, R2, R1], "#16284F") + poly([D, C, R2, R1], "#22386B") + poly([D, C, R2, R1], col, 'fill-opacity=".5"') + poly([C, B, R2], "#152750") + poly([C, B, R2], col, 'fill-opacity=".22"') + seg(R1, R2, col, 2) + seg(D, C, col, 1.5);
+}
+
+/** Each venture's building is shaped by what it does, so it reads without its label. Returns the drawing and its height. */
+const SHAPE: Record<string, (i: number, j: number, st: Light, col: string, r: () => number) => { s: string; top: number }> = {
+  // control tower: low base, slim shaft, wide glass cab, antenna
+  command(i, j, st, col, r) {
+    const w = st === "working", c = i + 1;
+    let s = box(i, j, 2, 2, 0, 24, w, col) + walls(i, j, 2, 2, 4, 20, 6, 1, lights(st, r));
+    s += box(i + 0.68, j + 0.68, 0.64, 0.64, 24, 46, w, col, 0.15) + box(i + 0.3, j + 0.3, 1.4, 1.4, 70, 20, w, col, 0.5);
+    s += walls(i + 0.3, j + 0.3, 1.4, 1.4, 73, 87, 5, 1, () => (w ? "#BFE2FF" : "rgba(255,226,170,.85)"));
+    s += seg(P(c, j + 1, 90), P(c, j + 1, 116), "#B8C8E0", 1.5) + `<circle class="base-blink" cx="${P(c, j + 1, 118)[0]}" cy="${P(c, j + 1, 118)[1]}" r="2.5" fill="#fff"/>`;
+    return { s, top: 118 };
+  },
+  // workshop: pitched roof, big door, and a crane
+  jdpm(i, j, st, col, r) {
+    let s = box(i, j, 2, 2, 0, 28, false, col, 0.1) + walls(i, j, 2, 2, 6, 24, 5, 1, lights(st, r));
+    const at = (u: number, z: number) => P(i + 2 * u, j + 2, z);
+    s += poly([at(0.12, 0), at(0.46, 0), at(0.46, 20), at(0.12, 20)], "#0A1226") + seg(at(0.12, 7), at(0.46, 7), "#2A3C66", 1) + seg(at(0.12, 14), at(0.46, 14), "#2A3C66", 1);
+    s += gable(i, j, 2, 2, 28, 18, col);
+    const m: Pt = [i + 1.8, j + 0.2];
+    s += seg(P(m[0], m[1], 0), P(m[0], m[1], 76), "#D9B25A", 3) + seg(P(m[0], m[1] - 0.6, 76), P(m[0], m[1] + 2.3, 76), "#D9B25A", 3) + seg(P(m[0], m[1], 88), P(m[0], m[1] + 2.3, 76), "#D9B25A", 1) + seg(P(m[0], m[1], 88), P(m[0], m[1], 76), "#D9B25A", 2);
+    const hk = P(m[0], m[1] + 1.7, 76), hb = P(m[0], m[1] + 1.7, 56);
+    s += seg(hk, hb, "#B8C8E0", 1) + `<rect x="${hb[0] - 5}" y="${hb[1]}" width="10" height="8" fill="${col}"/>`;
+    return { s, top: 86 };
+  },
+  // relay tower: stacked block, mast, dish and signal rings
+  crypto(i, j, st, col, r) {
+    const w = st === "working";
+    let s = box(i, j, 2, 2, 0, 30, w, col) + walls(i, j, 2, 2, 4, 26, 6, 2, lights(st, r));
+    s += box(i + 0.45, j + 0.45, 1.1, 1.1, 30, 28, w, col, 0.5) + walls(i + 0.45, j + 0.45, 1.1, 1.1, 34, 54, 3, 2, lights(st, r));
+    const t = P(i + 1, j + 1, 96), d = P(i + 1, j + 1, 86);
+    s += seg(P(i + 1, j + 1, 58), t, "#B8C8E0", 2) + `<ellipse cx="${d[0] + 9}" cy="${d[1]}" rx="15" ry="8" transform="rotate(-35 ${d[0] + 9} ${d[1]})" fill="#C9D6F2" stroke="${col}" stroke-width="2"/>`;
+    s += [18, 28, 38].map((q, k) => `<path class="base-ping" style="animation-delay:${k * 0.35}s" d="M${t[0] + q * 0.6} ${t[1] - q} A${q} ${q} 0 0 1 ${t[0] + q} ${t[1] - q * 0.2}" fill="none" stroke="${col}" stroke-width="2" stroke-linecap="round"/>`).join("");
+    return { s, top: 112 };
+  },
+  // house: warm windows, pitched roof, chimney, two trees
+  personal(i, j, _st, col, r) {
+    let s = "";
+    for (const [ti, tj] of [[i + 2.1, j + 0.2], [i + 2.25, j + 1.2]] as Pt[]) { const b = P(ti, tj), t = P(ti, tj, 18); s += `<ellipse cx="${b[0]}" cy="${b[1]}" rx="8" ry="3" fill="#000" fill-opacity=".35"/>` + seg(b, t, "#5A4A3A", 2.5) + `<circle cx="${t[0]}" cy="${t[1] - 6}" r="11" fill="#1F6B58"/><circle cx="${t[0] - 4}" cy="${t[1] - 10}" r="6" fill="#2C8A70"/>`; }
+    s += box(i + 0.15, j + 0.15, 1.7, 1.7, 0, 26, false, col, 0.1) + walls(i + 0.15, j + 0.15, 1.7, 1.7, 7, 21, 4, 1, () => (r() < 0.7 ? "rgba(255,226,170,.9)" : "rgba(255,255,255,.07)"));
+    s += gable(i + 0.15, j + 0.15, 1.7, 1.7, 26, 20, col) + box(i + 1.25, j + 0.75, 0.24, 0.24, 36, 20, false, col, 0.1);
+    return { s, top: 60 };
+  },
+  // office with a rooftop billboard: a chart going up
+  proedge(i, j, st, col, r) {
+    let s = box(i, j, 2, 2, 0, 42, st === "working", col) + walls(i, j, 2, 2, 4, 38, 6, 3, lights(st, r));
+    const at = (u: number, z: number) => P(i + 0.2 + 1.6 * u, j + 1.85, z);
+    s += seg(at(0.15, 42), at(0.15, 50), "#B8C8E0", 2) + seg(at(0.85, 42), at(0.85, 50), "#B8C8E0", 2);
+    s += poly([at(0, 50), at(1, 50), at(1, 84), at(0, 84)], "#081226", `stroke="${col}" stroke-width="2"`);
+    s += `<polyline points="${pts([at(0.12, 58), at(0.36, 66), at(0.56, 62), at(0.86, 77)])}" fill="none" stroke="${col}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` + poly([at(0.86, 77), at(0.74, 76), at(0.84, 70)], col);
+    return { s, top: 88 };
+  },
+  // bank: tall lit columns under a pediment
+  money(i, j, st, col) {
+    let s = box(i, j, 2, 2, 0, 30, st === "working", col, 0.12);
+    s += wall([i, j + 2], [i + 2, j + 2], 3, 27, 6, 1, () => "rgba(255,226,170,.85)") + wall([i + 2, j + 2], [i + 2, j], 3, 27, 6, 1, () => "rgba(255,226,170,.6)");
+    return { s: s + gable(i, j, 2, 2, 30, 14, col), top: 48 };
+  },
+  // studio with a big play-button screen
+  philneeds(i, j, st, col, r) {
+    let s = box(i, j, 2, 2, 0, 28, st === "working", col) + walls(i, j, 2, 2, 4, 24, 6, 2, lights(st, r));
+    const at = (u: number, z: number) => P(i + 0.2 + 1.6 * u, j + 1.85, z);
+    s += seg(at(0.15, 28), at(0.15, 36), "#B8C8E0", 2) + seg(at(0.85, 28), at(0.85, 36), "#B8C8E0", 2) + poly([at(0, 36), at(1, 36), at(1, 72), at(0, 72)], "#081226", `stroke="${col}" stroke-width="2"`) + poly([at(0.38, 44), at(0.38, 64), at(0.68, 54)], col);
+    return { s, top: 76 };
+  },
+  // lab: a low hall with a glass dome, and a tower beside it
+  range(i, j, st, col, r) {
+    const w = st === "working", d = P(i + 0.7, j + 1.3, 22);
+    let s = box(i, j, 2, 2, 0, 22, w, col) + walls(i, j, 2, 2, 4, 18, 6, 1, lights(st, r));
+    s += box(i + 1.05, j + 0.15, 0.8, 0.8, 22, 36, w, col, 0.5) + walls(i + 1.05, j + 0.15, 0.8, 0.8, 26, 54, 2, 3, lights(st, r));
+    s += `<path d="M${d[0] - 24} ${d[1]} A24 20 0 0 1 ${d[0] + 24} ${d[1]} Z" fill="#9FD2FF" fill-opacity=".35" stroke="${col}" stroke-width="1.5"/>`;
+    return { s, top: 62 };
+  },
+  // barn and silo, on the small lot
+  acres(i, j, _st, col) {
+    const s = box(i + 0.08, j + 0.08, 0.72, 0.84, 0, 14, false, col, 0.1) + wall([i + 0.08, j + 0.92], [i + 0.8, j + 0.92], 4, 11, 2, 1, () => "rgba(255,226,170,.85)") + gable(i + 0.08, j + 0.08, 0.72, 0.84, 14, 10, col) + box(i + 0.78, j + 0.12, 0.2, 0.2, 0, 30, false, col, 0.5);
+    return { s, top: 34 };
+  },
+};
+
+/** The ground slab and its grid. Never changes. */
+const GROUND = (() => {
+  let g = poly([P(0, N), P(N, N), P(N, N, -22), P(0, N, -22)], "#070D1E") + poly([P(N, N), P(N, 0), P(N, 0, -22), P(N, N, -22)], "#050A17");
+  g += poly([P(0, 0), P(N, 0), P(N, N), P(0, N)], "url(#base-ground)", 'stroke="#6EB8FF" stroke-opacity=".45" stroke-width="1.5"');
+  for (let k = 1; k < N; k++) g += seg(P(k, 0), P(k, N), "#6EB8FF", 1, 'stroke-opacity=".06"') + seg(P(0, k), P(N, k), "#6EB8FF", 1, 'stroke-opacity=".06"');
+  return g;
+})();
+/** Jarvis's core building (the orb on top is drawn live, so it can follow the voice state). */
+const CORE = (() => {
+  const r = rng(31);
+  return box(6, 6, 3, 3, 0, 22, true, "#6EB8FF", 0.2) + box(6.6, 6.6, 1.8, 1.8, 22, 88, true, "#9FD2FF", 0.3)
+    + wall([6.6, 8.4], [8.4, 8.4], 28, 104, 4, 6, () => (r() < 0.75 ? "#A8D6FF" : "rgba(255,255,255,.08)")) + wall([8.4, 8.4], [8.4, 6.6], 28, 104, 4, 6, () => (r() < 0.6 ? "#7FB4EE" : "rgba(255,255,255,.06)"));
+})();
+
+const clipText = (s: string | undefined, n: number) => { const t = (s ?? "").replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+/** Money, trades and code ships are decided on the full card, where the limits and the whole proposal are in view. */
+const heavy = (a: Approval) => a.kind === "money" || a.kind === "strategy" || /^(trade|strategy|robinhood|payment|invoice|transfer|wallet|order)\.|^code\.ship$|^hq\.update$/.test(typeof a.payload?.action === "string" ? a.payload.action : "");
+
+interface Row {
+  id: string; i: number; j: number; f: number; label: string; color: string; live: boolean; phase: number;
+  agents: AgentLive[]; working: AgentLive[]; errors: AgentLive[]; approvals: Approval[]; todos: AttentionItem[];
+  light: Light; top: number; art: string; L: Pt;
+}
+
+function Person({ at, body, ring, dot }: { at: Pt; body: string; ring?: boolean; dot?: string }) {
+  return (
+    <g className={ring ? "base-bob" : undefined}>
+      <ellipse cx={at[0]} cy={at[1]} rx={8} ry={3.4} fill="#000" fillOpacity={0.45} />
+      <rect x={at[0] - 5} y={at[1] - 15} width={10} height={14} rx={4} fill={body} />
+      <circle cx={at[0]} cy={at[1] - 19.5} r={5} fill="#F2E3CF" />
+      {ring && <circle cx={at[0]} cy={at[1] - 11} r={15} fill="none" stroke="#8FCBFF" strokeWidth={1.5} strokeOpacity={0.85} />}
+      {dot && <circle className="base-blink" cx={at[0]} cy={at[1] - 31} r={3.6} fill={dot} />}
+    </g>
+  );
+}
+
+export function Base({ core = "idle", target, onTarget }: { core?: CoreState; target: BaseTarget | null; onTarget: (t: BaseTarget | null) => void }) {
+  const { state, pending, attention, setPending } = useLive();
+  const [sel, setSel] = useState<string | null>(null);
+  const [pop, setPop] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+
+  const rows = useMemo<Row[]>(() => {
+    if (!state) return [];
+    // Jarvis himself lives in the core; anything filed under him shows on Command, the venture he leads.
+    const home = (agentId: string) => { const v = state.agents.find((a) => a.id === agentId)?.venture; return !v || v === "root" ? "command" : v; };
+    const open = attention.filter((x) => x.status === "open");
+    return SPOTS.map((s) => {
+      const agents = state.agents.filter((a) => a.id !== "jarvis" && (a.venture === s.id || (s.id === "command" && a.venture === "root")));
+      const live = agents.some((a) => a.live);
+      const working = agents.filter((a) => a.status === "working"), errors = agents.filter((a) => a.status === "error");
+      const approvals = pending.filter((p) => home(p.agentId) === s.id);
+      const todos = open.filter((x) => (x.venture && x.venture !== "root" ? x.venture : home(x.agentId)) === s.id);
+      const light: Light = working.length ? "working" : approvals.length || todos.length || agents.some((a) => a.status === "waiting") ? "needs" : "idle";
+      const color = hex(state.ventures[s.id as keyof typeof state.ventures]?.color);
+      const drawn = live && SHAPE[s.id] ? SHAPE[s.id]!(s.i, s.j, light, color, rng(seedOf(s.id))) : { s: "", top: 42 };
+      return {
+        ...s, label: state.ventures[s.id as keyof typeof state.ventures]?.short ?? s.id.toUpperCase(), color, live, phase: Math.min(...agents.map((a) => a.phase), 9),
+        agents, working, errors, approvals, todos, light, top: drawn.top, art: drawn.s, L: P(s.i + s.f / 2, s.j + s.f / 2, drawn.top + 22),
+      };
+    }).filter((r) => r.agents.length > 0);
+  }, [state, pending, attention]);
+
+  if (!state) return <div className="w-full" style={{ aspectRatio: `${VB.w} / ${VB.h}` }} aria-busy="true" />;
+
+  const row = (id: string | null) => rows.find((r) => r.id === id);
+  const cur = row(sel), popRow = row(pop);
+  const waiting = pending.length + attention.filter((x) => x.status === "open").length;
+  const down = Object.entries(state.providers ?? {}).filter(([, p]) => !p.ok).map(([k]) => k);
+  const pick = (id: string) => { setSel(id); setPop(null); setError(undefined); };
+  const clear = () => { setSel(null); setPop(null); onTarget(null); setError(undefined); };
+  const key = (fn: () => void) => (e: React.KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); } };
+
+  const approve = async (a: Approval) => {
+    setBusy(true); setError(undefined);
+    try { await post(`/api/approvals/${a.id}/approve`, {}); setPending((p) => p.filter((x) => x.id !== a.id)); }
+    catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+  const done = async (t: AttentionItem) => {
+    setBusy(true); setError(undefined);
+    try { await post(`/api/attention/${t.id}/done`); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+
+  const orb = P(7.5, 7.5, 150), corePt = P(7.5, 7.5);
+  const pct = (p: Pt) => ({ left: `${((p[0] - VB.x) / VB.w) * 100}%`, top: `${((p[1] - VB.y) / VB.h) * 100}%` });
+
+  // The card that opens from a bubble: problems first, then approvals, then to-dos, one at a time.
+  const card = popRow && (() => {
+    const n = popRow.errors.length + popRow.approvals.length + popRow.todos.length;
+    const e = popRow.errors[0], a = popRow.approvals[0], t = popRow.todos[0];
+    if (!n) return null;
+    const who = (id: string) => state.agents.find((x) => x.id === id)?.name ?? id;
+    return (
+      <div className="base-pop" data-side={popRow.L[0] > 900 ? "left" : "right"} data-kind={e ? "bad" : "need"} style={pct([popRow.L[0], Math.max(VB.y + 20, popRow.L[1] - 130)])} role="dialog" aria-label={`${popRow.label}: waiting on you`}>
+        <button className="base-x" onClick={() => setPop(null)} aria-label="Close">✕</button>
+        <span className="base-tag">{e ? "Problem" : a ? "Needs you" : "To do"} · {popRow.label}{n > 1 ? ` · 1 of ${n}` : ""}</span>
+        {e ? (
+          <>
+            <b>{e.name} hit an error</b>
+            <span className="base-dim">{clipText(e.lastError ?? e.detail ?? "No detail was recorded.", 180)}</span>
+            <div className="base-btns"><Link className="btn btn-sm" href={`/web?agent=${e.id}`}>Open {e.name.split(" ")[0]} ›</Link></div>
+          </>
+        ) : a ? (
+          <>
+            <b>{a.title}</b>
+            <span className="base-dim">{who(a.agentId)} · {clipText(a.effect ?? "Approving only records your decision.", 200)}</span>
+            {heavy(a)
+              ? <><span className="base-dim">Money, trades and code changes are decided on the full card.</span><div className="base-btns"><Link className="btn btn-sm btn-primary" href="/attention#approve">Review the full card ›</Link></div></>
+              : <div className="base-btns"><button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void approve(a)}>{approveLabel(a)}</button><Link className="btn btn-sm" href="/attention#approve">Edit or reject ›</Link></div>}
+          </>
+        ) : t ? (
+          <>
+            <b>{t.title}</b>
+            <span className="base-dim">{who(t.agentId)}{t.why ? ` · ${clipText(t.why, 180)}` : ""}</span>
+            <div className="base-btns"><button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void done(t)}>Done ✓</button><Link className="btn btn-sm" href="/attention#todo">Open ›</Link></div>
+          </>
+        ) : null}
+        {error && <span style={{ color: "var(--red)" }}>{error}</span>}
+      </div>
+    );
+  })();
+
+  return (
+    <section aria-label="Your base" className="w-full flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2 text-[11px] tracking-[0.14em] uppercase">
+        <Link href="/attention" className="base-chip" style={waiting ? { borderColor: "var(--amber)", color: "var(--amber)" } : undefined}>{waiting} need you ›</Link>
+        {down.length > 0 && <Link href="/settings" className="base-chip" style={{ borderColor: "var(--red)", color: "var(--red)" }} title={down.join(", ")}>{down.length} connection{down.length === 1 ? "" : "s"} down ›</Link>}
+      </div>
+
+      <div className="base-wrap">
+      <div className="base-stage">
+        <svg viewBox={`${VB.x} ${VB.y} ${VB.w} ${VB.h}`} className={`base-svg base-core-${core}`} role="group" aria-label="Jarvis in the middle, one building for each venture">
+          <defs>
+            <linearGradient id="base-ground" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#0A1430" /><stop offset="1" stopColor="#0F1E44" /></linearGradient>
+            <radialGradient id="base-orb"><stop offset="0" stopColor="#BFE2FF" stopOpacity=".95" /><stop offset=".4" stopColor="#6EB8FF" stopOpacity=".55" /><stop offset="1" stopColor="#6EB8FF" stopOpacity="0" /></radialGradient>
+            <filter id="base-glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="16" /></filter>
+          </defs>
+          <g dangerouslySetInnerHTML={{ __html: GROUND }} />
+          {/* A line from the core to every live venture; it runs while someone there is working. */}
+          {rows.filter((r) => r.live).map((r) => {
+            const c = P(r.i + r.f / 2, r.j + r.f / 2), on = r.working.length > 0;
+            return (
+              <g key={r.id}>
+                <line x1={corePt[0]} y1={corePt[1]} x2={c[0]} y2={c[1]} stroke={on ? "#8FCBFF" : r.color} strokeOpacity={on ? 0.95 : 0.4} strokeWidth={on ? 3 : 2} strokeLinecap="round" className={on ? "base-flow" : undefined} />
+                {on && <circle className="base-packet" r={5} cx={c[0]} cy={c[1]} fill="#EAF6FF" style={{ "--dx": `${(corePt[0] - c[0]).toFixed(0)}px`, "--dy": `${(corePt[1] - c[1]).toFixed(0)}px` } as React.CSSProperties} />}
+              </g>
+            );
+          })}
+          {ORDER.map((o) => {
+            if (o.id === "core") {
+              return (
+                <g key="core" role="button" tabIndex={0} aria-label="Jarvis. Clears your selection so the next message goes to him." className="base-hit" onClick={clear} onKeyDown={key(clear)}>
+                  <rect x={orb[0] - 110} y={orb[1] - 50} width={220} height={250} fill="transparent" />
+                  <g dangerouslySetInnerHTML={{ __html: CORE }} />
+                  <line x1={orb[0]} y1={orb[1] + 20} x2={orb[0]} y2={orb[1] + 40} stroke="#9FD2FF" strokeWidth={2} />
+                  <circle className="base-breathe" cx={orb[0]} cy={orb[1]} r={40} fill="url(#base-orb)" />
+                  <ellipse className="base-spin" cx={orb[0]} cy={orb[1]} rx={30} ry={11} fill="none" stroke="#9FD2FF" strokeWidth={1.5} strokeDasharray="3 6" />
+                  <circle className="base-orb" cx={orb[0]} cy={orb[1]} r={12} fill="#EAF6FF" />
+                </g>
+              );
+            }
+            const r = row(o.id);
+            if (!r) return null;
+            const D = P(r.i, r.j + r.f), B = P(r.i + r.f, r.j), C = P(r.i + r.f, r.j + r.f), y0 = r.L[1] - 18;
+            const said = `${r.label}: ${r.live ? `${r.agents.length} agents, ${r.working.length} working, ${r.approvals.length + r.todos.length} waiting on you${r.errors.length ? `, ${r.errors.length} with an error` : ""}` : `not built yet, phase ${r.phase}`}`;
+            // Only agents who are working, in error, or holding something for Phil stand outside. Three at most, then "+N".
+            const holding = new Set([...r.approvals.map((a) => a.agentId), ...r.todos.map((t) => t.agentId)]);
+            const outside = r.live ? [...r.working, ...r.agents.filter((a) => a.status !== "working" && (a.status === "error" || a.status === "waiting" || holding.has(a.id)))] : [];
+            const e = 0.4;
+            return (
+              <g key={r.id} role="button" tabIndex={0} aria-label={said} aria-pressed={sel === r.id} className="base-hit" onClick={() => pick(r.id)} onKeyDown={key(() => pick(r.id))}>
+                <rect x={D[0] - 10} y={y0} width={B[0] - D[0] + 20} height={C[1] - y0 + 26} fill="transparent" />
+                {sel === r.id && <polygon className="base-flow" points={pts([P(r.i - e, r.j - e), P(r.i + r.f + e, r.j - e), P(r.i + r.f + e, r.j + r.f + e), P(r.i - e, r.j + r.f + e)])} fill="rgba(255,255,255,.05)" stroke={r.color} strokeWidth={2.5} />}
+                {r.live ? (
+                  <>
+                    {r.light === "working" && <ellipse cx={P(r.i + r.f / 2, r.j + r.f / 2, 40)[0]} cy={P(r.i + r.f / 2, r.j + r.f / 2, 40)[1]} rx={r.f * HW + 6} ry={78} fill="#6EB8FF" fillOpacity={0.3} filter="url(#base-glow)" />}
+                    <g dangerouslySetInnerHTML={{ __html: r.art }} />
+                  </>
+                ) : (
+                  // An empty lot: a dashed outline, four posts and a sign with the phase it opens in.
+                  <>
+                    <polygon points={pts([P(r.i, r.j, 4), P(r.i + r.f, r.j, 4), P(r.i + r.f, r.j + r.f, 4), P(r.i, r.j + r.f, 4)])} fill="#0C1530" stroke={r.color} strokeOpacity={0.55} strokeWidth={1.5} strokeDasharray="6 5" />
+                    {([[0, 0], [r.f, 0], [r.f, r.f], [0, r.f]] as Pt[]).map(([a, b], k) => <line key={k} x1={P(r.i + a, r.j + b, 4)[0]} y1={P(r.i + a, r.j + b, 4)[1]} x2={P(r.i + a, r.j + b, 16)[0]} y2={P(r.i + a, r.j + b, 16)[1]} stroke={r.color} strokeOpacity={0.6} strokeWidth={2} />)}
+                    {(() => { const s = P(r.i + r.f / 2, r.j + r.f / 2, 4); return <><line x1={s[0]} y1={s[1]} x2={s[0]} y2={s[1] - 22} stroke="#7A869E" strokeWidth={2} /><rect x={s[0] - 30} y={s[1] - 40} width={60} height={19} rx={3} fill="#0A1226" stroke={r.color} strokeOpacity={0.7} /><text x={s[0]} y={s[1] - 27} textAnchor="middle" className="base-sign" fill={r.color}>PHASE {r.phase}</text></>; })()}
+                  </>
+                )}
+                {outside.slice(0, 3).map((a, k) => {
+                  const u = P(r.i + 0.2 + k * 0.9, r.j + r.f + 0.5), w = a.status === "working";
+                  const talk = () => { setSel(r.id); setPop(null); onTarget({ id: a.id, name: a.name }); };
+                  return (
+                    <g key={a.id} role="button" tabIndex={0} aria-label={`${a.name}, ${w ? "working" : a.status === "error" ? "hit an error" : "waiting on you"}. Send your next message to ${a.name}.`} className="base-hit" onClick={(ev) => { ev.stopPropagation(); talk(); }} onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); talk(); } }}>
+                      <rect x={u[0] - 20} y={u[1] - 38} width={40} height={56} fill="transparent" />
+                      <Person at={u} body={w ? "#9FD2FF" : r.color} ring={w} dot={w ? undefined : a.status === "error" ? "#FF4F6A" : "#FFB547"} />
+                      {outside.length <= 2 && <text x={u[0]} y={u[1] + 15} textAnchor="middle" className="base-lbl base-name" fill={w ? "#CFE8FF" : "#FFD9A0"}>{a.name.split(" ")[0]!.toUpperCase()}</text>}
+                    </g>
+                  );
+                })}
+                {outside.length > 3 && (() => { const u = P(r.i + 0.2 + 3 * 0.9, r.j + r.f + 0.5); return <text x={u[0]} y={u[1] - 6} textAnchor="middle" className="base-lbl" fontSize={13} fill="#E8EEFF">+{outside.length - 3}</text>; })()}
+              </g>
+            );
+          })}
+          {/* Names, the one line of work, and the bubbles sit above every building so nothing hides them. */}
+          <text x={orb[0]} y={orb[1] - 50} textAnchor="middle" className="base-lbl base-big" fill="#EAF6FF">JARVIS</text>
+          {rows.map((r) => {
+            const n = r.approvals.length + r.todos.length, both = n > 0 && r.errors.length > 0, work = r.working.length > 0;
+            const by = r.L[1] - (work ? 68 : 42);
+            const open = () => { setSel(r.id); setPop(r.id); setError(undefined); };
+            return (
+              <g key={r.id}>
+                <text x={r.L[0]} y={r.L[1]} textAnchor="middle" className="base-lbl base-big" fill={r.color} fillOpacity={r.live ? 1 : 0.7}>{r.label}</text>
+                {work && (
+                  <g className="base-work">
+                    <rect x={r.L[0] - 44} y={r.L[1] - 27} width={88} height={7} rx={3.5} fill="#060B1A" stroke="#8FCBFF" strokeOpacity={0.6} />
+                    <rect className="base-indet" x={r.L[0] - 42} y={r.L[1] - 25.5} width={26} height={4} rx={2} fill="#8FCBFF" />
+                    <text x={r.L[0]} y={r.L[1] - 33} textAnchor="middle" className="base-lbl" fontSize={10.5} fill="#CFE8FF">{r.working.length > 1 ? `${r.working.length} WORKING` : clipText(r.working[0]!.detail || "working", 26).toUpperCase()}</text>
+                  </g>
+                )}
+                {n > 0 && (
+                  <g role="button" tabIndex={0} aria-label={`${r.label}: ${n} waiting on you. Open.`} className="base-bub" onClick={open} onKeyDown={key(open)}>
+                    <circle cx={r.L[0] - (both ? 22 : 0)} cy={by} r={18} fill="#FFB547" />
+                    <text x={r.L[0] - (both ? 22 : 0)} y={by + 6} textAnchor="middle" className="base-bubtext" fill="#1A1002">{n}</text>
+                  </g>
+                )}
+                {r.errors.length > 0 && (
+                  <g role="button" tabIndex={0} aria-label={`${r.label}: ${r.errors.length} problem${r.errors.length === 1 ? "" : "s"}. Open.`} className="base-bub" onClick={open} onKeyDown={key(open)}>
+                    <circle cx={r.L[0] + (both ? 22 : 0)} cy={by} r={18} fill="#FF4F6A" />
+                    <text x={r.L[0] + (both ? 22 : 0)} y={by + 6} textAnchor="middle" className="base-bubtext" fill="#fff">!</text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      {card}
+      </div>
+
+      {cur ? (
+        <div className="base-panel" style={{ borderColor: cur.color }}>
+          <div className="flex flex-col gap-1 min-w-0">
+            <h2 className="display m-0 text-2xl font-bold tracking-[0.06em]" style={{ color: cur.color }}>{state.ventures[cur.id as keyof typeof state.ventures]?.label ?? cur.label}</h2>
+            <span className="text-[12px]" style={{ color: "var(--muted)" }}>{cur.live ? `${cur.agents.length} agents · ${cur.working.length} working · ${cur.approvals.length + cur.todos.length} need you` : `Not built yet · opens in phase ${cur.phase} · ${cur.agents.length} agents planned`}</span>
+            <div className="flex gap-2 mt-1">
+              <Link className="btn btn-sm btn-primary" href={`/ventures/${cur.id}`}>Go inside ›</Link>
+              <button className="btn btn-sm" onClick={clear} aria-label="Close this venture">Close</button>
+            </div>
+          </div>
+          <ul className="base-chips">
+            {cur.agents.map((a) => {
+              const st = a.status === "working" ? "working" : a.status === "error" ? "error" : a.status === "waiting" || cur.approvals.some((p) => p.agentId === a.id) ? "needs" : a.live ? "idle" : "off";
+              return (
+                <li key={a.id}>
+                  <button className="base-agent" data-st={st} aria-pressed={target?.id === a.id} onClick={() => onTarget(target?.id === a.id ? null : { id: a.id, name: a.name })} title={`Send your next message to ${a.name}`}>
+                    <i aria-hidden="true" />
+                    <span><b>{a.name}</b><small>{clipText(a.status === "working" ? a.detail || "working" : a.short, 34)}</small></span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : (
+        <p className="m-0 text-center text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>Click a building, a bubble, or an agent standing outside</p>
+      )}
+    </section>
+  );
+}

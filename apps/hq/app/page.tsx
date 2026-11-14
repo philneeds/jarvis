@@ -11,6 +11,7 @@ import { Skyline } from "@/components/Skyline";
 import { Core, type CoreState } from "@/components/Core";
 import { Transcript } from "@/components/Transcript";
 import { Working } from "@/components/Working";
+import { Base, type BaseTarget } from "@/components/Base";
 import { useLive } from "@/lib/live";
 import { useVoice } from "@/lib/voice";
 import { useClap, type ClapSensitivity } from "@/lib/clap";
@@ -40,6 +41,10 @@ export default function HomePage() {
   const [on, setOn] = useState(true);
   // Minimal: the clock, the orb and the conversation, nothing else. Remembered per device, like Display off.
   const [minimal, setMinimal] = useState(false);
+  // Home is the base by default; the older panels stay one button away. Remembered per device.
+  const [view, setView] = useState<"base" | "classic">("base");
+  // An agent picked on the base: the next typed message goes to them, the same as typing @name.
+  const [target, setTarget] = useState<BaseTarget | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   // Files and images to go with the next message (PDFs are read into text on the server).
@@ -84,7 +89,7 @@ export default function HomePage() {
   const [background, setBackground] = useState<string | null>(null);
 
   useEffect(() => {
-    try { setOn(localStorage.getItem("hq.display") !== "off"); setMinimal(localStorage.getItem("hq.layout") === "minimal"); setSince(localStorage.getItem("hq.lastSeen") ?? undefined); } catch { /* ignore */ }
+    try { setOn(localStorage.getItem("hq.display") !== "off"); setMinimal(localStorage.getItem("hq.layout") === "minimal"); setView(localStorage.getItem("hq.home") === "classic" ? "classic" : "base"); setSince(localStorage.getItem("hq.lastSeen") ?? undefined); } catch { /* ignore */ }
     const mark = () => { try { localStorage.setItem("hq.lastSeen", new Date().toISOString()); } catch { /* ignore */ } };
     window.addEventListener("pagehide", mark);
     api<{ metrics: { key: string; label: string; unit?: string; latest?: number }[] }>("/api/ventures/money").then((r) => setMoney(r.metrics.filter((m) => m.latest !== undefined).slice(0, 3).map((m) => ({ key: m.label, value: m.unit === "$" ? `$${m.latest!.toLocaleString("en-US", { maximumFractionDigits: 0 })}` : String(m.latest) })))).catch(() => undefined);
@@ -93,6 +98,7 @@ export default function HomePage() {
     return () => window.removeEventListener("pagehide", mark);
   }, []);
   const toggle = () => { setOn(!on); try { localStorage.setItem("hq.display", on ? "off" : "on"); } catch { /* ignore */ } };
+  const toggleView = () => { const next = view === "base" ? "classic" : "base"; setView(next); setTarget(null); try { localStorage.setItem("hq.home", next); } catch { /* ignore */ } };
   const toggleMinimal = () => { setMinimal(!minimal); try { localStorage.setItem("hq.layout", minimal ? "full" : "minimal"); } catch { /* ignore */ } };
 
   const lastJarvis = [...messages].reverse().find((m) => m.role === "jarvis" && m.kind !== "ack");
@@ -125,7 +131,8 @@ export default function HomePage() {
 
   const send = async (e: FormEvent) => {
     e.preventDefault();
-    const line = text.trim(); const { images, docs } = att;
+    const typed = text.trim(); const { images, docs } = att;
+    const line = target && typed && !typed.startsWith("@") ? `@${target.id} ${typed}` : typed;
     if ((!line && !images.length && !docs.length) || busy || att.uploading) return;
     setText(""); setBusy(true); att.clear();
     try {
@@ -147,12 +154,12 @@ export default function HomePage() {
   const coreLabel = coreState === "paused" ? "PAUSED" : coreState === "speaking" ? "SPEAKING" : voice.hearing ? "HEARING YOU" : coreState === "thinking" ? "THINKING" : voice.listening ? "LISTENING" : voice.conversation ? "READY" : "STANDING BY";
 
   const orb = <Core state={coreState} level={voice.level} label={coreLabel} />;
-  const core = (
-    <div className="flex flex-col items-center gap-4 w-full max-w-2xl">
-      {orb}
+  const talk = (
+    <>
       {voice.error && <p className="m-0 text-center text-[11px]" style={{ color: "var(--red)" }}>{voice.error}</p>}
       {att.error && <p className="m-0 text-center text-[12px]" style={{ color: "var(--red)" }}>{att.error}</p>}
       <div className="w-full"><AttachTray att={att} /></div>
+      {target && <button type="button" className="btn btn-sm self-start" onClick={() => setTarget(null)} title="Send to Jarvis again">To {target.name} ✕</button>}
       <form onSubmit={send} className="flex gap-1.5 w-full" style={dragging ? { outline: "1px solid var(--accent)" } : undefined}
         onDragOver={(e) => { if ([...e.dataTransfer.items].some((i) => i.kind === "file")) { e.preventDefault(); setDragging(true); } }}
         onDragLeave={() => setDragging(false)}
@@ -160,7 +167,7 @@ export default function HomePage() {
         <label htmlFor="home-cmd" className="sr-only">Command Jarvis</label>
         <input ref={fileRef} type="file" accept={ACCEPT} multiple className="sr-only" aria-hidden="true" tabIndex={-1} onChange={(e) => { if (e.target.files) att.add(e.target.files); e.target.value = ""; }} />
         <button type="button" className="btn w-11 px-0 flex-none" onClick={() => fileRef.current?.click()} aria-label="Attach a file or image" title="Attach a PDF, Word, Excel, CSV, PowerPoint, text file or image (or drop / paste one)"><ClipIcon /></button>
-        <div className="input flex items-center gap-2 flex-1"><span className="hidden sm:inline" style={{ color: "var(--accent)" }} aria-hidden="true">&gt;_</span><input id="home-cmd" className="flex-1 min-w-0 bg-transparent border-0 outline-none h-full" placeholder={roomy ? "Talk to Jarvis or @ an agent" : "Ask Jarvis or @ agent"} value={text} onChange={(e) => setText(e.target.value)} onPaste={(e) => { const f = [...e.clipboardData.files]; if (f.length) { e.preventDefault(); att.add(f); } }} enterKeyHint="send" /></div>
+        <div className="input flex items-center gap-2 flex-1"><span className="hidden sm:inline" style={{ color: "var(--accent)" }} aria-hidden="true">&gt;_</span><input id="home-cmd" className="flex-1 min-w-0 bg-transparent border-0 outline-none h-full" placeholder={target ? `Tell ${target.name.split(" ")[0]} something` : roomy ? "Talk to Jarvis or @ an agent" : "Ask Jarvis or @ agent"} value={text} onChange={(e) => setText(e.target.value)} onPaste={(e) => { const f = [...e.clipboardData.files]; if (f.length) { e.preventDefault(); att.add(f); } }} enterKeyHint="send" /></div>
         <button type="button" className={`btn w-11 px-0 flex-none ${voice.conversation ? "btn-primary" : ""}`} onClick={toggleVoice} aria-pressed={voice.conversation} aria-label={voice.conversation ? "End voice conversation" : "Start voice conversation"} title={voice.conversation ? "End conversation" : "Talk with Jarvis"}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
         </button>
@@ -209,19 +216,31 @@ export default function HomePage() {
           </ul>
         </section>
       )}
-    </div>
+    </>
   );
+  const core = <div className="flex flex-col items-center gap-4 w-full max-w-2xl">{orb}{talk}</div>;
 
   const power = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" /></svg>;
 
   return (
     <Shell>
-      {on || !background ? <Skyline dim={on} /> : (
+      {on && view === "base" ? null : on || !background ? <Skyline dim={on} /> : (
         // Display off: Phil's own picture, full screen.
         <div aria-hidden="true" className="fixed inset-0" style={{ zIndex: 0, backgroundImage: `url(/api/uploads/${background})`, backgroundSize: "cover", backgroundPosition: "center" }} />
       )}
       <div className="relative flex-1 flex flex-col p-4 md:p-6 gap-5" style={{ zIndex: 1 }}>
-        {on ? (
+        {on && view === "base" ? (
+          <>
+            <div className="flex flex-col items-center gap-4">
+              <Base core={coreState} target={target} onTarget={setTarget} />
+              <div className="flex flex-col items-center gap-4 w-full max-w-2xl">{talk}</div>
+            </div>
+            <div className="flex gap-2 justify-end mt-auto">
+              <button className="btn btn-sm" onClick={toggleView} title="The panels, towers and goals as they were">Classic view</button>
+              <button className="btn btn-sm" onClick={toggle}>{power}Display off</button>
+            </div>
+          </>
+        ) : on ? (
           <>
             {/* One short header row: level on the left, the clock on the right. The columns all start under it. */}
             <div className="flex items-start justify-between gap-4">
@@ -296,6 +315,7 @@ export default function HomePage() {
               </div>
               <div className="order-1 lg:order-2 w-full max-w-2xl justify-self-center min-w-0">{!minimal && <Objective />}</div>
               <div className="order-3 flex gap-2 lg:justify-end">
+                <button className="btn btn-sm" onClick={toggleView} title="Home as a base: a building for each venture">Base view</button>
                 <button className="btn btn-sm" onClick={toggleMinimal} aria-pressed={minimal} title={minimal ? "Bring back the panels, towers and goals" : "Just the clock, the orb and the conversation"}>{minimal ? "Full" : "Minimal"}</button>
                 <button className="btn btn-sm" onClick={toggle}>{power}Display off</button>
               </div>
