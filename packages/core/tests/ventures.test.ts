@@ -67,3 +67,20 @@ test("a run's own summary stays off the board; real items still land", async () 
   const dash = await jarvis.ventureDashboard("jdpm");
   assert.equal(dash.records.find((k) => k.kind === "lead")!.addedWeek, 1);
 });
+
+test("run summaries already on the boards are taken off on start; Phil's own entries and real leads stay", async () => {
+  const { Jarvis, ModelRouter, memoryStore, mockProvider, looksLikeRunReport } = await import("../src/index.js");
+  for (const t of ["Post-reconnect check 2026-11-13: Gmail OK, no new leads", "Daily lead check 2026-11-13 (7:15 run): could not run (Google token 400)", "Lead check 2026-11-12: inbox quiet"]) assert.equal(looksLikeRunReport(t), true, t);
+  const store = memoryStore();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
+  const now = new Date().toISOString();
+  const rec = (id: string, title: string, source: string) => store.records.upsert({ id, venture: "jdpm", kind: "lead", title, status: "new", fields: {}, source, createdAt: now, updatedAt: now });
+  await rec("a", "Daily lead check 2026-11-14 (7:15 run): no new leads", "karol");
+  await rec("b", "Post-reconnect check 2026-11-13: Gmail OK, no new leads", "karol");
+  await rec("c", "Howard Bailey – roof overlay", "karol");
+  await rec("d", "No new leads this week, call the old list", "phil");
+  assert.equal(await jarvis.pruneRunReports(), 2);
+  assert.deepEqual((await store.records.list("jdpm", "lead")).map((r) => r.id).sort(), ["c", "d"]);
+  assert.deepEqual((await store.settings.get<{ id: string }[]>("records.pruned", [])).map((r) => r.id).sort(), ["a", "b"], "kept, not lost");
+  assert.equal(await jarvis.pruneRunReports(), 0, "a second start finds nothing");
+});

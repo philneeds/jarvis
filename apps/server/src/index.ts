@@ -104,6 +104,8 @@ if (process.env.HEALTHCHECK_URL) {
 const scheduler = new Scheduler(jarvis);
 // Runs that died with the previous process must not show as "working" forever.
 const stale = await jarvis.clearStaleWork();
+const pruned = await jarvis.pruneRunReports().catch(() => 0);
+if (pruned) console.log(`Took ${pruned} run summaries off the venture boards`);
 // A ship that was in flight when HQ restarted: say how it went.
 void jarvis.finishShip().catch((e) => console.warn("[workshop] finish:", (e as Error).message));
 // Hourly: new code on GitHub that HQ isn't running becomes one "Update HQ" card under Needs you.

@@ -61,7 +61,10 @@ interface TrashEntry { id: string; at: string; kind: "memory" | "record" | "metr
 
 const clampPct = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0);
 /** A board entry that is really a report on the run itself ("Daily lead check 2026-11-14 (7:15 run): no new leads"). */
-export const looksLikeRunReport = (title: string) => /\bno new\b|\bnothing new\b|\(\s*\d{1,2}:\d{2}\s*run\s*\)/i.test(title) || /^(daily|morning|nightly|weekly)\s+[\w-]+\s+(check|run|scan|sweep|review)\b/i.test(title);
+export const looksLikeRunReport = (title: string) =>
+  /\bno new\b|\bnothing new\b|\b(could|did) not run\b|\(\s*\d{1,2}:\d{2}\s*run\s*\)/i.test(title)
+  || /^(daily|morning|nightly|weekly)\s+[\w-]+\s+(check|run|scan|sweep|review)\b/i.test(title)
+  || /^[\w-]+(\s+[\w-]+)?\s+(check|run|scan|sweep)\s+\d{4}-\d{2}-\d{2}\b/i.test(title);
 /** A goal can belong to any venture with a building: not Jarvis himself. */
 const goalVenture = (v: string) => v !== "root" && Object.prototype.hasOwnProperty.call(VENTURES, v);
 
@@ -81,6 +84,28 @@ export class Jarvis {
    * After a restart nothing is running, whatever the database says: a run that died with the old process would otherwise
    * show as "working" forever. Called once at boot; returns the agents that were reset.
    */
+  /**
+   * Take run summaries that agents saved as board items ("Daily lead check …: no new leads") off every board. Only
+   * agents' entries: anything Phil added or touched stays. They're kept under settings "records.pruned" so nothing is
+   * lost, and the activity log says how many went. Safe to run on every start.
+   */
+  async pruneRunReports(): Promise<number> {
+    const gone: RecordItem[] = [];
+    for (const v of Object.keys(VENTURE_DASH) as VentureId[]) {
+      for (const r of await this.store.records.list(v)) {
+        if (r.source === "phil" || !looksLikeRunReport(r.title)) continue;
+        await this.store.records.remove(r.id);
+        gone.push(r);
+      }
+    }
+    if (!gone.length) return 0;
+    const kept = await this.store.settings.get<RecordItem[]>("records.pruned", []);
+    await this.store.settings.set("records.pruned", [...kept, ...gone].slice(-500));
+    for (const v of new Set(gone.map((r) => r.venture))) bus.emitEvent({ type: "venture", venture: v });
+    await this.router.log("jarvis", "system", `Took ${gone.length} run summar${gone.length === 1 ? "y" : "ies"} off the boards (they weren't leads, jobs or posts): ${gone.slice(0, 5).map((r) => `"${r.title.slice(0, 60)}"`).join(", ")}${gone.length > 5 ? "…" : ""}`);
+    return gone.length;
+  }
+
   async clearStaleWork(): Promise<string[]> {
     const stale = (await this.store.agentState.all()).filter((s) => s.status === "working");
     const now = new Date().toISOString();
