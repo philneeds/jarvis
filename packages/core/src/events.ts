@@ -17,7 +17,12 @@ export type JarvisEvent =
   /** A scheduled report meant for Phil's phone as well as HQ (the brief, Monica's day plan). */
   | { type: "report"; agentId: string; title: string; text: string; at: string; files?: { id: string; name: string }[] }
   | { type: "attention"; item: AttentionItem; change: "raised" | "done" | "snoozed" | "reopened" | "edited" }
-  | { type: "goals"; goals: Goal[] };
+  | { type: "goals"; goals: Goal[] }
+  /** Trophies, levels, today's three or the streak changed: screens that show them fetch the summary again. */
+  | { type: "base" };
+
+/** How far out a goal sits. */
+export type Horizon = "long" | "mid" | "short";
 
 /** One of Phil's goals. Exactly one is primary whenever there are any. */
 export interface Goal {
@@ -31,7 +36,27 @@ export interface Goal {
   updatedAt: string;
   /** What moves the bar: David sets these for each goal; done benchmarks' weights add up to the percent. */
   benchmarks?: Benchmark[];
+  /** Long, mid or short term. When unset it's read off the deadline (see horizonOf). */
+  horizon?: Horizon;
+  /** The venture this goal belongs to; its benchmarks and completion level that venture's building. */
+  venture?: string;
+  /** The longer-term goal this one feeds. */
+  parent?: string;
 }
+
+/** Something that was really achieved: a benchmark met, or a goal finished. The base's levels are counted from these. */
+export interface Trophy { id: string; at: string; title: string; goalId: string; goalName: string; venture?: string; kind: "benchmark" | "goal" }
+
+/** A venture's level (1 to 5): `hits` milestone points so far, `next` the points that reach the next level. */
+export interface VentureLevel { level: number; hits: number; next?: number }
+
+/** One of today's three. `ref` ties it to the thing that completes it, so it ticks itself. */
+export interface TodayItem { id: string; text: string; goalId?: string; venture?: string; done: boolean; doneAt?: string; ref?: { kind: "approval" | "attention" | "benchmark"; id: string; goalId?: string } }
+/** Today's three: picked by David in the morning, or by HQ's own rule when he hasn't. `date` is Phil's day. */
+export interface Today { date: string; items: TodayItem[]; by: "david" | "auto" | "phil"; pickedAt: string }
+
+/** What the base and the Goals screen show beside the goals themselves. */
+export interface BaseSummary { trophies: Trophy[]; levels: Record<string, VentureLevel>; today: Today; streak: number }
 
 export interface Benchmark { id: string; text: string; weight: number; done: boolean; doneAt?: string }
 

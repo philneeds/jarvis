@@ -224,6 +224,16 @@ table.tbl td { padding: 8px; border-bottom: 1px solid rgba(124, 196, 255, 0.12);
 @keyframes base-spin { to { transform: rotate(360deg); } }
 @keyframes base-bounce { 50% { transform: translateY(-5px); } }
 .base-chip { height: 30px; padding: 0 12px; border: 1px solid var(--accent-soft); display: inline-flex; align-items: center; color: var(--ink-strong); background: rgba(10, 35, 90, 0.6); }
+button.base-chip { cursor: pointer; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+.base-menu { position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; width: 320px; max-width: 88vw; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--accent-soft); background: rgba(5, 12, 32, 0.98); box-shadow: 0 16px 50px rgba(0, 0, 0, 0.6); font-size: 12px; line-height: 1.5; letter-spacing: 0; text-transform: none; color: var(--ink); }
+.base-todo { display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 0; border: 0; background: transparent; cursor: pointer; color: var(--ink-bright); font-size: 13px; }
+.base-todo i { width: 18px; height: 18px; flex: none; margin-top: 1px; border: 1.5px solid var(--muted); position: relative; }
+.base-todo[data-done="true"] { color: var(--muted); text-decoration: line-through; }
+.base-todo[data-done="true"] i { background: var(--green); border-color: var(--green); }
+.base-todo[data-done="true"] i::after { content: ""; position: absolute; left: 5px; top: 1px; width: 4px; height: 9px; border: solid #06112B; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.base-queue { margin: 0; padding: 0; list-style: none; display: none; flex-direction: column; gap: 6px; width: 100%; }
+.base-queue li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 10px; border: 1px solid var(--line); background: rgba(5, 12, 32, 0.85); font-size: 12px; min-width: 0; }
+.base-queue .base-tag { padding: 0; flex: none; }
 .base-pop { position: absolute; z-index: 5; width: 320px; max-width: 92vw; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--amber); background: rgba(5, 12, 32, 0.97); box-shadow: 0 16px 50px rgba(0, 0, 0, 0.6); transform: translateX(34px); font-size: 12px; line-height: 1.5; }
 .base-pop[data-side="left"] { transform: translateX(calc(-100% - 34px)); }
 .base-pop[data-kind="bad"] { border-color: var(--red); }
@@ -233,7 +243,7 @@ table.tbl td { padding: 8px; border-bottom: 1px solid rgba(124, 196, 255, 0.12);
 .base-dim { color: var(--muted); }
 .base-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .base-x { position: absolute; right: 8px; top: 8px; width: 26px; height: 26px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
-.base-panel { width: 100%; max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 16px; padding: 14px 16px; border: 1px solid var(--line); background: rgba(5, 12, 32, 0.85); }
+.base-panel { width: 100%; max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr) minmax(180px, 250px); gap: 16px; padding: 14px 16px; border: 1px solid var(--line); background: rgba(5, 12, 32, 0.85); }
 .base-chips { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px 8px; align-content: start; }
 .base-agent { width: 100%; height: 40px; padding: 0 10px; display: flex; align-items: center; gap: 8px; text-align: left; border: 1px solid transparent; background: rgba(10, 35, 90, 0.55); cursor: pointer; min-width: 0; }
 .base-agent:hover, .base-agent[aria-pressed="true"] { border-color: var(--accent); }
@@ -248,8 +258,10 @@ table.tbl td { padding: 8px; border-bottom: 1px solid rgba(124, 196, 255, 0.12);
 .base-agent[data-st="off"] { opacity: 0.5; }
 @media (max-width: 767px) {
   .base-wrap { width: 100%; }
+  .base-queue { display: flex; }
+  .base-queue li > .flex-1 { flex-basis: 60%; }
   .base-big { font-size: 30px; stroke-width: 7px; }
-  .base-name, .base-work, .base-sign { display: none; }
+  .base-name, .base-work, .base-sign, .base-lot { display: none; }
   .base-bub { animation: none; transform: scale(1.8); }
   .base-pop, .base-pop[data-side="left"] { position: static; transform: none; width: auto; max-width: none; margin-top: 8px; }
   .base-panel { grid-template-columns: minmax(0, 1fr); }

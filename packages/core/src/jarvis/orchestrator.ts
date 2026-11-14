@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { bus, type Approval, type AttentionItem, type ChatMessage, type Goal, type Benchmark, type SystemStatus } from "../events.js";
+import { bus, type Approval, type AttentionItem, type BaseSummary, type ChatMessage, type Goal, type Benchmark, type Horizon, type SystemStatus, type Today, type Trophy } from "../events.js";
+import { HORIZONS, philDay, pickToday, reconcileToday, streakOf, syncTrophies, ventureLevels, type TodayLog } from "../progress.js";
 import { AGENTS, CHARTERS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
 import { ModelRouter } from "../router/index.js";
 import type { MemoryItem, MetricPoint, RecordItem, Store } from "../store/types.js";
@@ -59,6 +60,8 @@ import { isOutbound, alwaysWaits } from "./rules.js";
 interface TrashEntry { id: string; at: string; kind: "memory" | "record" | "metric" | "goal"; label: string; data: unknown; index?: number }
 
 const clampPct = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0);
+/** A goal can belong to any venture with a building: not Jarvis himself. */
+const goalVenture = (v: string) => v !== "root" && Object.prototype.hasOwnProperty.call(VENTURES, v);
 
 /** Which payload field holds the text Phil edits on the card, per action. */
 const TEXT_FIELD: Record<string, string> = { "gmail.send": "body", "x.post": "text", "x.reply": "text", "x.dm": "text", "ghl.message": "message" };
@@ -106,7 +109,7 @@ export class Jarvis {
     });
     // Phil's goals for the month, as agreed with Adam: add the new ones, retire the finished or dropped ones.
     this.executors.set("goals.set", async (a) => {
-      const p = (a.payload ?? {}) as { add?: { name?: unknown; deadline?: unknown; pct?: unknown; primary?: unknown }[]; retire?: unknown[] };
+      const p = (a.payload ?? {}) as { add?: { name?: unknown; deadline?: unknown; pct?: unknown; primary?: unknown; horizon?: unknown; venture?: unknown; parent?: unknown }[]; retire?: unknown[] };
       const current = await this.goals();
       const retiring = (p.retire ?? []).map(String).filter((id) => current.some((g) => g.id === id)).length;
       const adding = (p.add ?? []).filter((g) => typeof g.name === "string" && g.name.trim()).length;
@@ -117,7 +120,7 @@ export class Jarvis {
       for (const g of p.add ?? []) {
         if (typeof g.name !== "string" || !g.name.trim()) continue;
         const deadline = typeof g.deadline === "string" && /^\d{4}-\d{2}-\d{2}$/.test(g.deadline) ? g.deadline : undefined;
-        await this.addGoal({ name: g.name, deadline, pct: typeof g.pct === "number" ? g.pct : 0, primary: g.primary === true });
+        await this.addGoal({ name: g.name, deadline, pct: typeof g.pct === "number" ? g.pct : 0, primary: g.primary === true, horizon: HORIZONS.find((h) => h === g.horizon), venture: typeof g.venture === "string" ? g.venture : undefined, parent: typeof g.parent === "string" ? g.parent : undefined });
         added.push(g.name.trim());
       }
       if (!added.length && !retired.length) throw new Error("the proposal had no goals to add or retire");
@@ -148,6 +151,15 @@ export class Jarvis {
       if (!g) throw new Error("no goal with that id; check goals_list");
       return `"${g.name}" has ${g.benchmarks?.length ?? 0} benchmarks; it's ${g.pct}% done.`;
     });
+    // David's three for today, picked from the goals and from what's waiting on Phil. Only a list on Phil's own screen.
+    this.executors.set("today.set", async (a) => {
+      const raw = (a.payload as { items?: unknown } | undefined)?.items;
+      const items = (Array.isArray(raw) ? raw : []).filter((x): x is { text: string; goalId?: unknown; benchmarkId?: unknown; venture?: unknown } => !!x && typeof (x as { text?: unknown }).text === "string" && !!(x as { text: string }).text.trim()).slice(0, 3);
+      if (!items.length) throw new Error("today.set needs 1 to 3 items, each with text");
+      const t = await this.setToday(items.map((x) => ({ text: x.text, goalId: typeof x.goalId === "string" ? x.goalId : undefined, benchmarkId: typeof x.benchmarkId === "string" ? x.benchmarkId : undefined, venture: typeof x.venture === "string" ? x.venture : undefined })), a.agentId === "david" ? "david" : "auto");
+      return `Today's three: ${t.items.map((x) => x.text).join("; ")}.`;
+    });
+    this.describers.set("today.set", (p) => `Sets today's three on your home screen (${Array.isArray(p.items) ? Math.min(3, p.items.length) : 3} items). Nothing leaves HQ.`);
     this.describers.set("goals.benchmarks", (p) => `Sets ${Array.isArray(p.benchmarks) ? p.benchmarks.length : "the"} benchmarks for a goal on your home screen; ticking them moves its bar. Nothing leaves HQ.`);
     // A scout's own idea for the stock watchlist, added once Phil approves.
     this.executors.set("watchlist.add", async (a) => {
@@ -774,14 +786,18 @@ export class Jarvis {
     return [...list.filter((g) => g.primary), ...list.filter((g) => !g.primary)];
   }
 
-  async addGoal(g: { name: string; pct?: number; deadline?: string; primary?: boolean }): Promise<Goal> {
+  async addGoal(g: { name: string; pct?: number; deadline?: string; primary?: boolean; horizon?: Horizon; venture?: string; parent?: string }): Promise<Goal> {
     const name = g.name.trim();
     if (!name) throw new Error("name can't be empty");
     const list = await this.goalList();
     if (list.length >= Jarvis.MAX_GOALS) throw new Error(`at most ${Jarvis.MAX_GOALS} goals`);
     const goal: Goal = { id: randomUUID(), name, pct: clampPct(g.pct ?? 0), deadline: g.deadline || undefined, primary: !!g.primary || list.length === 0, updatedAt: new Date().toISOString() };
+    if (g.horizon && HORIZONS.includes(g.horizon)) goal.horizon = g.horizon;
+    if (g.venture && goalVenture(g.venture)) goal.venture = g.venture;
+    if (g.parent && list.some((x) => x.id === g.parent)) goal.parent = g.parent;
     if (goal.primary) for (const x of list) x.primary = false;
     await this.saveGoals([...list, goal]);
+    if (goal.pct >= 100) await this.awardTrophies(goal);
     await this.router.log("jarvis", "memory", `Phil set a goal: ${goal.name}${goal.primary ? " (primary)" : ""}`);
     return goal;
   }
@@ -790,7 +806,7 @@ export class Jarvis {
    * Rename, move progress, set or clear the deadline, make it the primary goal, replace its benchmarks, or tick them.
    * With benchmarks, the percent is the done benchmarks' share of the total weight.
    */
-  async updateGoal(id: string, patch: { name?: string; pct?: number; deadline?: string | null; primary?: true; benchmarks?: { text: string; weight?: number; done?: boolean }[]; benchmarksDone?: { done?: string[]; undone?: string[] } }, by = "phil"): Promise<Goal | undefined> {
+  async updateGoal(id: string, patch: { name?: string; pct?: number; deadline?: string | null; primary?: true; benchmarks?: { text: string; weight?: number; done?: boolean }[]; benchmarksDone?: { done?: string[]; undone?: string[] }; horizon?: Horizon | null; venture?: string | null; parent?: string | null }, by = "phil"): Promise<Goal | undefined> {
     const list = await this.goalList();
     const goal = list.find((g) => g.id === id);
     if (!goal) return undefined;
@@ -802,6 +818,15 @@ export class Jarvis {
     if (patch.pct !== undefined) goal.pct = clampPct(patch.pct);
     if (patch.deadline !== undefined) goal.deadline = patch.deadline || undefined;
     if (patch.primary) for (const g of list) g.primary = g.id === id;
+    if (patch.horizon !== undefined) goal.horizon = patch.horizon && HORIZONS.includes(patch.horizon) ? patch.horizon : undefined;
+    if (patch.venture !== undefined) {
+      if (patch.venture && !goalVenture(patch.venture)) throw new Error("no such venture");
+      goal.venture = patch.venture || undefined;
+    }
+    if (patch.parent !== undefined) {
+      if (patch.parent && (patch.parent === id || !list.some((g) => g.id === patch.parent))) throw new Error("a goal can only feed another goal that exists");
+      goal.parent = patch.parent || undefined;
+    }
     const now = new Date().toISOString();
     if (patch.benchmarks) {
       // Replacing the list keeps what was already done (matched by text).
@@ -823,6 +848,7 @@ export class Jarvis {
     }
     goal.updatedAt = now;
     await this.saveGoals(list);
+    await this.awardTrophies(goal);
     const who = by === "phil" ? "Phil" : getAgent(by)?.name ?? by;
     await this.router.log(by === "phil" ? "jarvis" : by, "memory", `${who} updated goal "${goal.name}"${patch.primary ? " and made it primary" : ""}${patch.benchmarks ? ` with ${goal.benchmarks?.length ?? 0} benchmarks` : ""}${patch.pct !== undefined || patch.benchmarksDone || patch.benchmarks ? ` (${goal.pct}%)` : ""}`);
     return goal;
@@ -834,10 +860,91 @@ export class Jarvis {
     const index = list.findIndex((g) => g.id === id);
     if (index < 0) return undefined;
     const [goal] = list.splice(index, 1);
+    for (const g of list) if (g.parent === id) g.parent = undefined;
     await this.saveGoals(list);
     await this.router.log("jarvis", "memory", `Phil deleted goal "${goal!.name}"`);
     const undoId = await this.toTrash({ kind: "goal", label: goal!.name, data: goal, index });
     return { goal: goal!, undoId };
+  }
+
+  // ---- Trophies, levels, today's three -----------------------------------------
+
+  /** What was really achieved, oldest first: benchmarks met and goals finished. */
+  async trophies(): Promise<Trophy[]> {
+    return this.store.settings.get<Trophy[]>("trophies", []);
+  }
+
+  /** After a goal changed: add the trophies it earned, take back the ones that were unticked. */
+  private async awardTrophies(goal: Goal): Promise<void> {
+    const r = syncTrophies(await this.trophies(), goal);
+    if (!r.changed) return;
+    await this.store.settings.set("trophies", r.trophies);
+    bus.emitEvent({ type: "base" });
+  }
+
+  private async todayContext() {
+    return { pending: await this.store.approvals.list("pending"), attention: await this.attention(true), goals: await this.goals() };
+  }
+
+  private async saveToday(t: Today): Promise<Today> {
+    await this.store.settings.set("today", t);
+    const log = await this.store.settings.get<TodayLog>("today.log", {});
+    log[t.date] = { done: t.items.filter((x) => x.done).length, total: t.items.length };
+    // Three months is plenty for a streak; older days fall off.
+    const keep = Object.keys(log).sort().slice(-90);
+    await this.store.settings.set("today.log", Object.fromEntries(keep.map((d) => [d, log[d]!])));
+    bus.emitEvent({ type: "base" });
+    return t;
+  }
+
+  /**
+   * Today's three and the streak. A new day starts with HQ's own pick (David's morning routine replaces it); items
+   * tied to an approval, a to-do or a benchmark tick themselves once that thing is done.
+   */
+  async today(): Promise<{ today: Today; streak: number }> {
+    const date = philDay();
+    const ctx = await this.todayContext();
+    const saved = await this.store.settings.get<Today | null>("today", null);
+    const fresh = !saved || saved.date !== date;
+    const r = reconcileToday(fresh ? pickToday(date, ctx) : saved, ctx);
+    if (fresh || r.changed) await this.saveToday(r.today);
+    return { today: r.today, streak: streakOf(await this.store.settings.get<TodayLog>("today.log", {}), date) };
+  }
+
+  /** Replace today's three (David's morning pick, or Phil asking for a fresh one). */
+  async setToday(items: { text: string; goalId?: string; benchmarkId?: string; venture?: string }[], by: Today["by"]): Promise<Today> {
+    const date = philDay();
+    const ctx = await this.todayContext();
+    const list = items.slice(0, 3).map((x, i) => {
+      const goal = x.goalId ? ctx.goals.find((g) => g.id === x.goalId) : undefined;
+      const bench = goal && x.benchmarkId ? goal.benchmarks?.find((b) => b.id === x.benchmarkId) : undefined;
+      const venture = x.venture && goalVenture(x.venture) ? x.venture : goal?.venture;
+      return { id: `${date}:${i}`, text: x.text.replace(/\s+/g, " ").trim().slice(0, 160), done: false, ...(goal ? { goalId: goal.id } : {}), ...(venture ? { venture } : {}), ...(goal && bench ? { ref: { kind: "benchmark" as const, id: bench.id, goalId: goal.id } } : {}) };
+    }).filter((x) => x.text);
+    if (!list.length) throw new Error("nothing to set");
+    const r = reconcileToday({ date, by, pickedAt: new Date().toISOString(), items: list }, ctx);
+    return this.saveToday(r.today);
+  }
+
+  /** HQ's own pick again, from what's waiting and the goals as they stand now. */
+  async repickToday(): Promise<Today> {
+    const ctx = await this.todayContext();
+    return this.saveToday(reconcileToday(pickToday(philDay(), ctx), ctx).today);
+  }
+
+  /** Phil ticks one of today's three (or unticks it). */
+  async toggleToday(id: string): Promise<Today | undefined> {
+    const { today } = await this.today();
+    if (!today.items.some((x) => x.id === id)) return undefined;
+    const now = new Date().toISOString();
+    return this.saveToday({ ...today, items: today.items.map((x) => (x.id === id ? { ...x, done: !x.done, doneAt: x.done ? undefined : now } : x)) });
+  }
+
+  /** Everything the base and the Goals screen show beside the goals. Never put in front of agents. */
+  async baseSummary(): Promise<BaseSummary> {
+    const trophies = await this.trophies();
+    const { today, streak } = await this.today();
+    return { trophies: trophies.slice(-100), levels: ventureLevels(trophies), today, streak };
   }
 
   // ---- Undo ---------------------------------------------------------------------
@@ -1150,10 +1257,13 @@ export class Jarvis {
     const memory = await this.store.memory.list();
     const r = await this.router.run(jarvis, { system: jarvisSystemPrompt(memory, (await this.systemStatus()).text, await this.attentionText()), prompt, direct: true, maxTurns: 1 });
     if (r.blocked) return `No brief: ${r.blocked}`;
-    const { text, approvals, remember } = extractBlocks(r.text);
+    const { text: body, approvals, remember } = extractBlocks(r.text);
     await this.absorb(jarvis, approvals, remember, r.runId);
     // Drop exactly what was briefed; a report that landed meanwhile stays for the next one.
     if (inbox.length) { const briefed = new Set(inbox.map((q) => q.id)); const { withInbox } = await import("../scheduler.js"); await withInbox(async () => { const nowInbox = await this.store.settings.get<{ id: string }[]>("reports.inbox", []); await this.store.settings.set("reports.inbox", nowInbox.filter((q) => !briefed.has(q.id))); }); }
+    // The brief opens with today's three, so there is one list for the day rather than two.
+    const three = (await this.today()).today;
+    const text = three.items.length ? `Today's 3${three.by === "david" ? " (David's pick)" : ""}\n${three.items.map((x, i) => `${i + 1}. ${x.text}${x.done ? " (done)" : ""}`).join("\n")}\n\n${body}` : body;
     const entry = { at: new Date().toISOString(), text };
     await this.store.settings.set("lastBrief", entry);
     const history = await this.store.settings.get<{ at: string; text: string }[]>("briefs", []);

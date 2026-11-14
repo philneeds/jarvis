@@ -16,6 +16,7 @@ export { readDocument, saveDoc, getDocs, docsContext, docSummary, pdfToText, doc
 export * from "./health.js";
 export * from "./xread.js";
 export * from "./video.js";
+export * from "./progress.js";
 export * from "./decks.js";
 export * from "./hyperliquid.js";
 export * from "./lookup.js";

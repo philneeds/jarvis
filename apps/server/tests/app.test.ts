@@ -259,3 +259,42 @@ test("Apple Health ingest: needs the key, not the HQ login; Settings makes the k
   assert.equal(st.days, 1);
   assert.match(st.summary, /steps 4,000/);
 });
+
+test("the base summary over the API: goal horizons and ventures, trophies, levels, today's three", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const json = async <T,>(r: Response | Promise<Response>) => (await (await r).json()) as T;
+  const send = (path: string, method: string, body?: unknown) => call(path, { method, cookie, body: body === undefined ? undefined : JSON.stringify(body) });
+  type Base = { trophies: { title: string; venture?: string }[]; levels: Record<string, { level: number }>; today: { by: string; items: { id: string; text: string; done: boolean }[] }; streak: number };
+
+  assert.equal((await call("/api/base")).status, 401, "signed-in only");
+  const star = await json<{ goal: { id: string; horizon?: string; venture?: string } }>(send("/api/goals", "POST", { name: "Roofing at $1M a year", horizon: "long", venture: "jdpm" }));
+  assert.equal(star.goal.horizon, "long");
+  assert.equal(star.goal.venture, "jdpm");
+  assert.equal((await send("/api/goals", "POST", { name: "x", venture: "root" })).status, 400, "Jarvis himself has no building");
+  assert.equal((await send("/api/goals", "POST", { name: "x", horizon: "someday" })).status, 400);
+  const mid = await json<{ goal: { id: string; parent?: string } }>(send("/api/goals", "POST", { name: "Send 40 quotes this quarter", venture: "jdpm", parent: star.goal.id }));
+  assert.equal(mid.goal.parent, star.goal.id);
+  assert.equal((await send(`/api/goals/${mid.goal.id}`, "PUT", { parent: mid.goal.id })).status, 400, "a goal can't feed itself");
+  const marked = await json<{ goal: { benchmarks: { id: string }[] } }>(send(`/api/goals/${mid.goal.id}`, "PUT", { benchmarks: [{ text: "First 10 quotes out" }, { text: "25 quotes out" }] }));
+
+  // Today's three picks the goal's next benchmark; meeting it ticks the item, earns a trophy and levels JD PM.
+  // (Other tests share this store, so make it the primary goal and ask for a fresh pick.)
+  await send(`/api/goals/${mid.goal.id}`, "PUT", { primary: true });
+  let base = await json<Base>(send("/api/today/repick", "POST"));
+  assert.ok(base.today.items.some((x) => x.text === "First 10 quotes out"));
+  await send(`/api/goals/${mid.goal.id}`, "PUT", { benchmarksDone: { done: [marked.goal.benchmarks[0]!.id] } });
+  base = await json<Base>(send("/api/base", "GET"));
+  assert.ok(base.trophies.some((t) => t.title === "First 10 quotes out" && t.venture === "jdpm"));
+  assert.equal(base.levels.jdpm!.level, 2);
+  assert.equal(base.today.items.find((x) => x.text === "First 10 quotes out")!.done, true);
+
+  // Phil ticks another by hand, and asks for a fresh pick.
+  const other = base.today.items.find((x) => !x.done);
+  if (other) assert.equal((await json<Base>(send(`/api/today/${encodeURIComponent(other.id)}/toggle`, "POST"))).today.items.find((x) => x.id === other.id)!.done, true);
+  assert.equal((await send("/api/today/nope/toggle", "POST")).status, 404);
+  assert.equal((await json<Base>(send("/api/today/repick", "POST"))).today.by, "auto");
+  // Clearing the venture and horizon is allowed.
+  const cleared = await json<{ goal: { venture?: string; horizon?: string } }>(send(`/api/goals/${mid.goal.id}`, "PUT", { venture: null, horizon: null }));
+  assert.equal(cleared.goal.venture, undefined);
+});

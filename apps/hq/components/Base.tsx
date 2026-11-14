@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLive } from "@/lib/live";
-import { post } from "@/lib/api";
+import { api, post } from "@/lib/api";
+import { LEVEL_NAME, horizonOf, useBase } from "@/lib/base";
 import type { AgentLive, Approval, AttentionItem } from "@/lib/types";
 import type { CoreState } from "@/components/Core";
 import { approveLabel } from "@/components/ApprovalsPanel";
@@ -159,8 +160,11 @@ const heavy = (a: Approval) => a.kind === "money" || a.kind === "strategy" || /^
 interface Row {
   id: string; i: number; j: number; f: number; label: string; color: string; live: boolean; phase: number;
   agents: AgentLive[]; working: AgentLive[]; errors: AgentLive[]; approvals: Approval[]; todos: AttentionItem[];
-  light: Light; top: number; art: string; L: Pt;
+  light: Light; top: number; art: string; L: Pt; level: number; scale: number;
 }
+/** A building's size for levels 1 to 5: it grows as the venture's goals are met. */
+const LEVEL_SCALE = [0.8, 0.8, 0.86, 0.92, 0.99, 1.07];
+interface Ready { agentId: string; name: string; missing: string[] }
 
 function Person({ at, body, ring, dot }: { at: Pt; body: string; ring?: boolean; dot?: string }) {
   return (
@@ -180,6 +184,10 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
   const [pop, setPop] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const { base, goals, toggle, repick } = useBase();
+  const [menu, setMenu] = useState<"today" | "health" | null>(null);
+  const [ready, setReady] = useState<{ phase: number; agents: Ready[] } | null>(null);
+  const levels = base?.levels;
 
   const rows = useMemo<Row[]>(() => {
     if (!state) return [];
@@ -195,19 +203,37 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
       const light: Light = working.length ? "working" : approvals.length || todos.length || agents.some((a) => a.status === "waiting") ? "needs" : "idle";
       const color = hex(state.ventures[s.id as keyof typeof state.ventures]?.color);
       const drawn = live && SHAPE[s.id] ? SHAPE[s.id]!(s.i, s.j, light, color, rng(seedOf(s.id))) : { s: "", top: 42 };
+      const level = live ? levels?.[s.id]?.level ?? 1 : 0, scale = live ? LEVEL_SCALE[level] ?? 1 : 1;
+      drawn.top = drawn.top * scale + (level === 5 ? 18 : 0);
       return {
         ...s, label: state.ventures[s.id as keyof typeof state.ventures]?.short ?? s.id.toUpperCase(), color, live, phase: Math.min(...agents.map((a) => a.phase), 9),
-        agents, working, errors, approvals, todos, light, top: drawn.top, art: drawn.s, L: P(s.i + s.f / 2, s.j + s.f / 2, drawn.top + 22),
+        agents, working, errors, approvals, todos, light, top: drawn.top, art: drawn.s, L: P(s.i + s.f / 2, s.j + s.f / 2, drawn.top + 22), level, scale,
       };
     }).filter((r) => r.agents.length > 0);
-  }, [state, pending, attention]);
+  }, [state, pending, attention, levels]);
+
+  // An empty lot shows what its agents still need connected before its phase is worth starting.
+  const lockedPhase = (() => { const r = rows.find((x) => x.id === sel); return r && !r.live ? r.phase : null; })();
+  useEffect(() => {
+    if (lockedPhase === null || lockedPhase > 3) { setReady(null); return; }
+    let on = true;
+    api<{ phase: number; agents: Ready[] }>(`/api/phase/readiness?phase=${lockedPhase}`).then((r) => { if (on) setReady(r); }).catch(() => undefined);
+    return () => { on = false; };
+  }, [lockedPhase]);
 
   if (!state) return <div className="w-full" style={{ aspectRatio: `${VB.w} / ${VB.h}` }} aria-busy="true" />;
 
   const row = (id: string | null) => rows.find((r) => r.id === id);
   const cur = row(sel), popRow = row(pop);
   const waiting = pending.length + attention.filter((x) => x.status === "open").length;
-  const down = Object.entries(state.providers ?? {}).filter(([, p]) => !p.ok).map(([k]) => k);
+  const problems = [
+    ...(state.status.killSwitch.all ? ["Everything is paused. Press Resume in the header to start again."] : []),
+    ...(state.status.level !== "green" && !state.status.killSwitch.all ? [state.status.text] : []),
+    ...Object.entries(state.providers ?? {}).filter(([, v]) => !v.ok).map(([k, v]) => `${k} isn't answering${v.reason ? `: ${v.reason}` : "."}`),
+    ...rows.flatMap((r) => r.errors.map((a) => `${a.name} hit an error${a.lastError ? `: ${clipText(a.lastError, 90)}` : "."}`)),
+  ];
+  const today = base?.today.items ?? [], todayDone = today.filter((x) => x.done).length;
+
   const pick = (id: string) => { setSel(id); setPop(null); setError(undefined); };
   const clear = () => { setSel(null); setPop(null); onTarget(null); setError(undefined); };
   const key = (fn: () => void) => (e: React.KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); } };
@@ -221,6 +247,13 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
     setBusy(true); setError(undefined);
     try { await post(`/api/attention/${t.id}/done`); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
+
+  // Everything waiting, in one list, for the phone: problems, then approvals, then to-dos.
+  const queue = rows.flatMap((r) => [
+    ...r.errors.map((a) => ({ key: `e${a.id}`, tag: r.label, color: r.color, text: `${a.name} hit an error`, act: <Link className="btn btn-sm" href={`/web?agent=${a.id}`}>Open ›</Link> })),
+    ...r.approvals.map((a) => ({ key: a.id, tag: r.label, color: r.color, text: a.title, act: heavy(a) ? <Link className="btn btn-sm" href="/attention#approve">Review ›</Link> : <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void approve(a)}>{approveLabel(a)}</button> })),
+    ...r.todos.map((t) => ({ key: t.id, tag: r.label, color: r.color, text: t.title, act: <button className="btn btn-sm" disabled={busy} onClick={() => void done(t)}>Done ✓</button> })),
+  ]);
 
   const orb = P(7.5, 7.5, 150), corePt = P(7.5, 7.5);
   const pct = (p: Pt) => ({ left: `${((p[0] - VB.x) / VB.w) * 100}%`, top: `${((p[1] - VB.y) / VB.h) * 100}%` });
@@ -265,7 +298,28 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
     <section aria-label="Your base" className="w-full flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2 text-[11px] tracking-[0.14em] uppercase">
         <Link href="/attention" className="base-chip" style={waiting ? { borderColor: "var(--amber)", color: "var(--amber)" } : undefined}>{waiting} need you ›</Link>
-        {down.length > 0 && <Link href="/settings" className="base-chip" style={{ borderColor: "var(--red)", color: "var(--red)" }} title={down.join(", ")}>{down.length} connection{down.length === 1 ? "" : "s"} down ›</Link>}
+        <div className="relative">
+          <button className="base-chip" aria-expanded={menu === "health"} onClick={() => setMenu(menu === "health" ? null : "health")} style={{ borderColor: problems.length ? "var(--red)" : "var(--green)", color: problems.length ? "var(--red)" : "var(--green)" }}>{problems.length ? `${problems.length} problem${problems.length === 1 ? "" : "s"} ▾` : "Healthy ▾"}</button>
+          {menu === "health" && (
+            <div className="base-menu" role="dialog" aria-label="Health">
+              {problems.length === 0 ? <span>Every agent is running, every provider is answering, and nothing is paused.</span> : <ul className="m-0 pl-4 flex flex-col gap-1">{problems.map((x, i) => <li key={i}>{x}</li>)}</ul>}
+              <Link href="/settings" className="btn btn-sm self-start">Connections and backups ›</Link>
+            </div>
+          )}
+        </div>
+        <div className="relative">
+          <button className="base-chip" aria-expanded={menu === "today"} onClick={() => setMenu(menu === "today" ? null : "today")} style={today.length && todayDone === today.length ? { borderColor: "var(--green)", color: "var(--green)" } : undefined}>Today {todayDone} / {today.length} ▾</button>
+          {menu === "today" && (
+            <div className="base-menu" role="dialog" aria-label="Today's three">
+              <span className="base-tag" style={{ color: "var(--gold)" }}>Today&apos;s 3 · {base?.today.by === "david" ? "David's pick" : base?.today.by === "phil" ? "your pick" : "HQ's pick"}{base && base.streak > 0 ? ` · ${base.streak} day streak` : ""}</span>
+              {today.length === 0 && <span className="base-dim">Nothing to pick from yet. Set a goal and the next step toward it shows up here.</span>}
+              {today.map((x) => (
+                <button key={x.id} className="base-todo" data-done={x.done} onClick={() => void toggle(x.id)} aria-pressed={x.done}><i aria-hidden="true" /><span>{x.text}</span></button>
+              ))}
+              <div className="base-btns"><Link href="/goals" className="btn btn-sm">All goals ›</Link>{today.length > 0 && <button className="btn btn-sm" onClick={() => void repick()} title="HQ picks again from what's waiting and your goals as they stand">Pick again</button>}</div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="base-wrap">
@@ -315,7 +369,8 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
                 {r.live ? (
                   <>
                     {r.light === "working" && <ellipse cx={P(r.i + r.f / 2, r.j + r.f / 2, 40)[0]} cy={P(r.i + r.f / 2, r.j + r.f / 2, 40)[1]} rx={r.f * HW + 6} ry={78} fill="#6EB8FF" fillOpacity={0.3} filter="url(#base-glow)" />}
-                    <g dangerouslySetInnerHTML={{ __html: r.art }} />
+                    {(() => { const c = P(r.i + r.f / 2, r.j + r.f / 2); return <g transform={`translate(${c[0].toFixed(1)} ${c[1].toFixed(1)}) scale(${r.scale}) translate(${(-c[0]).toFixed(1)} ${(-c[1]).toFixed(1)})`} dangerouslySetInnerHTML={{ __html: r.art }} />; })()}
+                    {r.level === 5 && (() => { const t = P(r.i + r.f / 2, r.j + r.f / 2, r.top - 8); return <><ellipse className="base-spin" cx={t[0]} cy={t[1]} rx={26} ry={10} fill="none" stroke="#FFD27A" strokeWidth={2.5} strokeDasharray="4 5" /><circle cx={t[0]} cy={t[1]} r={5} fill="#FFD27A" /></>; })()}
                   </>
                 ) : (
                   // An empty lot: a dashed outline, four posts and a sign with the phase it opens in.
@@ -348,7 +403,7 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
             const open = () => { setSel(r.id); setPop(r.id); setError(undefined); };
             return (
               <g key={r.id}>
-                <text x={r.L[0]} y={r.L[1]} textAnchor="middle" className="base-lbl base-big" fill={r.color} fillOpacity={r.live ? 1 : 0.7}>{r.label}</text>
+                <text x={r.L[0]} y={r.L[1]} textAnchor="middle" className={`base-lbl base-big ${r.live ? "" : "base-lot"}`} fill={r.color} fillOpacity={r.live ? 1 : 0.7}>{r.label}</text>
                 {work && (
                   <g className="base-work">
                     <rect x={r.L[0] - 44} y={r.L[1] - 27} width={88} height={7} rx={3.5} fill="#060B1A" stroke="#8FCBFF" strokeOpacity={0.6} />
@@ -376,6 +431,13 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
       {card}
       </div>
 
+      {queue.length > 0 && (
+        <ul className="base-queue" aria-label="Waiting on you">
+          {queue.slice(0, 6).map((q) => <li key={q.key}><span className="base-tag" style={{ color: q.color }}>{q.tag}</span><span className="flex-1 min-w-0">{q.text}</span>{q.act}</li>)}
+          {queue.length > 6 && <li><Link href="/attention">{queue.length - 6} more ›</Link></li>}
+        </ul>
+      )}
+
       {cur ? (
         <div className="base-panel" style={{ borderColor: cur.color }}>
           <div className="flex flex-col gap-1 min-w-0">
@@ -399,6 +461,31 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
               );
             })}
           </ul>
+          <div className="flex flex-col gap-1.5 min-w-0 text-[12px]">
+            {cur.live ? (() => {
+              const lv = levels?.[cur.id] ?? { level: 1, hits: 0, next: 1 };
+              const mine = goals.filter((g) => g.venture === cur.id);
+              return (
+                <>
+                  <span className="base-tag" style={{ color: cur.color }}>Level {lv.level} · {LEVEL_NAME[lv.level]}</span>
+                  <span className="base-dim">{lv.next ? `${lv.next - lv.hits} more milestone${lv.next - lv.hits === 1 ? "" : "s"} to level ${lv.level + 1}` : "Top level"}</span>
+                  {mine.slice(0, 3).map((g) => <Link key={g.id} href="/goals" className="flex items-center gap-2 min-w-0" style={{ color: "var(--ink)" }}><span className="truncate flex-1">{g.name}</span><span className="base-dim flex-none">{g.pct}%</span></Link>)}
+                  {mine.length === 0 && <Link href="/goals">Give {cur.label} a goal ›</Link>}
+                  {mine.length > 0 && <span className="base-dim text-[11px]">{mine.filter((g) => horizonOf(g) === "long").length} long · {mine.filter((g) => horizonOf(g) === "mid").length} mid · {mine.filter((g) => horizonOf(g) === "short").length} short term</span>}
+                </>
+              );
+            })() : (
+              <>
+                <span className="base-tag">Before it opens</span>
+                <span className="base-dim">You start each phase yourself, in Settings.</span>
+                {ready && ready.phase === cur.phase && (() => {
+                  const thin = ready.agents.filter((a) => a.missing.length && cur.agents.some((x) => x.id === a.agentId));
+                  return thin.length === 0 ? <span>Everything its agents need is connected.</span> : thin.slice(0, 4).map((a) => <span key={a.agentId}>{a.name} still needs {a.missing.join(", ")}</span>);
+                })()}
+                <Link href="/settings">Open Settings ›</Link>
+              </>
+            )}
+          </div>
         </div>
       ) : (
         <p className="m-0 text-center text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>Click a building, a bubble, or an agent standing outside</p>

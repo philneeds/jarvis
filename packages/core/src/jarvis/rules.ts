@@ -15,7 +15,7 @@ export function alwaysWaits(a: Pick<Approval, "kind" | "payload">): boolean {
 }
 
 /** Work that stays inside Phil's own tools and HQ: the only actions the "only outbound waits" rule lets through. */
-const INTERNAL_ACTIONS = /^(gmail\.(archive|label)|spotify\.playlist\.(create|add)|goals\.(update|benchmarks)|watchlist\.add|memory\.replace|record\.(create|update|upsert)|ghl\.(note|contact\.create|deal\.(create|move)))$/;
+const INTERNAL_ACTIONS = /^(gmail\.(archive|label)|spotify\.playlist\.(create|add)|goals\.(update|benchmarks)|today\.set|watchlist\.add|memory\.replace|record\.(create|update|upsert)|ghl\.(note|contact\.create|deal\.(create|move)))$/;
 
 /**
  * Does this approval reach anyone besides Phil, or touch something only Phil should change? An allow-list: anything
