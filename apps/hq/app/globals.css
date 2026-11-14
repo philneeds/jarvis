@@ -270,3 +270,27 @@ button.base-chip { cursor: pointer; font: inherit; letter-spacing: inherit; text
   .base-flow, .base-packet, .base-indet, .base-ping, .base-bob, .base-blink, .base-breathe, .base-spin, .base-bub { animation: none; }
   .base-packet { opacity: 0; }
 }
+
+/* Venture pages (app/ventures/[id]): tracker lists and the team list. */
+.vchip { height: 28px; padding: 0 10px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+.vchip:hover { color: var(--ink-bright); }
+.vitem { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto auto; align-items: center; gap: 12px; padding: 10px 4px; border-top: 1px solid rgba(124, 196, 255, 0.14); }
+.vitem:first-child { border-top: 0; }
+.vitem-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; padding: 0; border: 0; background: transparent; cursor: pointer; color: inherit; }
+.vitem-main b { font-weight: 600; font-size: 13px; color: var(--ink-bright); overflow-wrap: anywhere; }
+.vitem-main span { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.vitem-main i { font-style: normal; color: var(--dim); }
+.vitem-main:hover b { color: var(--accent); }
+.vitem-val { font-size: 13px; color: var(--ink-strong); white-space: nowrap; }
+.vstatus { height: 28px; padding: 0 6px; border: 1px solid; background: rgba(5, 12, 32, 0.6); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; max-width: 9.5rem; }
+.vitem-when { font-size: 11px; color: var(--dim); white-space: nowrap; min-width: 3.2rem; text-align: right; }
+.vitem-x { width: 28px; height: 28px; border: 1px solid transparent; background: transparent; color: var(--dim); cursor: pointer; font-size: 16px; }
+.vitem-x:hover, .vitem-x:focus-visible { color: var(--red); border-color: var(--red); }
+.vrow { display: flex; align-items: center; gap: 10px; padding: 6px 4px; font-size: 12px; color: var(--ink-strong); min-width: 0; }
+.vrow:hover { background: rgba(60, 130, 255, 0.12); color: var(--ink-bright); }
+@media (max-width: 767px) {
+  .vitem { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .vstatus { justify-self: start; }
+  .vitem-main { grid-column: 1 / -1; }
+  .vitem-val, .vitem-when { display: none; }
+}

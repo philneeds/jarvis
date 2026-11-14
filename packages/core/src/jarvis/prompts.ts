@@ -148,6 +148,6 @@ export function dashboardHint(venture: keyof typeof VENTURE_DASH): string {
   if (!d || (!d.metrics.length && !d.records.length)) return "";
   const parts: string[] = [];
   if (d.metrics.length) parts.push(`A number for the ${venture} dashboard goes in a fenced block tagged "metric": {"venture":"${venture}","key":"<${d.metrics.map((m) => m.key).join("|")}>","value":<number>}.`);
-  if (d.records.length) parts.push(`A tracker item goes in a fenced block tagged "record": {"venture":"${venture}","kind":"<${d.records.map((r) => r.kind).join("|")}>","title":"...","status":"<${[...new Set(d.records.flatMap((r) => r.statuses))].join("|")}>","fields":{...}}; include "id" to update one you saw before.`);
+  if (d.records.length) parts.push(`A tracker item goes in a fenced block tagged "record": {"venture":"${venture}","kind":"<${d.records.map((r) => r.kind).join("|")}>","title":"...","status":"<${[...new Set(d.records.flatMap((r) => r.statuses))].join("|")}>","fields":{...}}; include "id" to update one you saw before. Only real items go on the board (a lead is a person who might buy; a job is work sold): never log the run itself or "no new leads" as an item. If nothing is new, write no record.`);
   return parts.join(" ");
 }

@@ -60,6 +60,8 @@ import { isOutbound, alwaysWaits } from "./rules.js";
 interface TrashEntry { id: string; at: string; kind: "memory" | "record" | "metric" | "goal"; label: string; data: unknown; index?: number }
 
 const clampPct = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0);
+/** A board entry that is really a report on the run itself ("Daily lead check 2026-11-14 (7:15 run): no new leads"). */
+export const looksLikeRunReport = (title: string) => /\bno new\b|\bnothing new\b|\(\s*\d{1,2}:\d{2}\s*run\s*\)/i.test(title) || /^(daily|morning|nightly|weekly)\s+[\w-]+\s+(check|run|scan|sweep|review)\b/i.test(title);
 /** A goal can belong to any venture with a building: not Jarvis himself. */
 const goalVenture = (v: string) => v !== "root" && Object.prototype.hasOwnProperty.call(VENTURES, v);
 
@@ -599,7 +601,12 @@ export class Jarvis {
       await this.router.log(agent.id, "memory", memoryLine(agent.name, m.scope, m.key, agent.id), runId, { scope: m.scope, key: m.key, value: m.value });
     }
     for (const m of metrics) await this.recordMetric(m.venture as VentureId, m.key, m.value, agent.id, m.at, runId);
-    for (const r of records) await this.upsertRecord({ venture: r.venture as VentureId, kind: r.kind, id: r.id, title: r.title, status: r.status, fields: r.fields, source: agent.id }, runId);
+    for (const r of records) {
+      // A run's own summary ("Daily lead check: no new leads") isn't a lead, a job or a post: keep it off the board.
+      if (!r.id && looksLikeRunReport(r.title)) { await this.router.log(agent.id, "system", `${agent.name}'s board entry "${r.title.slice(0, 80)}" read like a run summary, not an item; left off the board.`, runId); continue; }
+      try { await this.upsertRecord({ venture: r.venture as VentureId, kind: r.kind, id: r.id, title: r.title, status: r.status, fields: r.fields, source: agent.id }, runId); }
+      catch (e) { await this.router.log(agent.id, "error", `${agent.name}'s board entry "${r.title.slice(0, 80)}" wasn't saved: ${(e as Error).message}`, runId); }
+    }
   }
 
   // ---- Needs you: the attention list ----------------------------------------------
@@ -1000,7 +1007,8 @@ export class Jarvis {
       const prev = series.length > 1 ? series[series.length - 2] : undefined;
       return { ...m, series: series.map((p) => ({ at: p.at, value: p.value })), latest: latest?.value, latestId: latest?.id, at: latest?.at, delta: latest && prev ? latest.value - prev.value : undefined };
     }));
-    const records = await Promise.all(dash.records.map(async (k) => ({ ...k, items: await this.store.records.list(venture, k.kind) })));
+    const week = Date.now() - 7 * 86_400_000;
+    const records = await Promise.all(dash.records.map(async (k) => { const items = await this.store.records.list(venture, k.kind); return { ...k, items, addedWeek: items.filter((i) => Date.parse(i.createdAt) >= week).length }; }));
     const pending = (await this.store.approvals.list("pending")).filter((a) => ids.has(a.agentId));
     // Hand-offs, approvals, errors and changes; the per-run lines would crowd them out.
     const activity = (await this.store.activity.list({ limit: 300, exclude: ["run"] })).filter((e) => ids.has(e.agentId)).slice(0, 25);
