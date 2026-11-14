@@ -30,3 +30,4 @@ export type { Executor } from "./jarvis/orchestrator.js";
 export * from "./connectors/index.js";
 export * from "./trading/limits.js";
 export * from "./ventures/dashboards.js";
+export * from "./home.js";
