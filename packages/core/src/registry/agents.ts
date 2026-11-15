@@ -46,7 +46,7 @@ const SECTOR = "Reviews current holdings in its sector and suggests changes to B
 const HEALTH_NOTE =
   "Coaches inside ChatGPT Health on Phil's ChatGPT plan, where his Apple Health data lives. Not reachable by API; Doc brings the summaries back.";
 
-/** The 52 agents in four layers, as Phil laid them out. Order matters for display. */
+/** Jarvis and the 51 agents in four layers, as Phil laid them out. Order matters for display. */
 export const AGENTS: AgentDef[] = [
   // ---- Main layer -------------------------------------------------------
   {
@@ -168,8 +168,8 @@ export const AGENTS: AgentDef[] = [
   { id: "brian", name: "Brian", short: "CFO, JD PM", layer: 2, parent: "stella", venture: "jdpm", model: "claude-sonnet", phase: 1, priority: "always", desc: "CFO for JD PM only: expenses, invoices, cash flow and everything to do with the dollar sign." },
 
   // ---- ProEdge -----------------------------------------------------------
-  { id: "stevon", name: "Stevon", short: "ProEdge", layer: 1, parent: "jarvis", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", desc: "Responsible for everything to do with ProEdge, with four sub-agents that optimize the business." },
-  { id: "salescoach", name: "Sales Coach", short: "Sales optimizer & trainer", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Sales optimizer and sales improvement trainer." },
+  // Phil, Nov 14 2026: the Sales Coach agent (salescoach) was retired and folded into Stevon as his "sales coaching" skill.
+  { id: "stevon", name: "Stevon", short: "ProEdge", layer: 1, parent: "jarvis", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", desc: "Responsible for everything to do with ProEdge, including sales coaching for the team, with three sub-agents that optimize the business." },
   { id: "scheduler", name: "Scheduler", short: "Team schedule optimizer", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Schedule optimizer and maker for managing the team." },
   { id: "emailai", name: "Email AI", short: "Email automation & info", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Email automation and information." },
   { id: "mindset", name: "Mindset Coach", short: "Mindset coaching", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Mindset coach for the ProEdge team." },

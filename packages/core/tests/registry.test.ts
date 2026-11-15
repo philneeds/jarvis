@@ -1,12 +1,26 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AGENTS, AGENT_BY_ID, findAgent, leads, teamSize, VENTURES, MODELS } from "../src/index.js";
+import { CHARTERS } from "../src/registry/index.js";
 
-test("Jarvis + 52 specialist agents in four layers, 12 leads", () => {
-  assert.equal(AGENTS.length, 53);
-  assert.equal(AGENTS.filter((a) => a.id !== "jarvis").length, 52);
+test("Jarvis + 51 specialist agents in four layers, 12 leads", () => {
+  assert.equal(AGENTS.length, 52);
+  assert.equal(AGENTS.filter((a) => a.id !== "jarvis").length, 51);
   assert.equal(leads().length, 12);
-  assert.equal(new Set(AGENTS.map((a) => a.id)).size, 53);
+  assert.equal(new Set(AGENTS.map((a) => a.id)).size, 52);
+});
+
+test("Sales Coach is retired and folded into Stevon as the sales coaching skill (Phil, Nov 14 2026)", () => {
+  assert.equal(AGENT_BY_ID["salescoach"], undefined);
+  assert.equal(findAgent("@salescoach"), undefined);
+  assert.equal(findAgent("Sales Coach"), undefined);
+  assert.equal(CHARTERS.salescoach, undefined);
+  // Stevon carries the job and reads its playbook from his own memory (agent:stevon, key skill:sales_coaching).
+  assert.ok(CHARTERS.stevon!.owns.some((o) => /sales coaching/i.test(o) && o.includes("skill:sales_coaching")));
+  assert.ok(CHARTERS.stevon!.tools?.includes("sales_data"), "Stevon keeps the sales data the coach used");
+  assert.ok(CHARTERS.stevon!.sources?.some((s) => /training material/.test(s)), "the coach's web source moved to Stevon");
+  assert.deepEqual(AGENTS.filter((a) => a.parent === "stevon").map((a) => a.id), ["scheduler", "emailai", "mindset"]);
+  assert.equal(teamSize("stevon"), 3);
 });
 
 test("every parent, link and venture resolves", () => {

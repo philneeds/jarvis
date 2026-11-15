@@ -2,7 +2,7 @@
   "name": "jarvis",
   "private": true,
   "version": "0.1.0",
-  "description": "Jarvis Agent System: one front door, 52 agents, one HQ.",
+  "description": "Jarvis Agent System: one front door, 51 agents, one HQ.",
   "packageManager": "pnpm@10.28.0",
   "scripts": {
     "dev": "pnpm -r --parallel --filter ./apps/* dev",

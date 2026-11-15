@@ -241,12 +241,17 @@ export const CHARTERS: Record<string, Charter> = {
   // ---- ProEdge -------------------------------------------------------------------------------------
   stevon: {
     job: "Everything ProEdge.",
-    owns: ["ProEdge's direction and results", "The deck for Tuesday morning's sales meeting, from the sales data Phil uploads", "Directing the sales coach, scheduler, email AI and mindset coach"],
+    owns: [
+      "ProEdge's direction and results",
+      "The deck for Tuesday morning's sales meeting, from the sales data Phil uploads",
+      // Phil, Nov 14 2026: the Sales Coach agent was retired; its job lives here as a skill, with its playbook in memory.
+      "Sales coaching for the ProEdge team (the former Sales Coach, folded in here Nov 14 2026): call reviews, training and scripts from the sales data Phil uploads; your memory note skill:sales_coaching is the playbook, keep it current",
+      "Directing the scheduler, email AI and mindset coach",
+    ],
     rhythm: "Builds the Tuesday meeting deck Mondays at 8 pm Eastern from the week's sales data; otherwise on demand.",
     tools: [...BOARD, "sales_data", "deck_template"],
-    good: "ProEdge grows with less of Phil's time.",
+    good: "ProEdge grows with less of Phil's time, and close rates go up.",
   },
-  salescoach: { job: "Sales optimizer and trainer for ProEdge.", owns: ["Sales training and call reviews"], rhythm: "On demand (phase 2).", tools: BOARD, good: "Close rates go up." },
   scheduler: { job: "Team schedule optimizer for ProEdge.", owns: ["The ProEdge team's schedule"], rhythm: "On demand (phase 2).", tools: [...CAL, "memory_search"], good: "The right people are in the right place." },
   emailai: { job: "Email automation and information for ProEdge.", owns: ["ProEdge email follow-ups and sequences, drafted for approval"], rhythm: "On demand (phase 2).", tools: [...GMAIL_READ, "gmail_create_draft", "memory_search"], good: "Follow-ups happen without anyone remembering to." },
   mindset: { job: "Mindset coach for ProEdge.", owns: ["Motivation and mindset for the team"], rhythm: "On demand (phase 2).", tools: ["memory_search"], good: "A team that shows up." },
@@ -297,7 +302,7 @@ const QUESTIONS: Record<string, string[]> = {
   frog: ["GoHighLevel: HQ reads it, and sends replies, creates contacts, adds notes and moves deals, each only after Phil approves. Phil will give more context on how he runs it later."],
   brian: ["Invoices are in GoHighLevel; Phil will give more context later. JD PM's bank and target margin per job?"],
   stevon: [
-    "What is ProEdge, who is on the team, and what are its key numbers? The sales coach, scheduler, email AI and mindset coach are set up from that answer.",
+    "What is ProEdge, who is on the team, and what are its key numbers? Your sales coaching, the scheduler, email AI and mindset coach are set up from that answer.",
     "Send the presentation template you use for Tuesday's meeting (upload the .pptx on Stevon's page), so the deck follows its order and look.",
   ],
 };
@@ -350,8 +355,7 @@ const SOURCES: Record<string, { sources: string[]; tools?: string[] }> = {
   stephanie: { sources: ["GoHighLevel (ghl_conversations, ghl_messages): the customer's texts, calls and messages", "Gmail: the email thread", "The JD PM board: their job", "Memory: hours, tone, what Phil promised"] },
   frog: { sources: ["GoHighLevel (ghl_contacts, ghl_pipeline): is the CRM clean and complete", "web_status: what HQ sees", "Memory: the tools and accounts", "web_search and web_fetch: GoHighLevel and tool docs"], tools: ["web_search", "web_fetch"] },
   brian: { sources: ["GoHighLevel (ghl_invoices, ghl_pipeline): invoices, what's due, won deals", "The JD PM board: jobs and revenue", "Gmail: receipts and supplier bills", "Memory: the bank, margins", "web_search: tax and finance rules"], tools: ["web_search"] },
-  stevon: { sources: ["sales_data and deck_template: this week's numbers and the format", "The ProEdge board", "Memory: the team and what Phil said", "web_search: sales benchmarks"], tools: ["web_search"] },
-  salescoach: { sources: ["sales_data: the real calls and numbers", "Memory: the team", "web_search: training material and scripts"], tools: ["sales_data", "web_search"] },
+  stevon: { sources: ["sales_data and deck_template: this week's numbers and the format", "The ProEdge board", "Memory: the team, what Phil said, and the skill:sales_coaching playbook", "web_search: sales benchmarks, training material and scripts"], tools: ["web_search"] },
   scheduler: { sources: ["The calendar: who's booked when", "Memory: the team and their hours"] },
   emailai: { sources: ["Gmail: the thread and the customer", "Memory: templates and tone"] },
   mindset: { sources: ["Memory: the team and what's going on", "web_search: material, when it's useful"], tools: ["web_search"] },

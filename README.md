@@ -7,7 +7,7 @@ This is **Phase 0 — Foundation** of the [scope outline](https://claude.ai/arti
 ## Layout
 
 ```
-packages/core   the runtime: agent registry (52 agents, 9 ventures), model catalog, model router,
+packages/core   the runtime: agent registry (51 agents, 9 ventures), model catalog, model router,
                 providers (Claude Agent SDK / API, Grok CLI / API, mock), Jarvis orchestrator,
                 approvals + memory blocks, usage rationing, scheduler, Postgres schema + stores
 apps/server     Hono API + websocket feed; single-user login; runs Jarvis and the scheduler
