@@ -139,9 +139,9 @@ fi
 APP=/opt/jarvis; OUT=/var/lib/jarvis/last-deploy.json; LOG=/var/log/jarvis-deploy.log
 # One deploy at a time: approvals given close together queue here instead of colliding over apt and the Next build.
 exec 9>/var/lock/jarvis-deploy.lock
-if ! flock -w 2400 9; then
-  echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) gave up: another deploy held the lock for 40 minutes" >> "$LOG"
-  printf '{"at":"%s","ok":false,"sha":"","previous":"","rolledBackTo":"","error":"another deploy held the lock for 40 minutes"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$OUT"; exit 1
+if ! flock -w 5400 9; then
+  echo "== $(date -u +%Y-%m-%dT%H:%M:%SZ) gave up: another deploy held the lock for 90 minutes" >> "$LOG"
+  printf '{"at":"%s","ok":false,"sha":"","previous":"","rolledBackTo":"","error":"another deploy held the lock for 90 minutes"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$OUT"; exit 1
 fi
 BRANCH=$(sudo -u jarvis git -C "$APP" rev-parse --abbrev-ref HEAD)
 PREV=$(sudo -u jarvis git -C "$APP" rev-parse HEAD)
@@ -212,21 +212,23 @@ $DOMAIN {
 EOF
 systemctl daemon-reload
 systemctl enable --now jarvis-server jarvis-hq >/dev/null
-# Don't cut off an agent mid-run (Einstein editing code, a lead's routine): wait for live runs, up to 20 minutes.
-# FORCE=1 skips the wait. Runs older than 70 minutes are ignored; HQ ends every run well before that.
+# Don't cut off an agent mid-run (Einstein editing code, a lead's routine): wait for live runs, up to 65 minutes.
+# That is longer than any run HQ allows (Einstein's code jobs get 60 minutes, everything else 20), so the wait ends
+# when the run does. At 20 minutes it cut off his longer jobs. FORCE=1 skips the wait. Runs older than 70 minutes
+# are ignored; HQ ends every run before that.
 wait_for_runs() {
   [[ -n "${FORCE:-}" ]] && return 0
   systemctl is-active -q jarvis-server || return 0
   local url n i
   url="$(grep -oP '^DATABASE_URL=\K.*' "$APP_DIR/.env" 2>/dev/null || true)"
   [[ -z "$url" ]] && return 0
-  for i in $(seq 1 80); do
+  for i in $(seq 1 260); do
     n="$(psql "$url" -tAc "select count(*) from runs where status='running' and started_at > now() - interval '70 minutes'" 2>/dev/null | tr -d '[:space:]')"
     [[ -z "$n" || "$n" == "0" ]] && return 0
-    [[ $i -eq 1 ]] && log "Waiting for $n agent run(s) to finish before restarting (up to 20 minutes; FORCE=1 to skip)"
+    [[ $i -eq 1 ]] && log "Waiting for $n agent run(s) to finish before restarting (up to 65 minutes; FORCE=1 to skip)"
     sleep 15
   done
-  log "Runs still going after 20 minutes; restarting anyway (they'll show as lost and can be asked again)"
+  log "Runs still going after 65 minutes; restarting anyway (they'll show as lost and can be asked again)"
 }
 wait_for_runs
 systemctl restart jarvis-server jarvis-hq caddy

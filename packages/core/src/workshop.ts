@@ -50,7 +50,7 @@ export interface WorkshopOptions {
   /** The checks a change must pass before it can be submitted; default: build, typecheck and tests of every package. */
   verify?: (dir: string) => Promise<{ ok: boolean; report: string }>;
   now?: () => Date;
-  /** How long a ship waits for agents mid-run before restarting HQ (default 25 minutes; 0 = don't wait). */
+  /** How long a ship waits for agents mid-run before restarting HQ (default 65 minutes; 0 = don't wait). */
   waitForRunsMs?: number;
   /** How often the ship and a queued run check again (default 15 s and 10 s). */
   pollMs?: number;
@@ -320,7 +320,11 @@ export class Workshop {
     setTimeout(() => void poll(), this.opts.pollMs ?? 15_000);
     return `${lead}. ${busy.length === 1 ? `${busy[0]} is` : `${busy.join(", ")} are`} mid-run, so the restart waits for that to finish (up to ${Math.round((this.opts.waitForRunsMs ?? Workshop.WAIT_FOR_RUNS_MS) / 60_000)} minutes); then HQ rebuilds and restarts, and rolls back to ${previous.slice(0, 7)} on its own if it doesn't come back up.`;
   }
-  static WAIT_FOR_RUNS_MS = 25 * 60_000;
+  /**
+   * Longer than the longest run HQ allows (a workshop job may take 60 minutes, anything else 20), so a restart never
+   * cuts a run short: the wait ends when the run does. At 25 minutes it cut off Einstein's longer code jobs (Nov 15).
+   */
+  static WAIT_FOR_RUNS_MS = 65 * 60_000;
 
   /** On boot: read the deploy script's verdict for a ship that was in flight, revert the branch if it rolled back. */
   async finish(store: Store): Promise<{ record: ShipRecord; message: string } | undefined> {
