@@ -95,6 +95,11 @@ test("auto-ship is off until Phil turns it on; then only guardrail-free commits 
   const d = await w.describe((stacked.payload as { sha: string }).sha);
   assert.deepEqual(d.carries, ["loosen", "copy tweak"], "the card can name what rides along");
   assert.ok(d.files.includes("packages/core/src/jarvis/rules.ts") && d.files.includes("apps/hq/app/x-stacked.tsx"));
+  // The base is read from GitHub each time: a missing or stale origin ref can't shrink the card to one commit's files.
+  git(dir, "update-ref", "-d", "refs/remotes/origin/deploy");
+  const again = await w.describe((stacked.payload as { sha: string }).sha);
+  assert.deepEqual(again.carries, ["loosen", "copy tweak"]);
+  assert.ok(again.files.includes("packages/core/src/jarvis/rules.ts"), "the guardrail edit underneath is still listed");
   // A fresh run starts from the deploy branch again; clean single commits go out, three a day.
   w.release(first.claim);
   await w.prepare("next change");

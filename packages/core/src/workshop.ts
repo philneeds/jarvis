@@ -259,9 +259,19 @@ export class Workshop {
    */
   async describe(sha: string): Promise<{ title: string; files: string[]; stat: string; carries: string[] }> {
     const title = await this.must(["log", "-1", "--format=%s", sha]);
+    const full = await this.must(["rev-parse", sha]);
     const { branch } = await this.target();
-    const base = await this.git(["merge-base", sha, `origin/${branch}`]);
-    const from = base.code === 0 && base.out.trim() && !sha.startsWith(base.out.trim()) ? base.out.trim() : undefined;
+    // The base is the deploy branch as GitHub has it now, else as the live app has it: read fresh each time. A stale or
+    // missing origin ref used to drop the card to the commit's own files, hiding what rides under it (Nov 15: a card
+    // flagged one guardrail file while the unshipped commit beneath it touched four more).
+    await this.git(["fetch", "-q", "origin", branch], this.opts.dir, this.auth());
+    let base = await this.git(["merge-base", full, `origin/${branch}`]);
+    if (base.code !== 0 || !base.out.trim()) {
+      const live = await this.git(["fetch", "-q", this.opts.appDir, "HEAD"]);
+      if (live.code === 0) base = await this.git(["merge-base", full, "FETCH_HEAD"]);
+    }
+    if (base.code !== 0 || !base.out.trim()) throw new Error(`can't find where ${sha.slice(0, 7)} meets ${branch}, so the card can't say what it ships`);
+    const from = base.out.trim() !== full ? base.out.trim() : undefined;
     if (!from) {
       const files = (await this.must(["diff-tree", "--no-commit-id", "--name-only", "-r", sha])).split("\n").filter(Boolean);
       return { title, files, stat: await this.must(["show", "--stat", "--format=", sha]), carries: [] };
@@ -501,7 +511,7 @@ export function workshopTools(w: Workshop, deps: WorkshopToolDeps = {}): ToolDef
           const rails = d.files.filter((f) => GUARDRAIL_FILES.test(f));
           const riders = d.carries.length ? `ALSO SHIPS ${d.carries.length} earlier change${d.carries.length === 1 ? "" : "s"} from the workshop that ${d.carries.length === 1 ? "isn't" : "aren't"} live yet: ${d.carries.map((t) => `"${t}"`).join(", ")}. Approving this card ships ${d.carries.length === 1 ? "it" : "them"} too; the files below cover all of it.\n\n` : "";
           const body = `${riders}${rails.length ? `GUARDRAILS TOUCHED: ${rails.join(", ")}. This change edits the code that limits what Einstein can do (the workshop guard, the deploy script, approvals or safety rules). Read the diff before approving.\n\n` : ""}${why.trim()}\n\nFiles: ${d.files.join(", ")}\n${d.stat}\n\nChecks: all green (build, typecheck, tests).`;
-          const block = { kind: "config", title: `${rails.length ? "Ship (touches guardrails)" : "Ship"}: ${title}`, body, payload: { action: "code.ship", sha, title, files: d.files, guardrails: rails }, context: `Einstein changed ${d.files.length} file${d.files.length === 1 ? "" : "s"} in the workshop on branch ${w.current?.branch ?? "einstein"}; every check passed. Approving pushes commit ${sha.slice(0, 7)} to the live branch and redeploys HQ (two or three minutes, HQ restarts); if HQ doesn't come back it rolls back on its own.` };
+          const block = { kind: "config", title: `${rails.length ? "Ship (touches guardrails)" : "Ship"}: ${title}`, body, payload: { action: "code.ship", sha, title, files: d.files, guardrails: rails, carries: d.carries }, context: `Einstein changed ${d.files.length} file${d.files.length === 1 ? "" : "s"} in the workshop on branch ${w.current?.branch ?? "einstein"}; every check passed. Approving pushes commit ${sha.slice(0, 7)} to the live branch and redeploys HQ (two or three minutes, HQ restarts); if HQ doesn't come back it rolls back on its own.` };
           return `Committed ${sha.slice(0, 7)}. Put this in your reply, exactly:\n\n\`\`\`approval\n${JSON.stringify(block)}\n\`\`\``;
         } catch (e) { return `Submit failed: ${(e as Error).message}`; }
       },

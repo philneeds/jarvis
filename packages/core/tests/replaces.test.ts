@@ -44,6 +44,28 @@ test("replacing is limited: only the agent's own cards, and never one Phil edite
   assert.doesNotMatch(next.effect ?? "", /Monica/);
 });
 
+test("Einstein's newer ship card replaces his older one only when its commit carries it", async () => {
+  const { jarvis, store } = make();
+  const ship = (runId: string, title: string, sha: string, carries: string[], replaces?: string[]) =>
+    jarvis.requestApproval({ agentId: "einstein", kind: "config", title: `Ship: ${title}`, body: "b", payload: { action: "code.ship", sha, title, files: ["README.md"], guardrails: [], carries }, runId }, { replaces });
+  const fold = await ship("r1", "Fold the health team into Metro", "1111111", []);
+  assert.equal(fold.status, "pending");
+  // A later commit on top of it (Nov 15: the fold, then the fold plus the tab): approving the new card ships the fold
+  // too, so the fold's card goes. workshop_submit lists what rides along in "carries".
+  const tab = await ship("r2", "Condense the Personal tab", "2222222", ["Fold the health team into Metro"], [fold.id.slice(0, 8)]);
+  assert.equal(tab.status, "pending");
+  assert.match((await store.approvals.get(fold.id))?.note ?? "", /^superseded: replaced by the newer card/);
+  assert.match(tab.effect ?? "", /Replaces the older card: "Ship: Fold the health team into Metro"/);
+  // An unrelated commit naming it: the ship card stays in front of Phil, and the new card says why.
+  const clap = await ship("r3", "Louder clap", "3333333", [], [tab.id]);
+  assert.equal((await store.approvals.get(tab.id))?.status, "pending");
+  assert.match(clap.effect ?? "", /Overlaps "Ship: Condense the Personal tab" \(still waiting: a code or update card is only replaced by a newer ship card that carries its commit\)/);
+  // Another agent's card never touches it, whatever it claims to carry.
+  await jarvis.requestApproval({ agentId: "oscar", kind: "config", title: "Ship: x", body: "b", payload: { action: "code.ship", sha: "4444444", title: "x", carries: ["Condense the Personal tab"] }, runId: "r4" }, { replaces: [tab.id] });
+  assert.equal((await store.approvals.get(tab.id))?.status, "pending");
+  assert.equal((await store.approvals.list("pending")).length, 3, "tab, clap and Oscar's wait; only the fold gave way");
+});
+
 test("the same card filed twice is one card", async () => {
   const { jarvis, store } = make();
   const a = await jarvis.requestApproval({ ...fold("Fold Sales Coach", { from: "salescoach", skill: "sales coaching" }), runId: "r1" });

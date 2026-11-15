@@ -83,10 +83,10 @@ test("a routine that watches its sources runs only when they hold something new"
   Jarvis.MAX_QUIET_MS = 0;
   try { assert.equal((await jarvis.quiet("schedule:karol-leads", "karol", ["ghl", "mail"])).skip, undefined); } finally { Jarvis.MAX_QUIET_MS = old; }
   // A source nobody connected is constant: asked once, then left alone until it's connected.
-  const d = await jarvis.quiet("brief:doc", "doc", ["calendar-of-nothing"]);
+  const d = await jarvis.quiet("brief:metro", "metro", ["calendar-of-nothing"]);
   assert.equal(d.skip, undefined);
   await d.ran();
-  assert.match((await jarvis.quiet("brief:doc", "doc", ["calendar-of-nothing"])).skip ?? "", /nothing new/);
+  assert.match((await jarvis.quiet("brief:metro", "metro", ["calendar-of-nothing"])).skip ?? "", /nothing new/);
 });
 
 test("on its timer the lead check doesn't call the model twice for the same inbox; a run Phil asks for always runs", async () => {
@@ -127,17 +127,23 @@ test("memory isn't tidied again when nothing was remembered since the last tidy"
   assert.equal(tidies(), 2, "new notes: it tidies");
 });
 
-test("Doc isn't asked for the morning brief when there's no new health data", async () => {
+test("Metro isn't asked for the morning brief until there's health data, nor again when nothing new arrived", async () => {
   const { jarvis, store, calls } = make();
-  await store.settings.set("phase", 1);
-  await store.agentState.set("doc", { status: "idle", lastRunAt: new Date().toISOString() });
+  await store.init();
+  const { ingestHealth } = await import("../src/index.js");
+  await store.agentState.set("metro", { status: "idle", lastRunAt: new Date().toISOString() });
   process.env.BRIEF_WAIT_STEP_MS = "1";
-  const asked = () => calls.filter((c) => c.agent === "doc").length;
+  const asked = () => calls.filter((c) => c.agent === "metro").length;
+  const logged = async (re: RegExp) => (await store.activity.list({ limit: 40 })).some((e) => re.test(e.summary));
   await jarvis.brief();
-  assert.equal(asked(), 1, "the first brief asks him");
+  assert.equal(asked(), 0, "nothing from the phone yet: not asked, no run");
+  assert.ok(await logged(/Metro wasn't asked for the brief: no health data yet/));
+  await ingestHealth(store, { data: { metrics: [{ name: "step_count", units: "count", data: [{ date: "2026-11-15 08:00:00 -0500", qty: 4000 }] }] } }, new Date("2026-11-15T13:00:00Z"));
   await jarvis.brief();
-  assert.equal(asked(), 1, "no health data then, none now: not asked again");
-  assert.ok((await store.activity.list({ limit: 30 })).some((e) => /wasn't asked for the brief: nothing new in health data/.test(e.summary)));
+  assert.equal(asked(), 1, "with data, the brief asks him");
+  await jarvis.brief();
+  assert.equal(asked(), 1, "same data as last time: not asked again");
+  assert.ok(await logged(/wasn't asked for the brief: nothing new in health data/));
 });
 
 test("one agent asked: its answer goes to Phil as written, with no second Jarvis call; two agents are still put together", async () => {

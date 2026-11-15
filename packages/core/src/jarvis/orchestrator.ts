@@ -128,6 +128,8 @@ const decidedByPhil = (a: Pick<Approval, "status" | "note">) => (a.status === "a
 /** Phil has edited this card or asked the agent about it: it is his now, and nothing replaces it behind his back. */
 const philTouched = (x: Pick<Approval, "original" | "editedBy" | "thread">) => x.original !== undefined || !!x.editedBy || (x.thread?.length ?? 0) > 0;
 const isShipCard = (x: Pick<Approval, "payload">) => /^(code\.ship|hq\.update)$/.test(String((x.payload as { action?: unknown } | undefined)?.action ?? ""));
+/** The commit title a ship card carries in its payload (workshop_submit writes it); nothing for an update card. */
+const shipTitle = (x: Pick<Approval, "payload">): string | undefined => { const p = x.payload as { action?: unknown; title?: unknown } | undefined; return p?.action === "code.ship" && typeof p.title === "string" && p.title ? p.title : undefined; };
 const sameText = (x: string, y: string) => x.replace(/\s+/g, " ").trim().toLowerCase() === y.replace(/\s+/g, " ").trim().toLowerCase();
 /** JSON with keys in a fixed order, so two payloads compare equal whatever order the store returns them in. */
 const stable = (v: unknown): string => Array.isArray(v) ? `[${v.map(stable).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(",")}}` : JSON.stringify(v) ?? "null";
@@ -306,7 +308,7 @@ export class Jarvis {
   pulses = new Map<string, (agentId: string) => Promise<string>>();
   static PULSE_KEY = "routine.pulse";
   /** Leads who report for the morning brief only when their source has something new. */
-  static BRIEF_WATCH: Record<string, string[]> = { doc: ["health"] };
+  static BRIEF_WATCH: Record<string, string[]> = { metro: ["health"] };
   /** Longest a watching routine is skipped before it runs anyway, so a quiet source still gets a look. */
   static MAX_QUIET_MS = 7 * 86_400_000;
   private async pulse(watch: string[], agentId: string): Promise<string | undefined> {
@@ -1721,16 +1723,15 @@ export class Jarvis {
     const leadIds = morning.filter((id) => !fresh.has(id));
     const reporters: AgentDef[] = [];
     const settle = new Map<string, () => Promise<void>>();
-    // Metro has nothing to read until Apple Health is sending data, so he isn't asked: no model run just to say
-    // "no health data yet" (that was Doc's whole daily cost, nine runs for nothing, before the health team became one agent).
+    // Metro reads Apple Health and nothing else for the brief. Until the phone has sent anything there is nothing to
+    // read, and once it has, unchanged data (BRIEF_WATCH, below) means nothing to report: either way he isn't asked.
+    // Doc, before him, cost a full run a day to say "no health data" (nine runs for nothing).
     const healthDays = leadIds.includes("metro") ? (await healthStatus(this.store)).days : 0;
     for (const id of leadIds) {
       const a = getAgent(id)!;
-      if (id === "metro" && !healthDays) continue;
+      if (id === "metro" && !healthDays) { await this.router.log(id, "schedule", `${a.name} wasn't asked for the brief: no health data yet`); continue; }
       const cfg = await getAgentConfig(this.store, id);
       if (!(cfg.tools.length || (await this.store.agentState.get(id))?.lastRunAt)) continue;
-      // Doc reads Apple Health and nothing else for the brief: with no new data there is nothing to report, so he
-      // isn't asked (he was costing a full run a day to say "no health data").
       const watch = Jarvis.BRIEF_WATCH[id];
       const q = watch ? await this.quiet(`brief:${id}`, id, watch) : undefined;
       if (q?.skip) { await this.router.log(id, "schedule", `${a.name} wasn't asked for the brief: ${q.skip}`); continue; }
@@ -1882,11 +1883,15 @@ export class Jarvis {
     }
     // The cards the agent named in "replaces" give way only now, when it's certain the new one is waiting in front of
     // Phil: a card that ran on its own must never take a waiting one off his list. A money or strategy card only gives
-    // way to another money or strategy card; a code or update card, or one Phil edited or asked about, never does.
-    const kept = named.filter((old) => philTouched(old) || isShipCard(old) || (alwaysWaits(old) && !alwaysWaits(a)));
+    // way to another money or strategy card; a code card only to a newer ship card of the same agent whose commit
+    // carries its commit (approving the new one ships the old change too: Nov 15, Phil had two cards for one fold); an
+    // update card, or any card Phil edited or asked about, never does.
+    const carried = named.some(isShipCard) ? await this.shipCarries(a) : [];
+    const carriesOld = (old: Approval) => { const t = shipTitle(old); return !!t && old.agentId === a.agentId && carried.includes(t); };
+    const kept = named.filter((old) => philTouched(old) || (isShipCard(old) && !carriesOld(old)) || (alwaysWaits(old) && !alwaysWaits(a)));
     const gone = named.filter((old) => !kept.includes(old));
     if (named.length) {
-      const why = (old: Approval) => (isShipCard(old) ? "a code or update card is never replaced" : philTouched(old) ? "you edited or asked about it" : "a money or strategy card is only replaced by another one");
+      const why = (old: Approval) => (isShipCard(old) ? "a code or update card is only replaced by a newer ship card that carries its commit" : philTouched(old) ? "you edited or asked about it" : "a money or strategy card is only replaced by another one");
       const note = [replacesNote(gone), kept.length ? `Overlaps ${kept.map((r) => `"${r.title}" (still waiting: ${why(r)})`).join(", ")}: decide ${kept.length === 1 ? "that one" : "those"} too.` : ""].filter(Boolean).join(" ");
       approval = (await this.store.approvals.update(approval.id, { effect: withNote(approval.effect, note) })) ?? approval;
       for (const old of gone) {
@@ -1900,6 +1905,19 @@ export class Jarvis {
     bus.emitEvent({ type: "approval.new", approval });
     await this.notify?.(`Approval: ${approval.title}`, approval.body.slice(0, 200)).catch(() => undefined);
     return approval;
+  }
+
+  /**
+   * The commit titles a ship card's commit carries with it (the earlier, unshipped commits under it). From the workshop
+   * when there is one, so git is the truth and a card can't name what it doesn't ship; otherwise what the card says.
+   */
+  private async shipCarries(a: Pick<Approval, "payload">): Promise<string[]> {
+    const p = (a.payload ?? {}) as { action?: unknown; sha?: unknown; carries?: unknown };
+    if (p.action !== "code.ship") return [];
+    if (this.workshop && typeof p.sha === "string") {
+      try { return (await this.workshop.describe(p.sha)).carries; } catch { return []; }
+    }
+    return Array.isArray(p.carries) ? p.carries.filter((t): t is string => typeof t === "string" && !!t) : [];
   }
 
   private deciding = new Set<string>();

@@ -70,8 +70,9 @@ test("a change goes workshop → commit → approval → push to the live branch
   const tools = workshopTools(w, { logs: async () => "line1\nkey=abcdefghijkl\n", query: async () => ({ rows: [{ id: "1", text: "hi" }] }) });
   const submit = tools.find((t) => t.name === "workshop_submit")!;
   const out = String(await submit.handler({ title: "Make the clap louder", why: "Phil asked; the gain goes from 1 to 2." }, { store: undefined as never, agentId: "einstein", workshopClaim: st.claim }));
-  const block = JSON.parse(out.match(/```approval\n([\s\S]*?)\n```/)![1]!) as { kind: string; title: string; payload: { action: string; sha: string; files: string[] } };
+  const block = JSON.parse(out.match(/```approval\n([\s\S]*?)\n```/)![1]!) as { kind: string; title: string; payload: { action: string; sha: string; files: string[]; carries: string[] } };
   assert.equal(block.kind, "config"); assert.equal(block.title, "Ship: Make the clap louder"); assert.equal(block.payload.action, "code.ship"); assert.deepEqual(block.payload.files, ["README.md"]);
+  assert.deepEqual(block.payload.carries, [], "nothing rides under a first commit");
   assert.equal(git(dir, "rev-parse", "HEAD"), block.payload.sha);
   // A change to the guard itself is flagged in the title and body.
   await fs.mkdir(path.join(dir, "packages/core/src"), { recursive: true });
