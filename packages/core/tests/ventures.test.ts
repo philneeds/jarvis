@@ -50,6 +50,9 @@ test("a run's own summary stays off the board; real items still land", async () 
   const { Jarvis, ModelRouter, memoryStore, mockProvider, looksLikeRunReport, getAgent } = await import("../src/index.js");
   for (const t of ["Daily lead check 2026-11-14 (7:15 run): no new leads", "Morning lead check: nothing new", "No new leads today", "Weekly holdings review 11/14"]) assert.equal(looksLikeRunReport(t), true, t);
   for (const t of ["Howard Bailey – roof overlay, 4544 NY-14, Geneva NY 14456", "Mike Tracy – roof only, 260 Longridge Ave", "Daily Grind Cafe – new roof", "NVDA"]) assert.equal(looksLikeRunReport(t), false, t);
+  // Real items that used to read as reports and were dropped.
+  for (const t of ["Dana Smith – siding only, no new windows", "Karen White – furnace did not run last night", "Roof check 2026-11-20 – Bailey", "Daily 5k run", "Weekly market review thread", "Nightly backup check – verify a restore", "No heat in upstairs unit - call back"]) assert.equal(looksLikeRunReport(t), false, t);
+  for (const t of ["Lead check 2026-11-14: nothing came in", "Daily lead check: could not run, GHL unreachable", "Inbox sweep did not run"]) assert.equal(looksLikeRunReport(t), true, t);
   const store = memoryStore();
   const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
   const karol = getAgent("karol")!;
@@ -88,7 +91,9 @@ test("run summaries already on the boards are taken off on start; Phil's own ent
 test("duplicates: an agent re-logging someone updates them, a DUPLICATE mark takes the copy off, and old marks are cleared on start", async () => {
   const { Jarvis, ModelRouter, memoryStore, mockProvider, isDuplicateMark } = await import("../src/index.js");
   assert.equal(isDuplicateMark("DUPLICATE – Mick Kuberka (see a223ae20)"), true);
-  assert.equal(isDuplicateMark("Duplicate check for Tracy"), true);
+  assert.equal(isDuplicateMark("Duplicate of a223ae20"), true);
+  assert.equal(isDuplicateMark("Duplicate check for Tracy"), false, "the word alone isn't a mark");
+  assert.equal(isDuplicateMark("Duplicate keys – 14 Elm St"), false, "a job about duplicate keys is a job");
   assert.equal(isDuplicateMark("Mick Kuberka – duplicate roof quote"), false);
   const store = memoryStore();
   const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
@@ -106,8 +111,28 @@ test("duplicates: an agent re-logging someone updates them, a DUPLICATE mark tak
   await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "Mike Tracy – gutters", source: "phil" });
   leads = await store.records.list("jdpm", "lead");
   assert.equal(leads.length, 2);
-  // An agent marking a copy as a duplicate takes it off the board (kept in the archive).
-  const copy = leads.find((l) => l.title === "Mike Tracy – gutters")!;
+  // An agent can't take Phil's own entry off the board by calling it a duplicate, or by updating it first.
+  const his = leads.find((l) => l.title === "Mike Tracy – gutters")!;
+  await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", id: his.id, title: "Mike Tracy – gutters", fields: { note: "called" }, source: "karol" });
+  assert.equal((await store.records.get(his.id))!.source, "phil", "an agent's update leaves it Phil's");
+  await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", id: his.id, title: "DUPLICATE – Mike Tracy (see b9ad269e)", source: "karol" });
+  assert.equal((await store.records.list("jdpm", "lead")).length, 2);
+  assert.equal(await jarvis.pruneRunReports(), 0);
+  await jarvis.removeRecord("jdpm", his.id);
+  // Different people who share a first word or a surname are different items.
+  await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "Smith – roof, 12 Oak St", source: "karol" });
+  await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "Smith – siding, 99 Elm Ave", source: "karol" });
+  await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "New roof – Howard Bailey", source: "karol" });
+  await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "New roof – Mike Stone", source: "karol" });
+  // The same full name where one title continues the other is one item.
+  await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "Dana Fox – kitchen", source: "karol" });
+  await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "Dana Fox – kitchen, wants a quote by Friday", fields: { phone: "585-555-0144" }, source: "stella" });
+  leads = await store.records.list("jdpm", "lead");
+  assert.deepEqual(leads.map((l) => l.title).sort(), ["Dana Fox – kitchen", "Mike Tracy – roof only, 260 Longridge Ave", "New roof – Howard Bailey", "New roof – Mike Stone", "Smith – roof, 12 Oak St", "Smith – siding, 99 Elm Ave"]);
+  assert.equal(leads.find((l) => l.title === "Dana Fox – kitchen")!.fields.phone, "585-555-0144");
+  for (const l of leads) if (!/Tracy/.test(l.title)) await store.records.remove(l.id);
+  // An agent marking its own copy as a duplicate takes it off the board (kept in the archive).
+  const copy = (await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "Tracy household, second entry", source: "karol" }))!;
   await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", id: copy.id, title: "DUPLICATE – Mike Tracy (see b9ad269e)", source: "karol" });
   assert.equal((await store.records.list("jdpm", "lead")).length, 1);
   assert.ok((await store.settings.get<{ id: string }[]>("records.pruned", [])).some((r) => r.id === copy.id));

@@ -62,19 +62,45 @@ interface TrashEntry { id: string; at: string; kind: "memory" | "record" | "metr
 
 const clampPct = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0);
 /** A board entry that is really a report on the run itself ("Daily lead check 2026-11-14 (7:15 run): no new leads"). */
+/**
+ * Narrow on purpose: a real item wrongly taken for a report is dropped, which is worse than a report left on the
+ * board. "No new …" and "did not run" only count where a report puts them (at the start, or right after the colon,
+ * dash or bracket that follows the run's name), and a dated or "daily" check only when nothing but a colon, a bracket
+ * or the end follows. So "Dana Smith – siding only, no new windows", "Karen White – furnace did not run last night",
+ * "Roof check 2026-11-20 – Bailey", "Daily 5k run" and "Nightly backup check – verify a restore" are items.
+ */
 export const looksLikeRunReport = (title: string) =>
-  /\bno new\b|\bnothing new\b|\b(could|did) not run\b|\(\s*\d{1,2}:\d{2}\s*run\s*\)/i.test(title)
-  || /^(daily|morning|nightly|weekly)\s+[\w-]+\s+(check|run|scan|sweep|review)\b/i.test(title)
-  || /^[\w-]+(\s+[\w-]+)?\s+(check|run|scan|sweep)\s+\d{4}-\d{2}-\d{2}\b/i.test(title);
-/** An agent's way of saying "this one is a copy": "DUPLICATE – Mick Kuberka (see a223ae20)". */
-export const isDuplicateMark = (title: string) => /^\s*duplicate\b/i.test(title);
+  /(^|[:(–—-])\s*(no new|nothing new)\b/i.test(title)
+  || /(^|[:(–—-])\s*(could|did)(n't| not) run\b|\b(check|scan|sweep|routine|search)\s+(could|did)(n't| not) run\b/i.test(title)
+  || /\(\s*\d{1,2}:\d{2}\s*run\s*\)/i.test(title)
+  || /^(daily|morning|nightly|weekly)\s+[\w-]+\s+(check|scan|sweep|review)\s*($|[:(]|\d)/i.test(title)
+  || /^[\w-]+(\s+[\w-]+)?\s+(check|run|scan|sweep)\s+\d{4}-\d{2}-\d{2}\s*($|[:(])/i.test(title);
+/**
+ * An agent's way of saying "this one is a copy": "DUPLICATE – Mick Kuberka (see a223ae20)", "Duplicate of a223ae20".
+ * The word alone isn't enough ("Duplicate keys – 14 Elm St" is a job).
+ */
+export const isDuplicateMark = (title: string) => /^\s*DUPLICATE\b\s*([–—:-]|\(|$)/.test(title) || /^\s*duplicate of\b/i.test(title);
 /** Who or what an item is about: the part of the title before " – ", " - " or a comma, lower-cased. */
 const itemKey = (title: string) => title.split(/\s[–—-]\s|,/)[0]!.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const digits = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v).replace(/\D/g, "") : "");
-/** The item already on the board that a new entry is about: the same phone number, or the same name. */
+const flat = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+/**
+ * The item already on the board that a new entry is about. The same phone number; or the same full name (two words
+ * or more before the dash) when one title simply continues the other ("Mick Kuberka" and "Mick Kuberka – roof leak").
+ * Not the same: a shared surname or a shared first word ("Smith – roof, 12 Oak St" and "Smith – siding, 99 Elm Ave";
+ * "New roof – Howard Bailey" and "New roof – Mike Tracy") or two different phone numbers. A finished item still
+ * counts: agents re-log won jobs, and that must not put the customer back on the board as new.
+ */
 function sameItem(items: RecordItem[], r: { title: string; fields?: Record<string, unknown> }): RecordItem | undefined {
-  const phone = digits(r.fields?.phone).slice(-10), key = itemKey(r.title);
-  return items.find((x) => (phone.length >= 7 && digits(x.fields.phone).slice(-10) === phone) || (key.length >= 3 && itemKey(x.title) === key));
+  const phone = digits(r.fields?.phone).slice(-10), key = itemKey(r.title), whole = flat(r.title);
+  return items.find((x) => {
+    const theirs = digits(x.fields.phone).slice(-10);
+    if (phone.length >= 10 && theirs === phone) return true;
+    if (phone.length >= 10 && theirs.length >= 10) return false; // two numbers on file, and they differ
+    if (key.split(" ").length < 2 || itemKey(x.title) !== key) return false;
+    const other = flat(x.title);
+    return other === whole || other.startsWith(`${whole} `) || whole.startsWith(`${other} `);
+  });
 }
 /** A goal can belong to any venture with a building: not Jarvis himself. */
 const goalVenture = (v: string) => v !== "root" && Object.prototype.hasOwnProperty.call(VENTURES, v);
@@ -134,9 +160,10 @@ export class Jarvis {
 
   /** Take items off their boards, keeping a copy under settings "records.pruned" (nothing is lost) and saying so in the log. */
   private async archiveRecords(items: RecordItem[], why: string): Promise<void> {
-    for (const r of items) await this.store.records.remove(r.id);
+    // The copy is saved before anything is removed.
     const kept = await this.store.settings.get<RecordItem[]>("records.pruned", []);
     await this.store.settings.set("records.pruned", [...kept, ...items].slice(-500));
+    for (const r of items) await this.store.records.remove(r.id);
     for (const v of new Set(items.map((r) => r.venture))) bus.emitEvent({ type: "venture", venture: v });
     await this.router.log("jarvis", "system", `Took ${items.length} item${items.length === 1 ? "" : "s"} off the boards (${why}): ${items.slice(0, 5).map((r) => `"${r.title.slice(0, 60)}"`).join(", ")}${items.length > 5 ? "…" : ""}`);
   }
@@ -146,6 +173,9 @@ export class Jarvis {
     const now = new Date().toISOString();
     // The run rows too: a row left "running" forever reads as "still building" to Jarvis and Phil.
     for (const r of await this.store.runs.running()) await this.store.runs.update(r.id, { status: "error", error: "HQ restarted during this run (a deploy or a crash); the run was lost. Ask again.", finishedAt: now });
+    // A to-do whose answer was being written when HQ stopped would say "is answering…" for ever.
+    const todos = await this.attentionList();
+    if (todos.some((i) => i.replying)) { for (const i of todos) i.replying = undefined; await this.saveAttention(todos); }
     for (const s of stale) {
       await this.store.agentState.set(s.id, { status: "idle", detail: "" });
       await this.router.log(s.id, "system", `${getAgent(s.id)?.name ?? s.id} was mid-run when the server restarted; that run was lost. Ask again.`);
@@ -742,6 +772,8 @@ export class Jarvis {
    * background and lands on the same item (screens hear an "attention" edit). The agent may act on it the usual way:
    * anything it proposes goes through the approval rules like any other run.
    */
+  /** Questions on a to-do that are still being answered, by to-do id. */
+  private answering = new Map<string, number>();
   async askAboutAttention(id: string, question: string, agentId?: string): Promise<AttentionItem | undefined> {
     const list = await this.attentionList();
     const item = list.find((i) => i.id === id);
@@ -753,6 +785,7 @@ export class Jarvis {
     item.replying = agent.id;
     await this.saveAttention(list);
     bus.emitEvent({ type: "attention", item, change: "edited" });
+    this.answering.set(id, (this.answering.get(id) ?? 0) + 1);
     const name = (m: { from: string; agentId?: string }) => (m.from === "phil" ? "Phil" : getAgent(m.agentId ?? "")?.name ?? "Agent");
     const task = [
       `Phil wants to talk about a to-do on his list. Answer him directly and briefly, in plain words, using your tools to check anything you need. If something should be done, do your part now (an approval block for anything that leaves HQ, a hand-off to whoever owns it). If you think it's finished, say so; Phil ticks it off himself.`,
@@ -766,14 +799,17 @@ export class Jarvis {
         const r = await this.runAgent(agent, task, { direct: true, from: "Phil (about a to-do)" });
         text = r.blocked ? `(${agent.name} didn't run: ${r.blocked})` : r.text.trim() || "(no answer)";
       } catch (e) { text = `(${agent.name} hit an error: ${(e as Error).message})`; }
+      // "Is answering…" stays up until the last question in flight on this to-do has its answer.
+      const left = (this.answering.get(id) ?? 1) - 1;
+      if (left > 0) this.answering.set(id, left); else this.answering.delete(id);
       const now = await this.attentionList();
       const cur = now.find((i) => i.id === id);
       if (!cur) return;
       cur.thread = [...(cur.thread ?? []), { at: new Date().toISOString(), from: "agent" as const, agentId: agent.id, text }].slice(-100);
-      cur.replying = undefined;
+      if (left <= 0) cur.replying = undefined;
       await this.saveAttention(now);
       bus.emitEvent({ type: "attention", item: cur, change: "edited" });
-    })();
+    })().catch((e) => void this.router.log(agent.id, "error", `${agent.name}'s answer on "${item.title.slice(0, 60)}" couldn't be saved: ${(e as Error).message}`).catch(() => undefined));
     return item;
   }
 
@@ -821,7 +857,10 @@ export class Jarvis {
     let existing = r.id ? await this.store.records.get(r.id) : undefined;
     // An agent marking an item as a duplicate means "take this one off": it's archived, not renamed and left on the board.
     if (agent && isDuplicateMark(r.title)) {
-      if (existing) await this.archiveRecords([existing], `${getAgent(r.source)?.name ?? r.source} marked a duplicate`);
+      const who = getAgent(r.source)?.name ?? r.source;
+      // Only an item it can name, on this board, that an agent put there. Phil's own entries stay where he put them.
+      if (existing && existing.venture === r.venture && existing.kind === r.kind && existing.source !== "phil") await this.archiveRecords([existing], `${who} marked a duplicate`);
+      else await this.router.log(r.source, "system", `${who} marked "${r.title.slice(0, 80)}" a duplicate, but ${existing ? (existing.source === "phil" ? "it's an item Phil added, so it stays on the board" : "it's on a different board, so nothing was removed") : "named no item on the board, so nothing was removed"}`, runId, { venture: r.venture, kind: r.kind });
       return existing;
     }
     // An agent logging someone already on the board updates that item instead of adding the same person again.
@@ -842,7 +881,7 @@ export class Jarvis {
       return item;
     }
     const status = r.status && def.statuses.includes(r.status) ? r.status : existing?.status ?? def.statuses[0]!;
-    const item = { id: existing?.id ?? r.id ?? randomUUID(), venture: r.venture, kind: r.kind, title: r.title || existing?.title || "(untitled)", status, fields: { ...(existing?.fields ?? {}), ...(r.fields ?? {}) }, source: r.source, createdAt: existing?.createdAt ?? now, updatedAt: now };
+    const item = { id: existing?.id ?? r.id ?? randomUUID(), venture: r.venture, kind: r.kind, title: r.title || existing?.title || "(untitled)", status, fields: { ...(existing?.fields ?? {}), ...(r.fields ?? {}) }, source: existing?.source === "phil" ? "phil" : r.source, createdAt: existing?.createdAt ?? now, updatedAt: now };
     await this.store.records.upsert(item);
     await this.router.log(r.source === "phil" ? "jarvis" : r.source, "memory", `${VENTURES[r.venture].short} · ${def.label.split(" (")[0]}: ${item.title} → ${status}${r.source === "phil" ? " (Phil)" : ""}`, runId, { venture: r.venture, kind: r.kind, id: item.id });
     bus.emitEvent({ type: "venture", venture: r.venture });
