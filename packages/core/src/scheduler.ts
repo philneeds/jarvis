@@ -119,7 +119,7 @@ export interface ScheduleView { id: string; agentId: string; when: string; whenT
 /** One plain line per built-in routine for the Schedules screen; the full instructions sit behind "details". */
 const SUMMARY: Record<string, string> = {
   "daily-brief": "The morning brief: each lead's report, what's waiting on you, today's calendar.",
-  "oscar-condense": "Tidies memory: merges duplicates and drops what's stale. Skipped when nothing was remembered since the last tidy.",
+  "oscar-condense": "Tidies memory: merges duplicates and drops what's stale. Skipped when nothing new was remembered.",
   "backup-nightly": "Backs up the database, keeps 14 days, copies to Google Drive.",
   "hq-update-check": "Checks GitHub for code HQ isn't running yet; if there is some, an Update HQ card waits under Needs you.",
   "setup-check": "Checks every live agent has its connections and has been tried once; keeps the Command center's setup goal up to date.",
@@ -127,8 +127,8 @@ const SUMMARY: Record<string, string> = {
   "einstein-weekly": "Weekly review: what to fix or improve, where your ideas stand, what to cut.",
   "adam-monthly": "Goals session: how last month went, and this month's goals for your OK.",
   "monica-day": "Your day: all five of your calendars, conflicts, and what to protect.",
-  "stella-leads": "Leads and jobs review; flags anything waiting on a customer. Skipped when mail and GoHighLevel hold nothing new (runs at least weekly).",
-  "karol-leads": "New-lead check: logs new leads and drafts first replies for your OK. Skipped when mail and GoHighLevel hold nothing new (runs at least weekly).",
+  "stella-leads": "Leads and jobs review; flags anything waiting on a customer. Skipped when nothing new came in.",
+  "karol-leads": "New-lead check: logs new leads, drafts first replies for your OK. Skipped when nothing new came in.",
   "bill-installs": "Today's installs and materials, and anything that would delay a job.",
   "mantis-markets": "Market read: what moved on-chain overnight and what to watch.",
   "ansem-scan": "New memecoins and low caps worth a look, each with the reason.",
