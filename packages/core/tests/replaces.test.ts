@@ -40,7 +40,7 @@ test("replacing is limited: only the agent's own cards, and never one Phil edite
   const next = await jarvis.requestApproval({ ...fold("Fold both coaches"), runId: "r2" }, { replaces: [others.id, asked.id] });
   const pending = (await store.approvals.list("pending")).map((p) => p.id).sort();
   assert.deepEqual(pending, [others.id, asked.id, next.id].sort(), "both stay");
-  assert.match(next.effect ?? "", /Overlaps "Fold Mindset Coach", still waiting because you edited or asked about it/);
+  assert.match(next.effect ?? "", /Overlaps "Fold Mindset Coach" \(still waiting: you edited or asked about it\)/);
   assert.doesNotMatch(next.effect ?? "", /Monica/);
 });
 

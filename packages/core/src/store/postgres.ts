@@ -73,7 +73,7 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
         return r ? toApproval(r) : undefined;
       },
       async update(id, p) {
-        const rows = await db.update(t.approvals).set({ status: p.status, decidedAt: date(p.decidedAt), note: p.note, body: p.body, payload: p.payload, context: p.context, effect: p.effect, thread: p.thread, original: p.original, editedBy: p.editedBy }).where(eq(t.approvals.id, id)).returning();
+        const rows = await db.update(t.approvals).set({ status: p.status, decidedAt: date(p.decidedAt), note: p.note, title: p.title, body: p.body, payload: p.payload, context: p.context, effect: p.effect, thread: p.thread, original: p.original, editedBy: p.editedBy }).where(eq(t.approvals.id, id)).returning();
         return rows[0] ? toApproval(rows[0]) : undefined;
       },
     },

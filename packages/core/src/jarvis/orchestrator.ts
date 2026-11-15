@@ -82,6 +82,21 @@ const goalVenture = (v: string) => v !== "root" && Object.prototype.hasOwnProper
 /** Which payload field holds the text Phil edits on the card, per action. */
 const TEXT_FIELD: Record<string, string> = { "gmail.send": "body", "x.post": "text", "x.reply": "text", "x.dm": "text", "ghl.message": "message" };
 
+/**
+ * The list a memory.replace keeps, checked whole: every entry needs a scope, a key and a value. One entry per key (the
+ * last wins), so fifty copies of one note can't pass for fifty notes kept.
+ */
+export function keepList(raw: unknown): { scope: string; key: string; value: string }[] {
+  if (!Array.isArray(raw)) throw new Error("memory.replace needs a keep list; nothing changed");
+  const out = new Map<string, { scope: string; key: string; value: string }>();
+  for (const k of raw as { scope?: unknown; key?: unknown; value?: unknown }[]) {
+    if (!k || typeof k.scope !== "string" || !k.scope.trim() || typeof k.key !== "string" || !k.key.trim() || typeof k.value !== "string") throw new Error("an entry in the keep list has no scope, key or value; nothing changed");
+    out.set(`${k.scope}\u0000${k.key}`, { scope: k.scope, key: k.key, value: k.value });
+  }
+  return [...out.values()];
+}
+/** How many messages a mail action may touch: the ids it names, else its max, else the 200 a query defaults to. */
+const bulkSize = (p: { ids?: unknown; max?: unknown }): number => (Array.isArray(p.ids) && p.ids.length ? p.ids.length : Number(p.max ?? 200));
 /** Phil has edited this card or asked the agent about it: it is his now, and nothing replaces it behind his back. */
 const philTouched = (x: Pick<Approval, "original" | "editedBy" | "thread">) => x.original !== undefined || !!x.editedBy || (x.thread?.length ?? 0) > 0;
 const isShipCard = (x: Pick<Approval, "payload">) => /^(code\.ship|hq\.update)$/.test(String((x.payload as { action?: unknown } | undefined)?.action ?? ""));
@@ -148,10 +163,13 @@ export class Jarvis {
     this.router = opts.router ?? new ModelRouter({ store: opts.store });
     this.notify = opts.notify;
     this.executors.set("memory.replace", async (a) => {
-      const keep = (a.payload?.keep ?? []) as { scope: string; key: string; value: string }[];
+      // Check the whole list before touching anything: a bad entry halfway through used to leave memory half-deleted.
+      const keep = keepList(a.payload?.keep);
       const current = await this.store.memory.list();
-      for (const m of current) await this.store.memory.remove(m.scope, m.key);
+      // Write what stays first, then drop the rest, so memory is never empty in between.
       for (const k of keep) await this.store.memory.set({ scope: k.scope, key: k.key, value: k.value, source: a.agentId });
+      const staying = new Set(keep.map((k) => `${k.scope}\u0000${k.key}`));
+      for (const m of current) if (!staying.has(`${m.scope}\u0000${m.key}`)) await this.store.memory.remove(m.scope, m.key);
       return `Memory condensed: ${current.length} → ${keep.length} items.`;
     });
     // Phil's goals for the month, as agreed with Adam: add the new ones, retire the finished or dropped ones.
@@ -192,7 +210,7 @@ export class Jarvis {
     this.executors.set("goals.benchmarks", async (a) => {
       const p = (a.payload ?? {}) as { id?: unknown; benchmarks?: unknown };
       if (typeof p.id !== "string" || !Array.isArray(p.benchmarks)) throw new Error("goals.benchmarks needs the goal id and a list of benchmarks");
-      const list = (p.benchmarks as { text?: unknown; weight?: unknown; done?: unknown }[]).filter((b) => b && typeof b.text === "string" && b.text.trim()).map((b) => ({ text: String(b.text), weight: Number(b.weight), done: b.done === true }));
+      const list = (p.benchmarks as { text?: unknown; weight?: unknown; done?: unknown }[]).filter((b) => b && typeof b.text === "string" && b.text.trim()).map((b) => ({ text: String(b.text), weight: Number(b.weight), ...(typeof b.done === "boolean" ? { done: b.done } : {}) }));
       if (!list.length) throw new Error("no benchmarks in the proposal");
       const g = await this.updateGoal(p.id, { benchmarks: list }, a.agentId);
       if (!g) throw new Error("no goal with that id; check goals_list");
@@ -1014,15 +1032,17 @@ export class Jarvis {
   private async tooBigToRunAlone(a: Approval): Promise<string | undefined> {
     const p = (a.payload ?? {}) as { action?: string; keep?: unknown[]; ids?: unknown[]; max?: unknown; query?: unknown };
     if (p.action === "memory.replace") {
-      const now = (await this.store.memory.list()).length, keep = Array.isArray(p.keep) ? p.keep.length : 0;
+      let keep = 0;
+      try { keep = keepList(p.keep).length; } catch (e) { return (e as Error).message; }
+      const now = (await this.store.memory.list()).length;
       if (!keep) return "it would empty memory";
       if (now >= 6 && keep < now / 2) return `it drops more than half of memory (${now} → ${keep})`;
     }
     if (p.action?.startsWith("gmail.")) {
       // 200 messages at a time, or less if Phil set a lower cap for this agent.
       const cap = Math.min(200, (await getAgentConfig(this.store, a.agentId)).rules.maxAutoItems ?? 200);
-      const n = Array.isArray(p.ids) && p.ids.length ? p.ids.length : Number(p.max ?? 200);
-      if (n > cap) return `it touches up to ${n} messages; ${cap} at a time is the limit for doing it alone`;
+      const n = bulkSize(p);
+      if (!(n <= cap)) return `it touches up to ${n} messages; ${cap} at a time is the limit for doing it alone`;
     }
     return undefined;
   }
@@ -1046,11 +1066,19 @@ export class Jarvis {
     if (!failed) {
       const list = await this.store.settings.get<AutoDone[]>(Jarvis.AUTODONE_KEY, []);
       const action = String((done.payload as { action?: unknown } | undefined)?.action ?? "");
-      // What goals looked like right after, so Undo can tell if anyone changed them since.
-      const after = action.startsWith("goals.") ? JSON.stringify(await this.goalList()) : undefined;
+      // What it looked like right after, so Undo can tell if anyone changed it since.
+      const after = action.startsWith("goals.") ? JSON.stringify(await this.goalList()) : action === "today.set" ? JSON.stringify(await this.store.settings.get<Today | null>("today", null)) : undefined;
       const entry: AutoDone = { id: randomUUID(), at: new Date().toISOString(), after, approvalId: done.id, agentId: done.agentId, title: done.title, action, outcome: (done.note ?? "").split(" · ").pop() ?? "", snapshot: snapshot ?? (action.startsWith("gmail.") ? { payload: done.payload } : undefined) };
       await this.store.settings.set(Jarvis.AUTODONE_KEY, [entry, ...list].slice(0, 200));
       bus.emitEvent({ type: "autodone" });
+    } else if ((snapshot as { memory?: MemoryItem[] } | undefined)?.memory) {
+      // It failed part-way and there is no Undo entry to press, so put memory back now.
+      const before = (snapshot as { memory: MemoryItem[] }).memory;
+      try {
+        for (const m of before) await this.store.memory.set({ scope: m.scope, key: m.key, value: m.value, source: m.source });
+        const had = new Set(before.map((m) => `${m.scope}\u0000${m.key}`));
+        for (const m of await this.store.memory.list()) if (!had.has(`${m.scope}\u0000${m.key}`) && m.source === done.agentId && !!m.updatedAt && m.updatedAt >= (done.decidedAt ?? "9999")) await this.store.memory.remove(m.scope, m.key);
+      } catch { /* the failure is already on the card */ }
     }
     return done;
   }
@@ -1074,8 +1102,16 @@ export class Jarvis {
     let result: string;
     try {
       if (e.action === "memory.replace" && s.memory) {
-        // Back to what it was, plus anything remembered since the tidy (those are newer than it and stay).
-        const since = (await this.store.memory.list()).filter((m) => m.updatedAt && m.updatedAt > e.at);
+        // A tidy Phil approved himself after this one is his: putting this back would bring back what he agreed to drop.
+        const autoIds = new Set(list.map((x) => x.approvalId));
+        const later = (await this.store.approvals.list()).find((x) => !autoIds.has(x.id) && (x.status === "approved" || x.status === "edited") && (x.payload as { action?: unknown } | undefined)?.action === "memory.replace" && (x.decidedAt ?? "") > e.at);
+        if (later) return { ok: false, result: `you approved "${later.title}" after this, so putting memory back would undo that too; fix single notes on the Memory screen instead` };
+        // Back to what it was, plus anything remembered since the tidy. "Since" is what memory holds now that the tidy
+        // didn't leave there (a new note, or one whose text changed), not a timestamp: an earlier Undo rewrites every
+        // note and would make them all look new.
+        const left = new Map<string, string>();
+        try { for (const k of keepList(((await this.store.approvals.get(e.approvalId))?.payload as { keep?: unknown } | undefined)?.keep)) left.set(`${k.scope}\u0000${k.key}`, k.value); } catch { /* an old entry without its list: fall back to the time */ }
+        const since = (await this.store.memory.list()).filter((m) => (left.size ? left.get(`${m.scope}\u0000${m.key}`) !== m.value : !!m.updatedAt && m.updatedAt > e.at));
         for (const m of await this.store.memory.list()) await this.store.memory.remove(m.scope, m.key);
         for (const m of s.memory) await this.store.memory.set({ scope: m.scope, key: m.key, value: m.value, source: m.source });
         for (const m of since) await this.store.memory.set({ scope: m.scope, key: m.key, value: m.value, source: m.source });
@@ -1087,6 +1123,10 @@ export class Jarvis {
         bus.emitEvent({ type: "base" });
         result = "Goals are back to how they were.";
       } else if (e.action === "today.set" && "today" in s) {
+        const nowToday = await this.store.settings.get<Today | null>("today", null);
+        if (nowToday && nowToday.date !== philDay()) return { ok: false, result: "that was another day's list; today's has its own pick" };
+        if (e.after && JSON.stringify(nowToday) !== e.after) return { ok: false, result: "today's three changed after this (something was ticked or picked again), so putting the earlier pick back would lose that; use Pick again instead" };
+        if (s.today && s.today.date !== philDay()) return { ok: false, result: "the earlier pick was for another day; use Pick again for a fresh one" };
         if (s.today) await this.saveToday(s.today); else { await this.store.settings.set("today", null); bus.emitEvent({ type: "base" }); }
         result = "Today's three are back to the earlier pick.";
       } else if (this.undoers.has(e.action) && s.payload) {
@@ -1647,15 +1687,12 @@ export class Jarvis {
     // ones HQ can tell are the same (same event, same email, same record), and the ones the agent names in "replaces"
     // after checking its waiting cards. Only its own cards, never a code ship or an update, and never one Phil has
     // edited or asked about: that one stays, and the new card says so.
-    const named = pendingNow.filter((old) => old.agentId === a.agentId && (opts.replaces ?? []).some((n) => old.id === n || old.id.startsWith(n)));
-    const kept = named.filter((old) => philTouched(old) || isShipCard(old));
-    const replaced = [...new Map([...pendingNow.filter((old) => supersedes(a, old)), ...named.filter((old) => !kept.includes(old))].map((x) => [x.id, x])).values()];
+    const replaced = pendingNow.filter((old) => supersedes(a, old));
+    const named = pendingNow.filter((old) => old.agentId === a.agentId && !replaced.includes(old) && (opts.replaces ?? []).some((n) => old.id === n || old.id.startsWith(n)));
     const effect0 = a.effect ?? this.effectOf(a);
-    const notes = [
-      replaced.length ? `Replaces ${replaced.length === 1 ? "the older card" : `${replaced.length} older cards`}: ${replaced.map((r) => `"${r.title}"`).join(", ")}.` : "",
-      kept.length ? `Overlaps ${kept.map((r) => `"${r.title}"`).join(", ")}, still waiting because ${kept.every(isShipCard) ? "a code or update card is never replaced" : "you edited or asked about it"}: decide that one too.` : "",
-    ].filter(Boolean).join(" ");
-    const approval: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "pending", ...a, effect: notes ? `${effect0 ?? ""}${effect0 ? " " : ""}${notes}` : effect0 };
+    const replacesNote = (list: Approval[]) => (list.length ? `Replaces ${list.length === 1 ? "the older card" : `${list.length} older cards`}: ${list.map((r) => `"${r.title}"`).join(", ")}.` : "");
+    const withNote = (base: string | undefined, note: string) => (note ? `${base ?? ""}${base ? " " : ""}${note}` : base);
+    let approval: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "pending", ...a, effect: withNote(effect0, replacesNote(replaced)) };
     await this.store.approvals.add(approval);
     for (const old of replaced) {
       const done = await this.store.approvals.update(old.id, { status: "rejected", decidedAt: new Date().toISOString(), note: `superseded: replaced by the newer card "${approval.title}"` });
@@ -1674,29 +1711,49 @@ export class Jarvis {
     }
     // Reversible work goes through on its own, whatever the agent's charter says: HQ keeps what it looked like before,
     // and Phil gets an Undo button under "Done for you" instead of a card to approve.
-    if (await this.reversibleOn() && isReversible(approval)) {
-      const why = await this.tooBigToRunAlone(approval);
-      if (!why) return this.runReversible(approval);
-      await this.store.approvals.update(approval.id, { note: `Waits for you: ${why}.` });
-    }
+    // A change too big to put back comfortably waits for Phil whatever else is true: with the switch off, and for
+    // the agents whose internal work otherwise goes through.
+    const tooBig = isReversible(approval) ? await this.tooBigToRunAlone(approval) : undefined;
+    if (tooBig) await this.store.approvals.update(approval.id, { note: `Waits for you: ${tooBig}.` });
+    else if (await this.reversibleOn() && isReversible(approval)) return this.runReversible(approval);
     // Phil's per-agent rules: low-risk kinds under the dollar cap go through on their own, logged.
     const rules = (await getAgentConfig(this.store, a.agentId)).rules;
-    const pay = (a.payload ?? {}) as { amount?: unknown; max?: unknown; ids?: unknown };
+    const pay = (a.payload ?? {}) as { amount?: unknown; max?: unknown; ids?: unknown; action?: unknown };
     const amount = Number(pay.amount ?? 0);
-    // Bulk size: an explicit max, or the number of ids. Over the agent's item cap, Phil decides.
-    const items = Array.isArray(pay.ids) ? pay.ids.length : Number(pay.max ?? 0);
+    // Bulk size: the ids named, else the most a query may touch. Over the agent's item cap, Phil decides.
+    const items = typeof pay.action === "string" && /^gmail\./.test(pay.action) ? bulkSize(pay) : Array.isArray(pay.ids) ? pay.ids.length : Number(pay.max ?? 0);
     const itemCap = rules.maxAutoItems ?? 100;
     const asksFor = CHARTERS[a.agentId]?.asksFor;
     const action = (a.payload as { action?: unknown } | undefined)?.action;
     // Phil's outbound rule: internal work goes through; anything reaching another person waits. Trash and money always
     // wait, and Phil's dollar cap for the agent still holds.
-    const auto = asksFor === "everything" || alwaysWaits(a) ? false : asksFor === "outbound"
-      ? !isOutbound(a) && action !== "gmail.trash" && amount <= rules.maxAutoDollars && items <= itemCap
-      : rules.autoApprove.includes(a.kind) && amount <= rules.maxAutoDollars && items <= itemCap;
+    // The kinds Phil ticked for an agent are judged by what the card does, not the kind the agent wrote on it: a
+    // "record" card that sends or posts needs "send" or "post" ticked too, and trashing mail never goes alone.
+    const reaches = isOutbound({ kind: "other", payload: a.payload });
+    const needs = !reaches ? [] : /^x\.(post|reply)$/.test(String(action ?? "")) || (a.payload as { public?: unknown } | undefined)?.public === true ? ["post"] : ["send"];
+    const within = amount <= rules.maxAutoDollars && items <= itemCap;
+    const auto = tooBig || asksFor === "everything" || alwaysWaits(a) || action === "gmail.trash" ? false : asksFor === "outbound"
+      ? !isOutbound(a) && within
+      : rules.autoApprove.includes(a.kind) && needs.every((k) => rules.autoApprove.includes(k as Approval["kind"])) && within;
     if (auto) {
       await this.router.log(a.agentId, "approval", `${getAgent(a.agentId)?.name ?? a.agentId}: "${a.title}" auto-approved by Phil's rule (${a.kind}${amount ? `, $${amount}` : ""})`, a.runId, { kind: a.kind, body: a.body });
       const done = await this.decide(approval.id, "approved", "auto: Phil's rule");
       return done ?? approval;
+    }
+    // The cards the agent named in "replaces" give way only now, when it's certain the new one is waiting in front of
+    // Phil: a card that ran on its own must never take a waiting one off his list. A money or strategy card only gives
+    // way to another money or strategy card; a code or update card, or one Phil edited or asked about, never does.
+    const kept = named.filter((old) => philTouched(old) || isShipCard(old) || (alwaysWaits(old) && !alwaysWaits(a)));
+    const gone = named.filter((old) => !kept.includes(old));
+    if (named.length) {
+      const why = (old: Approval) => (isShipCard(old) ? "a code or update card is never replaced" : philTouched(old) ? "you edited or asked about it" : "a money or strategy card is only replaced by another one");
+      const note = [replacesNote(gone), kept.length ? `Overlaps ${kept.map((r) => `"${r.title}" (still waiting: ${why(r)})`).join(", ")}: decide ${kept.length === 1 ? "that one" : "those"} too.` : ""].filter(Boolean).join(" ");
+      approval = (await this.store.approvals.update(approval.id, { effect: withNote(approval.effect, note) })) ?? approval;
+      for (const old of gone) {
+        const done = await this.store.approvals.update(old.id, { status: "rejected", decidedAt: new Date().toISOString(), note: `superseded: replaced by the newer card "${approval.title}"` });
+        await this.router.log(a.agentId, "system", `${getAgent(a.agentId)?.name ?? a.agentId}: "${old.title}" replaced by the newer card "${approval.title}"`, a.runId, { approvalId: old.id, supersededBy: approval.id });
+        if (done) bus.emitEvent({ type: "approval.decided", approval: done });
+      }
     }
     await this.router.setStatus(a.agentId, "waiting", `waiting on Phil: ${a.title}`);
     await this.router.log(a.agentId, "approval", `${getAgent(a.agentId)?.name ?? a.agentId} asked for approval: ${a.title}`, a.runId, { kind: a.kind, body: a.body });
@@ -1705,7 +1762,17 @@ export class Jarvis {
     return approval;
   }
 
+  private deciding = new Set<string>();
+  /**
+   * Decide a card. One decision at a time per card: Approve tapped in Telegram and in HQ a moment apart used to both
+   * find it pending and both run it (a second send, a second order).
+   */
   async decide(id: string, decision: "approved" | "rejected" | "edited", note?: string, edits?: { body?: string; payload?: Record<string, unknown> }): Promise<Approval | undefined> {
+    if (this.deciding.has(id)) return this.store.approvals.get(id);
+    this.deciding.add(id);
+    try { return await this.decideOnce(id, decision, note, edits); } finally { this.deciding.delete(id); }
+  }
+  private async decideOnce(id: string, decision: "approved" | "rejected" | "edited", note?: string, edits?: { body?: string; payload?: Record<string, unknown> }): Promise<Approval | undefined> {
     const before = await this.store.approvals.get(id);
     if (!before) return undefined;
     if (before.status !== "pending") return before;

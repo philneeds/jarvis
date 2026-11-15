@@ -54,6 +54,9 @@ export const GOOGLE_SCOPES = [
 const ACCOUNTS_KEY = "google.accounts";
 const LEGACY_KEY = "google.tokens";
 
+/** Gmail's built-in labels (by name or id): folders and states, not something an agent files mail under. */
+const GMAIL_OWN_LABELS = /^(trash|bin|spam|junk|inbox|sent|sent mail|drafts?|unread|starred|important|chats?|all mail|scheduled|snoozed|category_[a-z]+)$/i;
+
 export class GoogleConnector {
   readonly id = "google";
   private f: typeof fetch;
@@ -300,11 +303,20 @@ export class GoogleConnector {
     return [...counts.entries()].map(([from, c]) => ({ from, ...c })).sort((a, b) => b.n - a.n);
   }
 
+  /**
+   * The id of one of Phil's own labels, made if it doesn't exist. Never one of Gmail's built-in ones: "labelling"
+   * mail Trash or Spam is trashing it, and filing it under Inbox, Sent or Unread changes where it lives, so those are
+   * refused here whatever the card says.
+   */
   private async labelId(name: string, account?: string): Promise<string> {
-    const j = await this.api<{ labels?: { id: string; name: string }[] }>(account, "https://gmail.googleapis.com/gmail/v1/users/me/labels");
-    const hit = j.labels?.find((l) => l.name.toLowerCase() === name.toLowerCase());
+    const wanted = name.trim();
+    if (!wanted) throw new Error("no label named; nothing changed");
+    if (GMAIL_OWN_LABELS.test(wanted)) throw new Error(`"${wanted}" is one of Gmail's own folders, not a label; nothing changed (trashing mail is its own card)`);
+    const j = await this.api<{ labels?: { id: string; name: string; type?: string }[] }>(account, "https://gmail.googleapis.com/gmail/v1/users/me/labels");
+    const hit = j.labels?.find((l) => l.name.toLowerCase() === wanted.toLowerCase());
+    if (hit && (hit.type === "system" || GMAIL_OWN_LABELS.test(hit.id))) throw new Error(`"${wanted}" is one of Gmail's own folders, not a label; nothing changed`);
     if (hit) return hit.id;
-    const made = await this.api<{ id: string }>(account, "https://gmail.googleapis.com/gmail/v1/users/me/labels", { method: "POST", body: JSON.stringify({ name, labelListVisibility: "labelShow", messageListVisibility: "show" }) });
+    const made = await this.api<{ id: string }>(account, "https://gmail.googleapis.com/gmail/v1/users/me/labels", { method: "POST", body: JSON.stringify({ name: wanted, labelListVisibility: "labelShow", messageListVisibility: "show" }) });
     return made.id;
   }
 
@@ -462,14 +474,16 @@ export class GoogleConnector {
         const p = a.payload as { ids?: string[]; query?: string; max?: number; account?: string; doneIds?: string[] };
         if (!p.ids?.length && !p.query) throw new Error("gmail.archive needs ids or a query");
         // Resolve the query once and keep the ids on the card, so Undo puts back exactly these messages.
-        p.doneIds = p.ids?.length ? p.ids : await this.listMessageIds(p.query!, Math.min(p.max ?? 200, 2000), p.account);
+        // Only mail that is in the inbox now: archiving the rest changes nothing, and Undo would drag it back in.
+        p.doneIds = p.ids?.length ? p.ids : await this.listMessageIds(/\bin:inbox\b/i.test(p.query!) ? p.query! : `in:inbox (${p.query!})`, Math.min(p.max ?? 200, 2000), p.account);
         const n = await this.modifyMessages("archive", { ...p, ids: p.doneIds, query: undefined });
         return `Archived ${n} message(s)${p.query ? ` matching "${p.query}"` : ""}${p.account ? ` in ${p.account}` : ""}.`;
       },
       "gmail.label": async (a) => {
         const p = a.payload as { ids?: string[]; query?: string; max?: number; label?: string; account?: string; doneIds?: string[] };
         if ((!p.ids?.length && !p.query) || !p.label) throw new Error("gmail.label needs ids or a query, and a label");
-        p.doneIds = p.ids?.length ? p.ids : await this.listMessageIds(p.query!, Math.min(p.max ?? 200, 2000), p.account);
+        // Only mail that doesn't carry the label yet, so Undo never takes it off something Phil labelled himself.
+        p.doneIds = p.ids?.length ? p.ids : await this.listMessageIds(`(${p.query!}) -label:${p.label.trim().replace(/[\s/]+/g, "-")}`, Math.min(p.max ?? 200, 2000), p.account);
         const n = await this.modifyMessages("label", { ...p, ids: p.doneIds, query: undefined });
         return `Labelled ${n} message(s) "${p.label}"${p.account ? ` in ${p.account}` : ""}.`;
       },
