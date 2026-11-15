@@ -39,6 +39,13 @@ export const MODELS: Record<ModelKey, ModelSpec> = {
     modelId: env("CLAUDE_SONNET_MODEL", "claude-sonnet-5-5"),
     why: "Tool work in Phil's accounts at a sustainable cost.",
   },
+  "claude-haiku": {
+    key: "claude-haiku", label: "Claude Haiku", provider: "claude", plan: "claude",
+    modelId: env("CLAUDE_HAIKU_MODEL", "claude-haiku-5-5"),
+    // If the small model isn't available on the plan, the check still runs, on Sonnet.
+    limitFallback: "claude-sonnet",
+    why: "Quick yes/no checks HQ makes for itself, like whether a new card repeats one already waiting.",
+  },
   grok: {
     key: "grok", label: "Grok", provider: "grok", plan: "supergrok",
     modelId: env("GROK_MODEL", "grok-4.7"),

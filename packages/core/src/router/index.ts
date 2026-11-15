@@ -39,6 +39,13 @@ export interface RunOptions {
   images?: import("../uploads.js").ImageInput[];
   /** Einstein's workshop: file and shell tools inside one directory, guarded. */
   workspace?: import("./types.js").Workspace;
+  /**
+   * One of HQ's own small checks, made under an agent's name: it is counted in usage and kept in the runs table, but
+   * it doesn't show the agent as working, isn't logged as a run of theirs, and a failure doesn't mark them in error.
+   */
+  background?: boolean;
+  /** Run on this model whatever the agent's own is: HQ's small checks use the small model. */
+  modelKey?: import("../registry/agents.js").ModelKey;
   /** Wall-clock limit for the whole run. Default RUN_TIMEOUT_MS (20 min), or WORKSHOP_RUN_TIMEOUT_MS (60 min) in a workshop. */
   timeoutMs?: number;
 }
@@ -104,10 +111,11 @@ export class ModelRouter {
   async run(agent: AgentDef, opts: RunOptions): Promise<RunOutcome> {
     const runId = randomUUID();
     const startedAt = new Date().toISOString();
-    const model = await this.modelForAgent(agent);
+    const model = opts.modelKey && MODELS[opts.modelKey] ? MODELS[opts.modelKey] : await this.modelForAgent(agent);
     const base: RunOutcome = { runId, agentId: agent.id, text: "", provider: model.provider, modelId: model.modelId ?? model.key, inputTokens: 0, outputTokens: 0, costUsd: 0, durationMs: 0 };
 
     const block = async (reason: string) => {
+      if (opts.background) return { ...base, blocked: reason };
       await this.store.runs.add({ id: runId, agentId: agent.id, prompt: opts.prompt, status: "blocked", error: reason, startedAt, finishedAt: new Date().toISOString(), parentRunId: opts.parentRunId });
       await this.log(agent.id, "system", `${agent.name} did not run: ${reason}`, runId);
       return { ...base, blocked: reason };
@@ -132,7 +140,7 @@ export class ModelRouter {
     await this.store.runs.add({ id: runId, agentId: agent.id, provider: model.provider, modelId: model.modelId, prompt: opts.prompt, status: "running", startedAt, parentRunId: opts.parentRunId });
     // What it's on, for the Working strip in HQ: the ask itself, not the model name.
     const ask = opts.prompt.replace(/^[^:]{0,40}?asks:\s*/i, "").replace(/\s+/g, " ").trim();
-    await this.setStatus(agent.id, "working", ask.length > 90 ? `${ask.slice(0, 90).replace(/\s+\S*$/, "")}…` : ask);
+    if (!opts.background) await this.setStatus(agent.id, "working", ask.length > 90 ? `${ask.slice(0, 90).replace(/\s+\S*$/, "")}…` : ask);
 
     const chain = this.providers[model.provider as "claude" | "grok"] ?? [];
     const errors: string[] = [];
@@ -182,6 +190,7 @@ export class ModelRouter {
           await this.store.runs.update(runId, { status: "done", output: res.text, provider: res.provider, modelId: res.modelId, finishedAt, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd });
           // A Grok run through the API spends xAI credits, not the SuperGrok plan.
           await this.store.usage.add({ id: randomUUID(), at: finishedAt, plan: res.provider === "grok:api" ? "xai" : m.plan, provider: res.provider, agentId: agent.id, modelId: res.modelId, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd, runId });
+          if (opts.background) { bus.emitEvent({ type: "usage", usage: await usageSummary(this.store) }); return { ...base, ...res, runId, agentId: agent.id }; }
           await this.store.agentState.set(agent.id, { status: "idle", lastRunAt: finishedAt, lastRunId: runId, lastError: "" });
           bus.emitEvent({ type: "agent.status", agentId: agent.id, status: "idle", at: finishedAt, detail: `last run ${res.durationMs}ms on ${res.modelId}` });
           await this.log(agent.id, "run", `${agent.name} ran on ${res.modelId} (${res.provider}) in ${(res.durationMs / 1000).toFixed(1)}s`, runId, { prompt: opts.prompt.slice(0, 500), output: res.text.slice(0, 2000), tokens: res.inputTokens + res.outputTokens });
@@ -210,6 +219,7 @@ export class ModelRouter {
     const err = errors.join(" | ") || `no provider configured for ${model.label}`;
     const finishedAt = new Date().toISOString();
     await this.store.runs.update(runId, { status: "error", error: err, finishedAt });
+    if (opts.background) return { ...base, blocked: err };
     await this.store.agentState.set(agent.id, { status: "error", lastRunAt: finishedAt, lastRunId: runId, lastError: err });
     bus.emitEvent({ type: "agent.status", agentId: agent.id, status: "error", at: finishedAt, detail: err.slice(0, 200) });
     await this.log(agent.id, "error", `${agent.name} failed: ${err.slice(0, 300)}`, runId);

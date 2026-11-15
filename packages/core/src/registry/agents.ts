@@ -8,6 +8,7 @@ export type ModelKey =
   | "claude-fable"
   | "claude-opus"
   | "claude-sonnet"
+  | "claude-haiku"
   | "grok"
   | "cursor"
   | "higgsfield"
