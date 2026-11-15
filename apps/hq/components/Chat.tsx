@@ -10,7 +10,7 @@ import { imageUrl } from "@/lib/images";
 import { ACCEPT, AttachTray, ClipIcon, useAttachments } from "@/lib/attach";
 import { Working } from "@/components/Working";
 
-const QUICK = ["/brief", "/status", "/approvals", "/usage", "/pause", "/condense", "/help"];
+const QUICK = ["/brief", "/status", "/approvals", "/usage", "/pause", "/condense", "/update", "/help"];
 
 type Recognition = { start(): void; stop(): void; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null; lang: string; interimResults: boolean; continuous: boolean };
 
