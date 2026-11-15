@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { bus, type AgentSetup, type Approval, type AttentionItem, type AutoDone, type BaseSummary, type ChatMessage, type Goal, type Benchmark, type Horizon, type SystemStatus, type Today, type Trophy } from "../events.js";
-import { connectionsFor, OPTIONAL_CONNECTIONS, type Connection } from "../readiness.js";
+import { ALL_CONNECTIONS, connectionsFor, OPTIONAL_CONNECTIONS, type Connection } from "../readiness.js";
 import { HORIZONS, philDay, pickToday, playerLevel, reconcileToday, streakOf, syncTrophies, ventureLevels, type TodayLog } from "../progress.js";
 import { AGENTS, CHARTERS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
 import { ModelRouter } from "../router/index.js";
@@ -466,7 +466,7 @@ export class Jarvis {
     const status = await this.systemStatus();
     const recent = (await this.store.chat.list(12)).slice(0, -1).map((m) => `${m.role === "phil" ? "Phil" : m.agentId ?? "Jarvis"}: ${m.text.slice(0, 300)}`).join("\n");
     const { recentReports, reportsText } = await import("../scheduler.js");
-    const system = jarvisSystemPrompt(memory, `${status.text}\n${await this.liveWorkText()}`, await this.attentionText(), reportsText(await recentReports(this.store, 48)));
+    const system = jarvisSystemPrompt(memory, `${status.text}\n${await this.liveWorkText()}`, await this.attentionText(), reportsText(await recentReports(this.store, 48))) + await this.connectionsText();
 
     const imageIds = this.convo.getStore()?.images ?? [];
     const byVoice = this.convo.getStore()?.voice ? "\n\n(Phil said this as a voice note; it was transcribed, so an odd word may be a mishearing. Don't say you can't tell how it arrived.)" : "";
@@ -557,7 +557,7 @@ export class Jarvis {
         workshopHint = `\n\n${WORKSHOP_HINT(w.dir, w.branch, w.base)}`;
       } catch (e) { workshopHint = `\n\nYour workshop couldn't be opened (${(e as Error).message.slice(0, 200)}), so you can't change code this run; say so and diagnose with the tools you have.`; }
     }
-    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "") + workshopHint;
+    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "") + workshopHint + await this.connectionsText();
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
     // Images Phil attached to this conversation go with every run in it, including hand-offs; agents that read uploaded
     // data also see this week's screenshots.
@@ -1097,6 +1097,22 @@ export class Jarvis {
 
   /** Which connections are working right now. The server sets this from its connectors; without it nothing counts as connected. */
   connectionProbe?: () => Promise<Set<Connection>>;
+  private connectionsCache?: { at: number; text: string };
+  /**
+   * What is connected this minute, for every agent's prompt. Memory and old reports go stale the moment Phil adds a key
+   * ("GoHighLevel isn't connected" written yesterday), so the live list is stated last and wins. Empty when HQ has no
+   * probe (tests, scripts).
+   */
+  async connectionsText(): Promise<string> {
+    if (!this.connectionProbe) return "";
+    if (this.connectionsCache && Date.now() - this.connectionsCache.at < 60_000) return this.connectionsCache.text;
+    const on = await this.connectionProbe().catch(() => undefined);
+    if (!on) return "";
+    const yes = ALL_CONNECTIONS.filter((c) => on.has(c)), no = ALL_CONNECTIONS.filter((c) => !on.has(c));
+    const text = `\n\nConnections right now (HQ checked this minute; this is the truth and overrides anything in memory, earlier reports or chat that says otherwise): connected: ${yes.join(", ") || "none"}. Not connected: ${no.join(", ") || "none"}. Never tell Phil a connected service is missing or still to be set up; if a memory note says so, the note is out of date, and the way to find out what a connected service holds is to call its tool (or hand off to the agent who has it).`;
+    this.connectionsCache = { at: Date.now(), text };
+    return text;
+  }
   static SETUP_GOAL_KEY = "setup.goalId";
   static SETUP_GOAL_NAME = "Every live agent set up and tried";
 

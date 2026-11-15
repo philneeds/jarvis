@@ -204,7 +204,8 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     if (connectors.spotify && (await connectors.spotify.status()).connected) connected.add("Spotify");
     if (connectors.kubera) connected.add("Kubera");
     if (connectors.robinhood && (await connectors.robinhood.status()).connected) connected.add("Robinhood");
-    if (connectors.ghl) connected.add("GoHighLevel");
+    // A key GoHighLevel refused isn't a connection; it counts again after the next call that succeeds.
+    if (connectors.ghl && !/refused the key/.test((await connectors.ghl.status()).lastFetch?.error ?? "")) connected.add("GoHighLevel");
     if (connectors.discord) connected.add("Discord");
     if (connectors.github) connected.add("GitHub");
     if (process.env.XAI_API_KEY) connected.add("X search");

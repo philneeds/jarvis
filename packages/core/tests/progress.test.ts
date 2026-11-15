@@ -223,3 +223,12 @@ test("setup quests: the Command goal tracks which live teams are connected and t
   status = await jarvis.setupStatus();
   assert.equal(status[0]!.id, "karol", "the agent with a problem is listed first");
 });
+
+test("every prompt carries what's connected right now, so a stale memory note can't say otherwise", async () => {
+  const { jarvis } = make();
+  assert.equal(await jarvis.connectionsText(), "", "no probe (tests, scripts): nothing is claimed");
+  jarvis.connectionProbe = async () => new Set(["Google", "GoHighLevel"] as never);
+  const text = await jarvis.connectionsText();
+  assert.match(text, /connected: Google, GoHighLevel\. Not connected: Kubera, Robinhood/);
+  assert.match(text, /overrides anything in memory/);
+});
