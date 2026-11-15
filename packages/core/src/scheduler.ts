@@ -15,6 +15,11 @@ export interface Schedule {
   when: string;
   /** Phase in which this schedule becomes active. */
   phase: number;
+  /**
+   * The sources this routine reads ("mail", "ghl", "health", "memory"). On its timer it runs only when one of them has
+   * something new since its last run (at least once a week regardless); a run Phil asks for always runs.
+   */
+  watch?: string[];
   /** A deliverable for Phil himself (the daily brief, Stevon's deck): sent to him on Telegram and in chat. */
   push?: boolean;
   /** Makes a deck from uploaded data: skipped when one was already made by hand from the same data. */
@@ -39,13 +44,13 @@ export const SCHEDULES: Schedule[] = [
   { id: "buffett-weekly", agentId: "buffett", task: "Weekly holdings review after Friday's close, short enough to read on a phone. Read the holdings (kubera_items; everything is at Robinhood). Say how each did this week, what the scouts flagged, and at most three suggested changes, each as an approval with the reason. Then keep the scouts informed: a remember block with scope venture:money and key holdings listing the tickers by sector. And add any stock Phil talked about this week (chat_recent) to the watchlist as a record with status watch.", when: "weekly:fri@16:45", phase: 2 },
   { id: "david-today", agentId: "david", task: "Pick Phil's three for today. Call goals_list and web_status. Choose the three things that most move his goals or unblock an agent today: an unmet benchmark he can finish today (shortest horizon first), or something waiting on his decision. Send them as one today.set approval block (see your charter): at most three items, each short, concrete and finishable today, with goalId and benchmarkId when the item is a benchmark. If there are no goals and nothing is waiting, send nothing and say so in one line. Keep your written reply to two lines.", when: "daily@06:40", phase: 0 },
   { id: "david-weekly", agentId: "david", task: "Weekly goals check: call goals_list. Any goal without benchmarks gets them first (goals.benchmarks: 3 to 6 concrete, checkable, weighted). For each goal: which benchmarks were met this week and the evidence (tick them with a goals.update approval block, done: [benchmark ids]), where it stands, the next benchmark to hit, and the one or two steps that get there next week. Flag any goal that's slipping against its deadline. Only move the bar on evidence.", when: "weekly:sun@18:00", phase: 0 },
-  { id: "karol-leads", agentId: "karol", task: "Morning lead check for JD PM: new leads since yesterday, each logged on the board as its own lead (name, phone, source), and a first reply drafted for every one that hasn't had one. If there are none, log nothing on the board and say so in one line. The leads_week number is the leads added in the last 7 days, not today's.", when: "daily@07:15", phase: 1 },
+  { id: "karol-leads", agentId: "karol", watch: ["ghl", "mail"], task: "Morning lead check for JD PM: new leads since yesterday, each logged on the board as its own lead (name, phone, source), and a first reply drafted for every one that hasn't had one. If there are none, log nothing on the board and say so in one line. The leads_week number is the leads added in the last 7 days, not today's.", when: "daily@07:15", phase: 1 },
   { id: "bill-installs", agentId: "bill", task: "Today's installs and materials for JD PM: what's scheduled, what's missing, what needs ordering. Flag anything that would delay a job.", when: "weekdays@06:30", phase: 1 },
   { id: "nick-weekly", agentId: "nick", task: "Philneeds weekly analytics: what posts worked and why (x_own_posts, x_mentions), what to post more of, and next week's plan for Boo and ncrypt.", when: "weekly:mon@09:00", phase: 2 },
   { id: "poseidon-weekly", agentId: "poseidon", task: "Range.cool weekly metrics: the key numbers, what moved and why, runway, and the decisions that need Phil.", when: "weekly:mon@08:15", phase: 3 },
   { id: "oscar-inbox", agentId: "oscar", task: "Weekly inbox cleanup with Monica. For each of Phil's personal Google accounts: use gmail_senders on 'in:inbox older_than:14d' and 'category:promotions older_than:30d', then propose ONE archive plan per account as an approval (gmail.archive by query, with the match count in the body). Never trash. Keep anything from a real person or about money, travel, health or a job.", when: "weekly:sun@04:00", phase: 0 },
   { id: "monica-day", agentId: "monica", task: "Lay out Phil's day for him to read on his phone. Read all five of his calendars, one calendar_list_events call per account: philneedsofficial@gmail.com, pmarino9081@gmail.com, info@jdpmrenovations.com, pmarino@getproedge.com, rangedotzone@gmail.com (Phil, Nov 13 2026; this replaces any older note limiting you to the personal accounts). Say which calendar each event is on and name any account that failed to read. Then: conflicts across all five, what's unscheduled, what to protect. Propose any calendar change as an approval; change nothing yourself. A change on a business calendar goes to that venture's lead as a handoff or to Phil as an approval.", when: "daily@06:45", phase: 0 },
-  { id: "stella-leads", agentId: "stella", task: "Review new leads and open jobs for JD PM; flag anything waiting on a customer reply.", when: "daily@06:50", phase: 1 },
+  { id: "stella-leads", agentId: "stella", watch: ["ghl", "mail"], task: "Review new leads and open jobs for JD PM; flag anything waiting on a customer reply.", when: "daily@06:50", phase: 1 },
   { id: "mantis-markets", agentId: "mantis", task: "Market read for the day. Call hyperliquid_perps for real numbers: BTC, ETH and SOL, the biggest moves, where funding and open interest are stretched. Say what moved overnight and what the team should watch today. Use only the numbers you were given; if you don't have data on something, say so instead of guessing.", when: "daily@06:55", phase: 1 },
   { id: "ansem-scan", agentId: "ansem", task: "Scan: new memecoins and low caps worth a look, with the reason each is on the list. This goes to Mantis, not Phil.", when: "every:240", phase: 2, to: "mantis" },
   { id: "pentoshi-scan", agentId: "pentoshi", task: "Scan Hyperliquid with hyperliquid_perps: what changed since your last scan in funding (both extremes), open interest and the biggest moves, and what it says about positioning. Keep it to what's worth Phil's attention, with the numbers; say \"nothing notable\" when that's the truth. Add what traders on X are saying about the biggest moves (x_search), with handles. Then any news from Phil's prop firms (Vest Markets, Backed). Save this scan's key numbers in a remember block (scope agent:pentoshi, key last-scan) so the next scan can compare.", when: "every:240", phase: 2, to: "mantis" },
@@ -114,7 +119,7 @@ export interface ScheduleView { id: string; agentId: string; when: string; whenT
 /** One plain line per built-in routine for the Schedules screen; the full instructions sit behind "details". */
 const SUMMARY: Record<string, string> = {
   "daily-brief": "The morning brief: each lead's report, what's waiting on you, today's calendar.",
-  "oscar-condense": "Tidies memory: merges duplicates and drops what's stale.",
+  "oscar-condense": "Tidies memory: merges duplicates and drops what's stale. Skipped when nothing was remembered since the last tidy.",
   "backup-nightly": "Backs up the database, keeps 14 days, copies to Google Drive.",
   "hq-update-check": "Checks GitHub for code HQ isn't running yet; if there is some, an Update HQ card waits under Needs you.",
   "setup-check": "Checks every live agent has its connections and has been tried once; keeps the Command center's setup goal up to date.",
@@ -122,8 +127,8 @@ const SUMMARY: Record<string, string> = {
   "einstein-weekly": "Weekly review: what to fix or improve, where your ideas stand, what to cut.",
   "adam-monthly": "Goals session: how last month went, and this month's goals for your OK.",
   "monica-day": "Your day: all five of your calendars, conflicts, and what to protect.",
-  "stella-leads": "Leads and jobs review; flags anything waiting on a customer.",
-  "karol-leads": "New-lead check: logs new leads and drafts first replies for your OK.",
+  "stella-leads": "Leads and jobs review; flags anything waiting on a customer. Skipped when mail and GoHighLevel hold nothing new (runs at least weekly).",
+  "karol-leads": "New-lead check: logs new leads and drafts first replies for your OK. Skipped when mail and GoHighLevel hold nothing new (runs at least weekly).",
   "bill-installs": "Today's installs and materials, and anything that would delay a job.",
   "mantis-markets": "Market read: what moved on-chain overnight and what to watch.",
   "ansem-scan": "New memecoins and low caps worth a look, each with the reason.",
@@ -324,14 +329,21 @@ export class Scheduler {
           const fn = this.jarvis.tasks.get(s.task);
           if (fn) { const r = await fn(); await done(r); }
         } else if (s.task === "condense") {
-          if ((await this.jarvis.store.memory.list()).length >= 20) {
+          // Nothing remembered or changed since the last tidy: there is nothing to tidy.
+          const q = await this.jarvis.quiet(`schedule:${s.id}`, agent.id, ["memory"]);
+          if (!q.skip && (await this.jarvis.store.memory.list()).length >= 20) {
             const text = await this.jarvis.condenseMemory();
             await this.jarvis.say({ role: "system", text });
+            await q.ran();
             await done(text.split("\n")[0]!.slice(0, 120));
           }
         } else {
+          // A routine that watches its sources isn't run when they hold nothing new: no model call, one log line.
+          const q = s.watch?.length ? await this.jarvis.quiet(`schedule:${s.id}`, agent.id, s.watch) : undefined;
+          if (q?.skip) { await this.jarvis.router.log(agent.id, "schedule", `Scheduled: ${s.id} · skipped, ${q.skip}`); continue; }
           const r = await runRoutine(this.jarvis, s, { deliver: false });
           if (r && !r.blocked) {
+            await q?.ran();
             await done(`${agent.name} reported back`, r.runId);
             if ("report" in r && r.report) batches.set(r.toId, [...(batches.get(r.toId) ?? []), r.report]);
           }

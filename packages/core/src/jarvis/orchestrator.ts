@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { bus, type AgentSetup, type Approval, type AttentionItem, type AutoDone, type BaseSummary, type ChatMessage, type Goal, type Benchmark, type Horizon, type SystemStatus, type Today, type Trophy } from "../events.js";
 import { ALL_CONNECTIONS, connectionsFor, OPTIONAL_CONNECTIONS, type Connection } from "../readiness.js";
@@ -16,7 +16,7 @@ import { VENTURES, type VentureId } from "../registry/ventures.js";
 import { VENTURE_DASH, recordKind } from "../ventures/dashboards.js";
 import { TOOLS } from "../tools/index.js";
 import { imageInputs } from "../uploads.js";
-import { HEALTH_TOOLS } from "../health.js";
+import { HEALTH_TOOLS, healthSummary } from "../health.js";
 import { XREAD_TOOLS, expandXLinks, xPostIds, readXTimeline, type XPost } from "../xread.js";
 import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
@@ -194,6 +194,8 @@ export class Jarvis {
     this.store = opts.store;
     this.router = opts.router ?? new ModelRouter({ store: opts.store });
     this.notify = opts.notify;
+    this.pulses.set("health", async () => healthSummary(this.store, 3));
+    this.pulses.set("memory", async () => (await this.store.memory.list()).filter((m) => !/^(watch|handoff):/.test(m.key)).map((m) => `${m.scope}|${m.key}|${m.value}`).sort().join("\n"));
     this.executors.set("memory.replace", async (a) => {
       // Check the whole list before touching anything: a bad entry halfway through used to leave memory half-deleted.
       const keep = keepList(a.payload?.keep);
@@ -284,13 +286,58 @@ export class Jarvis {
   onApproved(action: string, fn: Executor) { this.executors.set(action, fn); }
 
   /** Plug in a connector: its tools become available in agent settings, its actions run on approval. */
-  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer>; normalize?: Normalizer; undoers?(): Record<string, (a: Approval) => Promise<string>> }, hint?: string) {
+  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer>; normalize?: Normalizer; undoers?(): Record<string, (a: Approval) => Promise<string>>; pulses?(): Record<string, (agentId: string) => Promise<string>> }, hint?: string) {
     for (const [k, fn] of Object.entries(c.undoers?.() ?? {})) this.undoers.set(k, fn);
+    for (const [k, fn] of Object.entries(c.pulses?.() ?? {})) this.pulses.set(k, fn);
     for (const t of c.tools()) this.connectorTools.set(t.name, t);
     for (const [k, fn] of Object.entries(c.executors())) this.executors.set(k, fn);
     for (const [k, fn] of Object.entries(c.describe?.() ?? {})) this.describers.set(k, fn);
     if (c.normalize) this.normalizers.push(c.normalize.bind(c));
     if (hint) this.promptHints.push(hint);
+  }
+
+  /**
+   * "Is there anything new?" without a model call. A pulse is a short text of what a source holds right now (the
+   * newest mail ids, the newest contacts and conversations, the last days of health data, memory); a routine that
+   * watches some sources runs only when their pulses differ from the last time it ran. A source that isn't connected
+   * has a constant pulse, so an agent with nothing to read is asked once and then left alone until that changes.
+   * A pulse that can't be read never causes a skip.
+   */
+  pulses = new Map<string, (agentId: string) => Promise<string>>();
+  static PULSE_KEY = "routine.pulse";
+  /** Leads who report for the morning brief only when their source has something new. */
+  static BRIEF_WATCH: Record<string, string[]> = { doc: ["health"] };
+  /** Longest a watching routine is skipped before it runs anyway, so a quiet source still gets a look. */
+  static MAX_QUIET_MS = 7 * 86_400_000;
+  private async pulse(watch: string[], agentId: string): Promise<string | undefined> {
+    const parts: string[] = [];
+    for (const w of [...watch].sort()) {
+      const fn = this.pulses.get(w);
+      if (!fn) { parts.push(`${w}: not connected`); continue; }
+      try { parts.push(`${w}: ${await fn(agentId)}`); } catch { return undefined; }
+    }
+    return createHash("sha256").update(parts.join("\n")).digest("hex");
+  }
+  /**
+   * For a routine on a timer: `skip` says why there's nothing to do, in Phil's words; otherwise run it and call
+   * `ran()` once it has worked, which records what the sources looked like after the run (a run can change them:
+   * tidying memory changes memory). A run Phil asks for never goes through this.
+   */
+  async quiet(key: string, agentId: string, watch: string[]): Promise<{ skip?: string; ran: () => Promise<void> }> {
+    const save = async () => {
+      const h = await this.pulse(watch, agentId);
+      if (!h) return;
+      const all = await this.store.settings.get<Record<string, { hash: string; at: string }>>(Jarvis.PULSE_KEY, {});
+      await this.store.settings.set(Jarvis.PULSE_KEY, { ...all, [key]: { hash: h, at: new Date().toISOString() } });
+    };
+    const now = await this.pulse(watch, agentId);
+    const last = (await this.store.settings.get<Record<string, { hash: string; at: string }>>(Jarvis.PULSE_KEY, {}))[key];
+    if (now && last && last.hash === now && Date.now() - Date.parse(last.at) < Jarvis.MAX_QUIET_MS) {
+      const names: Record<string, string> = { mail: "mail", ghl: "GoHighLevel", health: "health data", memory: "memory" };
+      const what = watch.map((w) => names[w] ?? w);
+      return { skip: `nothing new in ${what.length > 1 ? `${what.slice(0, -1).join(", ")} or ${what[what.length - 1]}` : what[0]} since ${new Date(last.at).toLocaleString("en-US", { timeZone: process.env.PHIL_TZ || "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`, ran: save };
+    }
+    return { ran: save };
   }
 
   /** How to put back a connector's action (Gmail archive and label), for the ones agents ran on their own. */
@@ -580,11 +627,22 @@ export class Jarvis {
 
     // Each delegate is time-boxed. A slow one doesn't hold the answer: Jarvis answers with what's in, names who's still
     // working, and that agent's report posts on its own when it lands.
-    type Report = { agent: AgentDef; task: string; text: string; blocked?: string; late?: boolean };
-    const runs = delegations.map((d) => this.runAgent(d.agent, d.task, { direct: true, parentRunId: planRun.runId, from: "Jarvis" }).then((r) => ({ agent: d.agent, task: d.task, text: r.text, blocked: r.blocked }) as Report));
+    type Report = { agent: AgentDef; task: string; text: string; blocked?: string; late?: boolean; runId?: string };
+    // One agent asked: Phil reads its answer as it is, so it is told who it is answering.
+    const solo = delegations.length === 1;
+    const runs = delegations.map((d) => this.runAgent(d.agent, d.task, { direct: true, parentRunId: planRun.runId, from: solo ? "Phil (through Jarvis; your answer goes to him as written)" : "Jarvis" }).then((r) => ({ agent: d.agent, task: d.task, text: r.text, blocked: r.blocked, runId: r.runId }) as Report));
     const reports: Report[] = await Promise.all(runs.map((pr, i) => Promise.race([pr, new Promise<Report>((res) => setTimeout(() => res({ agent: delegations[i]!.agent, task: delegations[i]!.task, text: "", blocked: "still working; their report will follow", late: true }), Jarvis.DELEGATE_TIMEOUT_MS))])));
     reports.forEach((r, i) => { if (r.late) void runs[i]!.then(async (late) => { await this.say({ role: "agent", agentId: late.agent.id, text: late.blocked ? `(${late.agent.name} did not run: ${late.blocked})` : `Late report: ${late.text}`, kind: "progress", via: ["jarvis"] }); }).catch((e) => void this.router.log(delegations[i]!.agent.id, "error", `${delegations[i]!.agent.name}'s late report failed: ${(e as Error).message}`).catch(() => undefined)); });
 
+    // A single agent that answered: its words go to Phil. Jarvis rewriting one report was a second full model call
+    // (his whole briefing again) to say the same thing. With several agents, or one that didn't answer in time,
+    // Jarvis still puts it together.
+    const only = solo ? reports[0] : undefined;
+    if (only && !only.late && !only.blocked && only.text.trim()) {
+      if (pulled) out.push(await this.say({ role: "jarvis", text: pulled, runId: planRun.runId, kind: "progress" }));
+      out.push(await this.say({ role: "agent", agentId: only.agent.id, text: only.text, runId: only.runId, via: ["jarvis"], kind: "final" }));
+      return out;
+    }
     const synth = await this.router.run(jarvis, { system, prompt: synthesisPrompt(userText, reports), direct: true, parentRunId: planRun.runId, maxTurns: 1, onDelta: this.streamer("jarvis") });
     const final = synth.blocked
       ? reports.map((r) => `${r.agent.name}: ${r.blocked ? `did not run (${r.blocked})` : r.text}`).join("\n\n")
@@ -599,7 +657,8 @@ export class Jarvis {
   async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string; depth?: number; noBlocks?: boolean } = {}) {
     const memory = [...(await this.store.memory.list("phil")), ...(await this.store.memory.list(`venture:${agent.venture}`)), ...(await this.store.memory.list(`agent:${agent.id}`))];
     const cfg = await getAgentConfig(this.store, agent.id);
-    const tools = this.allTools().filter((t) => cfg.tools.includes(t.name));
+    // memory_read goes to everyone: briefings carry long notes cut short, and the rest must be one call away.
+    const tools = this.allTools().filter((t) => cfg.tools.includes(t.name) || t.name === "memory_read");
     // Einstein's workshop: a fresh branch of the code for this task, with the file and shell tools inside it.
     let workspace: import("../router/types.js").Workspace | undefined;
     let workshopHint = "";
@@ -1661,16 +1720,25 @@ export class Jarvis {
     const fresh = new Set(inbox.filter((q) => now.getTime() - Date.parse(q.at) < 3 * 3_600_000).map((q) => q.agentId));
     const leadIds = morning.filter((id) => !fresh.has(id));
     const reporters: AgentDef[] = [];
+    const settle = new Map<string, () => Promise<void>>();
     for (const id of leadIds) {
       const a = getAgent(id)!;
       const cfg = await getAgentConfig(this.store, id);
-      if (cfg.tools.length || (await this.store.agentState.get(id))?.lastRunAt) reporters.push(a);
+      if (!(cfg.tools.length || (await this.store.agentState.get(id))?.lastRunAt)) continue;
+      // Doc reads Apple Health and nothing else for the brief: with no new data there is nothing to report, so he
+      // isn't asked (he was costing a full run a day to say "no health data").
+      const watch = Jarvis.BRIEF_WATCH[id];
+      const q = watch ? await this.quiet(`brief:${id}`, id, watch) : undefined;
+      if (q?.skip) { await this.router.log(id, "schedule", `${a.name} wasn't asked for the brief: ${q.skip}`); continue; }
+      reporters.push(a);
+      if (q) settle.set(id, q.ran);
     }
     const reports = (await Promise.all(reporters.map(async (a) => {
       const r = await Promise.race([
         this.runAgent(a, leadBriefTask(now), { direct: true, from: "Jarvis" }),
         new Promise<{ blocked: string; text: string }>((res) => setTimeout(() => res({ blocked: "took too long", text: "" }), Number(process.env.BRIEF_LEAD_TIMEOUT_MS ?? 180_000))),
       ]);
+      if (!r.blocked) await settle.get(a.id)?.().catch(() => undefined);
       return r.blocked ? null : { name: a.name, text: r.text.slice(0, 1500) };
     }))).filter((r): r is { name: string; text: string } => !!r);
     const prompt = briefPrompt({

@@ -41,6 +41,16 @@ export function buildTools(): ToolDef[] {
       },
     }),
     defineTool({
+      name: "memory_read",
+      description: "The full text of one memory note, by its scope and key as shown in your briefing. Use it when a note there was cut short or listed by title only and the task needs the rest.",
+      schema: { scope: z.string().describe("as shown in brackets, e.g. phil or venture:jdpm"), key: z.string().describe("the note's key") },
+      async handler({ scope, key }, { store }) {
+        const notes = await store.memory.list(scope.trim());
+        const hit = notes.find((m) => m.key === key.trim()) ?? notes.find((m) => m.key.toLowerCase() === key.trim().toLowerCase());
+        return hit ? `[${hit.scope}] ${hit.key}: ${hit.value}` : "No note with that scope and key. memory_search finds notes by words.";
+      },
+    }),
+    defineTool({
       name: "web_status",
       description: "Who in the agent web is working, waiting on Phil, paused or in error right now, and what is waiting for approval.",
       schema: {},

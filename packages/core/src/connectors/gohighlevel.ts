@@ -205,6 +205,16 @@ export class GoHighLevelConnector {
   }
 
   /** Writes, each carried out only once Phil approves: a reply, a new contact, a note, a new deal, a deal moved. */
+  /** The newest contacts and conversations, as ids and times: a new lead or a new message changes it. Two read calls. */
+  pulses(): Record<string, (agentId: string) => Promise<string>> {
+    return {
+      ghl: async () => {
+        const [contacts, convos] = await Promise.all([this.contacts(undefined, 20), this.conversations(false, 20)]);
+        return `${contacts.map((c) => `${c.id}@${c.dateAdded ?? ""}`).join(",")}\n${convos.map((c) => `${c.id}@${c.lastMessageDate ?? ""}#${c.unreadCount ?? 0}`).join(",")}`;
+      },
+    };
+  }
+
   executors(): Record<string, Executor> {
     const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
     return {

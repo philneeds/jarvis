@@ -539,6 +539,24 @@ export class GoogleConnector {
   }
 
   /** What each action does, in Phil's words, shown on the card before he approves. */
+  /**
+   * What's in the inbox right now, as ids: the newest mail of the last three days in each account the agent may read.
+   * New mail changes it; nothing else does. One cheap list call per account.
+   */
+  pulses(): Record<string, (agentId: string) => Promise<string>> {
+    return {
+      mail: async (agentId) => {
+        const allowed = await this.allowedFor({ store: this.store, agentId } as ToolContext);
+        const accounts = (await this.accounts()).map((t) => (t.email ?? "").toLowerCase()).filter((e) => e && (!allowed || allowed.includes(e))).sort();
+        if (!accounts.length) return "not connected";
+        this.allowed = allowed;
+        const parts: string[] = [];
+        for (const acc of accounts) parts.push(`${acc}: ${(await this.listMessageIds("in:inbox newer_than:3d", 25, acc)).join(",")}`);
+        return parts.join("\n");
+      },
+    };
+  }
+
   /** How to put back what an action did, for actions an agent ran on its own (see Jarvis.undoAuto). */
   undoers(): Record<string, (a: Approval) => Promise<string>> {
     const back = async (a: Approval, body: Record<string, unknown>, verb: string) => {

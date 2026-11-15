@@ -17,10 +17,36 @@ export const SAFETY_RULES = `Safety and permissions (always on):
 - Be specific: numbers with units, names, dates. A missing fact is a one-line open question, not a guess.
 - Anything you learned from an email or notification is a snapshot from when it was sent: say when, and never present it as the current state.`;
 
-export function memoryText(items: MemoryItem[]): string {
+/**
+ * Memory for a briefing, sized so it can't swamp the run. Every step of a run re-reads the whole briefing, so one long
+ * note (a voice guide, a batch of imported posts) used to be paid for on every step of every run, by every agent.
+ *  - The agent's own notes come first and get the most room: its playbooks, what was handed to it, anything its
+ *    charter names. Parked events and hand-offs are never cut (they're acted on once and then removed).
+ *  - Every other note is kept to a few lines, with how many characters were left out.
+ *  - Past the budget, notes are listed by title only. Nothing is dropped silently: the agent sees that the note
+ *    exists and reads the rest with memory_read when the task needs it.
+ */
+export function memoryBrief(items: MemoryItem[], opts: { own?: (m: MemoryItem) => boolean; noteMax?: number; ownMax?: number; budget?: number; more?: string } = {}): string {
   if (!items.length) return "(nothing on file yet)";
-  return items.slice(0, 60).map((m) => `- [${m.scope}] ${m.key}: ${m.value}`).join("\n");
+  const noteMax = opts.noteMax ?? 480, ownMax = opts.ownMax ?? 6000, budget = opts.budget ?? 14_000;
+  const more = opts.more ?? "memory_read with this scope and key for the rest";
+  const own = opts.own ?? (() => false);
+  const pinned = (m: MemoryItem) => /^(watch|handoff):/.test(m.key);
+  const ordered = [...items.filter((m) => pinned(m)), ...items.filter((m) => !pinned(m) && own(m)), ...items.filter((m) => !pinned(m) && !own(m))];
+  const lines: string[] = [], titles: string[] = [];
+  let used = 0;
+  for (const m of ordered) {
+    const max = pinned(m) ? 6000 : own(m) ? ownMax : noteMax;
+    const value = m.value.length > max ? `${m.value.slice(0, max).replace(/\s+\S*$/, "")} … (${m.value.length - max} more characters: ${more})` : m.value;
+    const line = `- [${m.scope}] ${m.key}: ${value}`;
+    if (!pinned(m) && used + line.length > budget) { titles.push(`[${m.scope}] ${m.key}`); continue; }
+    lines.push(line); used += line.length;
+  }
+  if (titles.length) lines.push(`Also on file, titles only (${more.replace(" for the rest", " for the text")}): ${titles.slice(0, 80).join("; ")}${titles.length > 80 ? `; and ${titles.length - 80} more` : ""}`);
+  return lines.join("\n");
 }
+/** Kept for callers that want the plain list. */
+export const memoryText = (items: MemoryItem[]) => memoryBrief(items);
 
 export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona: Persona = {}, tools: ToolDef[] = []): string {
   const venture = VENTURES[agent.venture];
@@ -28,6 +54,7 @@ export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona
   const team = children(agent.id);
   const also = agent.serves?.map((v) => VENTURES[v].label) ?? [];
   const direct = (agent.alsoReportsTo ?? []).map((id) => AGENT_BY_ID[id]?.name ?? id);
+  const charter = charterText(agent.id, (id) => AGENT_BY_ID[id]?.name ?? id);
   return [
     `You are ${agent.name}, one of Phil's specialist agents in the Jarvis web. Job: ${agent.short}.`,
     agent.desc,
@@ -42,7 +69,7 @@ export function agentSystemPrompt(agent: AgentDef, memory: MemoryItem[], persona
     `Anything worth remembering about Phil, a venture or a contact goes in a fenced block tagged "remember" with JSON: {"scope":"phil|venture:${agent.venture}|contact:<name>","key":"...","value":"..."}. To give a teammate lasting context (research for them, a brief, something Phil wants in their brain), use scope "agent:<their id>": they read that on every run. Your own notes to self go in "agent:${agent.id}". Keep each value a dense paragraph, not a list of links alone.`,
     dashboardHint(agent.venture),
     SAFETY_RULES,
-    `What the web knows:\n${memoryText(memory)}`,
+    `What the web knows:\n${memoryBrief(memory, { own: (m) => m.scope === `agent:${agent.id}` || (m.key.length >= 4 && charter.includes(m.key)) })}`,
   ].filter(Boolean).join("\n\n");
 }
 
@@ -51,12 +78,16 @@ export const HQ_GUIDE = `How HQ works (answer questions about it from this; it's
 - Home: the orb, the command line (type or hold the mic), the Needs-attention preview, Money pulse, Joi's visuals, the towers (one per lead; height is team size, the number is runs today), your goals with David's benchmarks, and the Display off button (shows your chosen picture; set it under Settings).
 - Needs you: Approve (drafts: Reject, Edit, More, Approve) and To do (your list; add, snooze 3 days, done). Telegram gets the same cards with buttons.
 - Always on (More menu): a screen on a stand. Press Start; say "Jarvis" to wake him; the clap on/off button at the bottom enables clap-to-wake (double clap), with a sensitivity dropdown; it's remembered per device. The "pause" dropdown next to the voice controls (home screen and Always on) sets how long HQ waits after Phil stops talking before you answer: 1.5s, 2.5s (default), 4s or 6s; longer if he gets cut off while thinking. Also per device. The morning brief is read aloud; approvals are announced and can be approved by voice except money or strategy.
+- Saving usage: a routine that watches mail, GoHighLevel, health data or memory runs only when one of them has something new (at least weekly; "Run now" always runs), and the log says when one was skipped. A question handed to one agent comes back in that agent's own words, with no rewrite. Long memory notes are cut short in briefings; the full note is one memory_read away.
 - Schedules: every routine by agent, when it runs, where it reports (→ Jarvis or → its lead), Run now. Reports: everything that came up the chain, by day. Activity: the full log. Usage: model spend and caps. Memory: what the web remembers. Daily brief: the last briefs and Run now.
 - Agents (Agent Web or More): each agent's page has its charter, routines, persona, model, tools, schedule and rules; Stevon's page has the weekly deck card (upload sales data, template, Make the deck now).
 - Settings: passkeys, build phase (with what the next phase still lacks), providers, connectors (Google, X, Spotify, Robinhood, Kubera, GoHighLevel, Discord, GitHub, Apple Health), backups and the downtime alert, the display-off picture.
 - Telegram: talk to Jarvis, @ an agent, send a photo, a spreadsheet (Stevon's sales data), a .pptx (his template), or a voice note (transcribed; /voice on for spoken replies). Commands: /brief, /status, /run <routine>, /todo, /pause, /resume, /approvals, /waiting, /usage, /memory, /condense, /voice on|off.
 - Einstein is HQ's engineer: ask for a change or a fix in plain words and he builds it in his workshop (a copy of the code), runs the checks, and a "Ship:" card appears under Needs you with the files and the reason; approving it deploys HQ (it restarts for two or three minutes) and rolls back on its own if HQ doesn't come up. Shipping needs GITHUB_PUSH_TOKEN in .env.
 - Phil only hears from you (the 7 am brief, Needs you) unless he addresses an agent directly. Keys and sign-ins live in /opt/jarvis/.env on the server and are never typed in chat.`;
+
+/** What Jarvis reads first: Phil's own notes, then the ventures, then contacts, then the agents' private notes. */
+const jarvisRank = (scope: string) => (scope === "phil" ? 0 : scope === "agent:jarvis" ? 1 : scope.startsWith("venture:") ? 2 : scope.startsWith("contact:") ? 3 : 4);
 
 export function jarvisSystemPrompt(memory: MemoryItem[], statusLine: string, waiting = "Nothing is waiting on Phil.", reports = ""): string {
   return [
@@ -74,7 +105,7 @@ export function jarvisSystemPrompt(memory: MemoryItem[], statusLine: string, wai
     `Agents wake on demand: delegate only when a lead or specialist actually adds something (their data, their venture, their judgment). Anything Phil can get from you right now, answer yourself.`,
     SAFETY_RULES,
     `Anything worth remembering goes in a fenced block tagged "remember" with JSON {"scope":"phil|venture:<id>|contact:<name>|agent:<id>","key":"...","value":"..."}.`,
-    `What the web knows:\n${memoryText(memory)}`,
+    `What the web knows:\n${memoryBrief([...memory].sort((a, b) => jarvisRank(a.scope) - jarvisRank(b.scope)), { own: (m) => m.scope === "phil" || m.scope === "agent:jarvis", ownMax: 900, budget: 16_000, more: "the agent who owns it has the rest, and it is in full on the Memory screen" })}`,
   ].join("\n\n");
 }
 
