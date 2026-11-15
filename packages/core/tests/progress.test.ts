@@ -193,6 +193,10 @@ test("setup quests: the Command goal tracks which live teams are connected and t
   assert.ok(status.every((s) => !s.ok));
   const karol = status.find((s) => s.id === "karol")!;
   assert.ok(karol.missing.length > 0, "Karol's tools need a connection");
+  // Paid X search is an extra: listed, but it never keeps an agent from being ready.
+  const mantis = status.find((s) => s.id === "mantis")!;
+  assert.deepEqual(mantis.extras, ["X search"]);
+  assert.ok(!mantis.missing.includes("X search"));
   assert.match(await jarvis.syncSetupGoal(), /0 of \d+ live agents ready/);
   const goal = () => jarvis.goals().then((gs) => gs.find((g) => g.name === Jarvis.SETUP_GOAL_NAME)!);
   let g = await goal();
@@ -200,7 +204,7 @@ test("setup quests: the Command goal tracks which live teams are connected and t
   assert.equal(g.horizon, "short");
   assert.ok(g.benchmarks!.some((b) => /^JD PM team:/.test(b.text)));
   // Connect everything and give every live agent a run: each team's benchmark is met, so Command earns trophies.
-  jarvis.connectionProbe = async () => new Set(["Google", "X", "X search", "Spotify", "Kubera", "Robinhood", "GoHighLevel", "Discord", "GitHub", "Apple Health"] as never);
+  jarvis.connectionProbe = async () => new Set(["Google", "X", "Spotify", "Kubera", "Robinhood", "GoHighLevel", "Discord", "GitHub", "Apple Health"] as never);
   for (const s of status) await store.agentState.set(s.id, { status: "idle", lastRunAt: new Date().toISOString() });
   await jarvis.syncSetupGoal();
   g = await goal();

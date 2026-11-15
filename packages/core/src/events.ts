@@ -60,8 +60,11 @@ export interface TodayItem { id: string; text: string; goalId?: string; venture?
 /** Today's three: picked by David in the morning, or by HQ's own rule when he hasn't. `date` is Phil's day. */
 export interface Today { date: string; items: TodayItem[]; by: "david" | "auto" | "phil"; pickedAt: string }
 
-/** Is a live agent ready to work: its connections in place and tried at least once? */
-export interface AgentSetup { id: string; name: string; venture: string; missing: string[]; tried: boolean; error?: string; ok: boolean }
+/**
+ * Is a live agent ready to work: its connections in place and tried at least once? `extras` are optional connections it
+ * would use but works without (paid X search); they never count against `ok`.
+ */
+export interface AgentSetup { id: string; name: string; venture: string; missing: string[]; extras: string[]; tried: boolean; error?: string; ok: boolean }
 
 /** What the base and the Goals screen show beside the goals themselves. */
 export interface BaseSummary { trophies: Trophy[]; levels: Record<string, VentureLevel>; today: Today; streak: number; player: PlayerLevel }

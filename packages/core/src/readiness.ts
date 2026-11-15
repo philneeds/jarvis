@@ -7,9 +7,14 @@ import { CHARTERS } from "./registry/charters.js";
  */
 export type Connection = "Google" | "X" | "X search" | "Spotify" | "Kubera" | "Robinhood" | "GoHighLevel" | "Discord" | "GitHub" | "Apple Health";
 const NEEDS: [RegExp, Connection][] = [
-  [/^(gmail_|calendar_|google_)/, "Google"], [/^(x_own_|x_mentions|x_dm_)/, "X"], [/^(x_search|x_recent_posts)$/, "X search"], [/^spotify_/, "Spotify"], [/^kubera_/, "Kubera"],
+  [/^(gmail_|calendar_|google_)/, "Google"], [/^(x_own_|x_mentions|x_dm_)/, "X"], [/^x_search$/, "X search"], [/^spotify_/, "Spotify"], [/^kubera_/, "Kubera"],
   [/^robinhood_/, "Robinhood"], [/^ghl_/, "GoHighLevel"], [/^discord_/, "Discord"], [/^github_/, "GitHub"], [/^health_/, "Apple Health"],
 ];
+/**
+ * Connections an agent works without. X search is xAI's paid API: without it agents still read any post or account they
+ * are pointed at (x_recent_posts and post links are free), they just can't search X. Missing one never holds up setup.
+ */
+export const OPTIONAL_CONNECTIONS: Connection[] = ["X search"];
 /** The connections an agent's charter tools rely on. */
 export function connectionsFor(agent: AgentDef): Connection[] {
   const out = new Set<Connection>();

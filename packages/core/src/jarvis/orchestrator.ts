@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { bus, type AgentSetup, type Approval, type AttentionItem, type AutoDone, type BaseSummary, type ChatMessage, type Goal, type Benchmark, type Horizon, type SystemStatus, type Today, type Trophy } from "../events.js";
-import { connectionsFor, type Connection } from "../readiness.js";
+import { connectionsFor, OPTIONAL_CONNECTIONS, type Connection } from "../readiness.js";
 import { HORIZONS, philDay, pickToday, playerLevel, reconcileToday, streakOf, syncTrophies, ventureLevels, type TodayLog } from "../progress.js";
 import { AGENTS, CHARTERS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
 import { ModelRouter } from "../router/index.js";
@@ -1105,10 +1105,11 @@ export class Jarvis {
     const connected = (await this.connectionProbe?.().catch(() => undefined)) ?? new Set<Connection>();
     const live = (await this.snapshot()).filter((a) => a.live && a.id !== "jarvis" && a.id !== "interface");
     return live.map((a) => {
-      const missing = connectionsFor(getAgent(a.id)!).filter((c) => !connected.has(c));
+      const lacking = connectionsFor(getAgent(a.id)!).filter((c) => !connected.has(c));
+      const missing = lacking.filter((c) => !OPTIONAL_CONNECTIONS.includes(c)), extras = lacking.filter((c) => OPTIONAL_CONNECTIONS.includes(c));
       const tried = !!a.lastRunAt;
       const error = a.status === "error" ? a.lastError ?? "error" : undefined;
-      return { id: a.id, name: a.name, venture: a.venture === "root" ? "command" : a.venture, missing, tried, error, ok: !missing.length && tried && !error };
+      return { id: a.id, name: a.name, venture: a.venture === "root" ? "command" : a.venture, missing, extras, tried, error, ok: !missing.length && tried && !error };
     }).sort((x, y) => Number(x.ok) - Number(y.ok) || Number(x.tried) - Number(y.tried) || y.missing.length - x.missing.length);
   }
 

@@ -149,7 +149,7 @@ function MetricTile({ m, color, busy, onAdd, onFix, onDelete }: { m: Metric; col
   );
 }
 
-interface AgentSetup { id: string; name: string; venture: string; missing: string[]; tried: boolean; error?: string; ok: boolean }
+interface AgentSetup { id: string; name: string; venture: string; missing: string[]; extras?: string[]; tried: boolean; error?: string; ok: boolean }
 
 /**
  * Setup quests: which live agents here still lack a connection or have never been tried. The Command center shows
@@ -188,6 +188,7 @@ function Setup({ venture, color }: { venture: string; color: string }) {
                 {a.error ? <span style={{ color: "var(--red)" }}>Last run failed: {a.error.slice(0, 140)}</span>
                   : a.missing.length ? <>Needs {a.missing.join(", ")} connected{a.tried ? "" : ", then a first run"}</>
                   : "Tools are connected. Never been tried."}
+                {!a.error && a.extras?.length ? <span style={{ color: "var(--dim)" }}> · works without {a.extras.join(", ")} (paid, optional)</span> : null}
               </span>
               {said[a.id] && <span className="whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{said[a.id]}</span>}
             </div>
