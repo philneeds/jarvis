@@ -29,14 +29,24 @@ export function scrubEnv(env: NodeJS.ProcessEnv = process.env): Record<string, s
   return out;
 }
 
+/**
+ * The result waits for "close" (the command's output fully read), not "exit". Node can report a command's exit before
+ * it has read what the command printed, and does so often when several commands end close together: a git rev-parse
+ * then came back as exit 0 with no output. If something the command started keeps the output open after it exits, the
+ * result is whatever was read EXIT_GRACE_MS later.
+ */
+const EXIT_GRACE_MS = 2000;
 export const defaultRunner: Runner = (cmd, args, opts) => new Promise((resolve) => {
   let out = "";
+  let grace: ReturnType<typeof setTimeout> | undefined;
   const p = spawn(cmd, args, { cwd: opts.cwd, env: { ...scrubEnv(), ...(opts.env ?? {}) }, stdio: ["ignore", "pipe", "pipe"] });
   p.stdout.on("data", (d) => { out += d.toString(); });
   p.stderr.on("data", (d) => { out += d.toString(); });
   const t = setTimeout(() => { p.kill("SIGTERM"); out += `\n(timed out after ${Math.round((opts.timeoutMs ?? 600_000) / 1000)}s)`; }, opts.timeoutMs ?? 600_000);
-  p.on("error", (e) => { clearTimeout(t); resolve({ code: 127, out: `${out}\n${e.message}` }); });
-  p.on("exit", (code) => { clearTimeout(t); resolve({ code: code ?? 1, out }); });
+  const end = (code: number, tail = "") => { clearTimeout(t); clearTimeout(grace); resolve({ code, out: out + tail }); };
+  p.on("error", (e) => end(127, `\n${e.message}`));
+  p.on("exit", (code) => { clearTimeout(t); grace = setTimeout(() => end(code ?? 1), EXIT_GRACE_MS); });
+  p.on("close", (code) => end(code ?? 1));
 });
 
 export interface WorkshopOptions {
@@ -56,6 +66,8 @@ export interface WorkshopOptions {
   pollMs?: number;
   /** How long a second code task waits for the workshop (default WORKSHOP_WAIT_MS, 45 minutes; 0 = don't wait). */
   queueWaitMs?: number;
+  /** How long finish() waits before asking git again for the live commit when it got no answer (default 500 ms). */
+  lookupRetryMs?: number;
 }
 export interface WorkshopState { dir: string; branch: string; base: string }
 /** A deploy in flight: one of Einstein's commits ("ship"), or bringing HQ up to its branch on GitHub ("update"). */
@@ -303,17 +315,35 @@ export class Workshop {
   }
   static WAIT_FOR_RUNS_MS = 25 * 60_000;
 
-  /** On boot: read the deploy script's verdict for a ship that was in flight, revert the branch if it rolled back. */
+  /**
+   * The commit the live checkout is on, or nothing when git gave no answer (the command failed, was killed, or printed
+   * no commit). Asked up to three times: "no answer" is not "a different commit".
+   */
+  private async liveCommit(): Promise<string | undefined> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, this.opts.lookupRetryMs ?? 500));
+      const r = await this.git(["rev-parse", "HEAD"], this.opts.appDir).catch(() => undefined);
+      const sha = r?.code === 0 ? r.out.trim() : "";
+      if (/^[0-9a-f]{40,64}$/.test(sha)) return sha;
+    }
+    return undefined;
+  }
+
+  /**
+   * On boot: read the deploy script's verdict for a ship that was in flight, revert the branch if it rolled back.
+   * Without a verdict and without a readable live commit there is nothing to judge by: the record stays "shipping"
+   * and the next boot looks again.
+   */
   async finish(store: Store): Promise<{ record: ShipRecord; message: string } | undefined> {
     const rec = await store.settings.get<ShipRecord | null>(SHIP_KEY, null);
     if (!rec || rec.status !== "shipping") return undefined;
     const file = this.opts.outcomeFile ?? "/var/lib/jarvis/last-deploy.json";
     let outcome: { at?: string; ok?: boolean; sha?: string; rolledBackTo?: string; error?: string } = {};
     try { outcome = JSON.parse(await fs.readFile(file, "utf8")) as typeof outcome; } catch { /* no verdict file */ }
-    const live = await this.must(["rev-parse", "HEAD"], this.opts.appDir).catch(() => "");
+    const live = await this.liveCommit();
     const fresh = outcome.at && rec.at && outcome.at >= rec.at;
     let message: string;
-    if (live.startsWith(rec.sha) || (fresh && outcome.ok)) {
+    if (live?.startsWith(rec.sha) || (fresh && outcome.ok)) {
       rec.status = "done"; message = rec.kind === "update" ? `Updated: HQ is back up on ${rec.sha.slice(0, 7)}, the newest code on its branch.` : `Shipped "${rec.title}" (${rec.sha.slice(0, 7)}): HQ is back up on the new code.`;
     } else if (fresh && outcome.ok === false && rec.kind === "update") {
       // An update is several commits from the branch; nothing is reverted, the branch stays as it is for a fix.
@@ -333,6 +363,8 @@ export class Workshop {
         reverted = ` The commit is reverted on ${branch}.`;
       } catch (e) { reverted = ` I couldn't revert it on the branch (${(e as Error).message.slice(0, 120)}); the next deploy would try it again, so tell Einstein.`; }
       message = `"${rec.title}" (${rec.sha.slice(0, 7)}) was rolled back: HQ didn't come up on it${outcome.error ? ` (${outcome.error.slice(0, 200)})` : ""}. Running ${(outcome.rolledBackTo ?? rec.previous ?? "").slice(0, 7)} again.${reverted}`;
+    } else if (!live) {
+      return undefined;
     } else {
       rec.status = "failed"; message = `"${rec.title}" (${rec.sha.slice(0, 7)}): the deploy didn't report back and HQ is on ${live.slice(0, 7)}. Check journalctl -u jarvis-server and /var/log/jarvis-deploy.log.`;
     }

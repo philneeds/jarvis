@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { Workshop, workshopGuard, workshopTools, maskSecrets, scrubEnv, memoryStore, SHIP_KEY, CHARTERS, MODELS, getAgent, Jarvis, mockProvider, ModelRouter, WORKSHOP_HINT } from "../src/index.js";
+import { Workshop, workshopGuard, workshopTools, maskSecrets, scrubEnv, memoryStore, SHIP_KEY, CHARTERS, MODELS, getAgent, Jarvis, mockProvider, ModelRouter, WORKSHOP_HINT, defaultRunner, type Runner, type ShipRecord } from "../src/index.js";
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] }).toString().trim();
 
@@ -137,6 +137,51 @@ test("the last-deploy line for Settings: the deploy script's verdict, blanks dro
   assert.equal((await w.lastDeploy()).last, null);
   // No live checkout: the line still renders without it.
   assert.equal((await new Workshop({ dir: path.join(root, "w2"), appDir: path.join(root, "nowhere"), outcomeFile: outcome }).lastDeploy()).live, null);
+});
+
+test("a deploy that landed is reported as landed when git doesn't answer at first; with no answer at all the record waits for the next boot", async () => {
+  const { root, app } = await repo();
+  const sha = git(app, "rev-parse", "HEAD");
+  const shipping = (): ShipRecord => ({ at: new Date().toISOString(), sha, title: "Update HQ: 1 new change", previous: "0001111", status: "shipping", kind: "update" });
+  // The live-commit lookup answers as scripted, then normally; every other git command runs as usual.
+  const lookups = (answers: { code: number; out: string }[]) => {
+    let asked = 0;
+    const run: Runner = (cmd, args, opts) => (cmd === "git" && args.join(" ") === "rev-parse HEAD" && opts.cwd === app && asked++ < answers.length ? Promise.resolve(answers[asked - 1]!) : defaultRunner(cmd, args, opts));
+    return { run, asked: () => asked };
+  };
+  const workshop = (run: Runner) => new Workshop({ dir: path.join(root, "workshop"), appDir: app, outcomeFile: path.join(root, "none.json"), run, lookupRetryMs: 1 });
+  const store = memoryStore(); await store.init();
+  // The first rev-parse fails (git was killed): asked again, and the deploy is reported as landed.
+  await store.settings.set(SHIP_KEY, shipping());
+  const failed = lookups([{ code: 1, out: "" }]);
+  const done = await workshop(failed.run).finish(store);
+  assert.equal(done!.record.status, "done"); assert.match(done!.message, /Updated: HQ is back up on [0-9a-f]{7}/);
+  assert.equal(failed.asked(), 2, "asked again after the failure");
+  // The same when git exits 0 but its output was lost, which is how it showed up on a busy machine.
+  await store.settings.set(SHIP_KEY, shipping());
+  const empty = await workshop(lookups([{ code: 0, out: "" }, { code: 0, out: "\n" }]).run).finish(store);
+  assert.equal(empty!.record.status, "done");
+  // Git never answers: that says nothing about which commit HQ is on, so nothing is reported and the record waits.
+  await store.settings.set(SHIP_KEY, shipping());
+  const silent = lookups([{ code: 0, out: "" }, { code: 128, out: "fatal: not a git repository" }, { code: 0, out: "" }]);
+  assert.equal(await workshop(silent.run).finish(store), undefined);
+  assert.equal(silent.asked(), 3, "three tries");
+  assert.equal((await store.settings.get<ShipRecord | null>(SHIP_KEY, null))!.status, "shipping", "not marked failed");
+  // The next boot reads the commit and reports it.
+  assert.equal((await workshop(defaultRunner).finish(store))!.record.status, "done");
+  // HQ really is on another commit and the deploy never reported: that is still a failure, naming the commit.
+  await store.settings.set(SHIP_KEY, { ...shipping(), sha: "f".repeat(40), kind: "ship", title: "Make the clap louder" });
+  const other = await workshop(lookups([{ code: 1, out: "" }]).run).finish(store);
+  assert.equal(other!.record.status, "failed");
+  assert.match(other!.message, new RegExp(`the deploy didn't report back and HQ is on ${sha.slice(0, 7)}\\.`));
+});
+
+test("a command's output is all there when several commands finish at the same time", async () => {
+  const { app } = await repo();
+  const sha = git(app, "rev-parse", "HEAD");
+  const one = async () => { const got: { code: number; out: string }[] = []; for (let i = 0; i < 25; i++) got.push(await defaultRunner("git", ["rev-parse", "HEAD"], { cwd: app })); return got; };
+  const all = (await Promise.all(Array.from({ length: 6 }, one))).flat();
+  assert.deepEqual(all.filter((r) => r.code !== 0 || r.out.trim() !== sha), []);
 });
 
 test("Einstein is HQ's engineer: Fable by default, the workshop tools in his charter, a code task opens the workshop and the ship action is described", async () => {
