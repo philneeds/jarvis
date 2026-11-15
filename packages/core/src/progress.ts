@@ -1,4 +1,4 @@
-import type { Approval, AttentionItem, Goal, Horizon, Today, TodayItem, Trophy, VentureLevel } from "./events.js";
+import type { Approval, AttentionItem, Goal, Horizon, PlayerLevel, Today, TodayItem, Trophy, VentureLevel } from "./events.js";
 import { getAgent } from "./registry/index.js";
 
 /**
@@ -101,6 +101,19 @@ export function reconcileToday(today: Today, ctx: TodayContext, now: string = ne
     return { ...it, done: true, doneAt: now };
   });
   return { today: changed ? { ...today, items } : today, changed };
+}
+
+/**
+ * Phil's own level. XP comes only from things that got done: a trophy (a benchmark met or a goal finished) 10, a day
+ * with all of today's three done 15, a to-do ticked off 5, a card he decided himself 2. Nothing for time spent or for
+ * agents' activity. Each level takes 25 more XP than the last: 50 to reach level 2, 75 more for 3, and so on.
+ */
+export const XP = { trophy: 10, fullDay: 15, todo: 5, decision: 2 } as const;
+export function playerLevel(from: PlayerLevel["from"]): PlayerLevel {
+  const total = from.trophies * XP.trophy + from.fullDays * XP.fullDay + from.todosDone * XP.todo + from.decisions * XP.decision;
+  let level = 1, left = total, need = 50;
+  while (left >= need) { left -= need; level++; need += 25; }
+  return { level, total, xp: left, next: need, from };
 }
 
 export type TodayLog = Record<string, { done: number; total: number }>;

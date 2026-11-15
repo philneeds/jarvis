@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { LiveProvider } from "@/lib/live";
 import { UndoProvider } from "@/lib/undo";
+import { TaskProvider } from "@/lib/task";
 
 export const metadata: Metadata = {
   title: "Jarvis HQ",
@@ -27,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
       </head>
       <body>
-        <LiveProvider><UndoProvider>{children}</UndoProvider></LiveProvider>
+        <LiveProvider><UndoProvider><TaskProvider>{children}</TaskProvider></UndoProvider></LiveProvider>
       </body>
     </html>
   );

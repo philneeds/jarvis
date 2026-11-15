@@ -61,7 +61,10 @@ export interface TodayItem { id: string; text: string; goalId?: string; venture?
 export interface Today { date: string; items: TodayItem[]; by: "david" | "auto" | "phil"; pickedAt: string }
 
 /** What the base and the Goals screen show beside the goals themselves. */
-export interface BaseSummary { trophies: Trophy[]; levels: Record<string, VentureLevel>; today: Today; streak: number }
+export interface BaseSummary { trophies: Trophy[]; levels: Record<string, VentureLevel>; today: Today; streak: number; player: PlayerLevel }
+
+/** Phil's own level, from what he actually got done (see playerXp). `xp` is into this level, `next` what it takes to reach the next. */
+export interface PlayerLevel { level: number; total: number; xp: number; next: number; from: { trophies: number; fullDays: number; todosDone: number; decisions: number } }
 
 export interface Benchmark { id: string; text: string; weight: number; done: boolean; doneAt?: string }
 
@@ -78,7 +81,14 @@ export interface AttentionItem {
   snoozedUntil?: string;
   doneAt?: string;
   source?: { runId?: string; approvalId?: string };
+  /** Phil talking the task over with the agents on it. */
+  thread?: TaskMessage[];
+  /** The agent writing a reply right now, so the screen can say so. */
+  replying?: string;
 }
+
+/** One line in a task's conversation: Phil, or the agent who answered. */
+export interface TaskMessage { at: string; from: "phil" | "agent"; agentId?: string; text: string }
 
 export interface ChatMessage {
   id: string;

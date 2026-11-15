@@ -161,3 +161,24 @@ test("David has a morning routine for today's three, and the tools to pick from"
   assert.match(s.task, /today\.set/);
   assert.ok(getAgent("david"));
 });
+
+test("Phil's level comes from what got done, each level a little further than the last", async () => {
+  const { playerLevel, XP } = await import("../src/index.js");
+  const at = (xp: number) => playerLevel({ trophies: 0, fullDays: 0, todosDone: xp / XP.todo, decisions: 0 });
+  assert.deepEqual([0, 45, 50, 120, 125, 225, 350].map((x) => at(x).level), [1, 1, 2, 2, 3, 4, 5]);
+  const p = playerLevel({ trophies: 3, fullDays: 2, todosDone: 4, decisions: 10 });
+  assert.equal(p.total, 3 * 10 + 2 * 15 + 4 * 5 + 10 * 2);
+  assert.equal(p.level, 2);
+  assert.equal(p.xp, 50);
+  assert.equal(p.next, 75);
+  const { jarvis } = make();
+  const s = await jarvis.baseSummary();
+  assert.equal(s.player.level, 1);
+  const item = await jarvis.raiseAttention({ title: "Renew passport", why: "", agentId: "monica" });
+  await jarvis.attentionUpdate(item.id, "done");
+  const a = await jarvis.requestApproval({ agentId: "stella", kind: "send", title: "Email Tracy", body: "Hi", payload: { action: "gmail.send", to: "t@example.com", subject: "Quote", body: "Hi" } });
+  await jarvis.decide(a.id, "rejected");
+  const after = (await jarvis.baseSummary()).player;
+  assert.deepEqual(after.from, { trophies: 0, fullDays: 0, todosDone: 1, decisions: 1 });
+  assert.equal(after.total, 7);
+});

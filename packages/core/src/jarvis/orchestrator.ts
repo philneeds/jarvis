@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { bus, type Approval, type AttentionItem, type AutoDone, type BaseSummary, type ChatMessage, type Goal, type Benchmark, type Horizon, type SystemStatus, type Today, type Trophy } from "../events.js";
-import { HORIZONS, philDay, pickToday, reconcileToday, streakOf, syncTrophies, ventureLevels, type TodayLog } from "../progress.js";
+import { HORIZONS, philDay, pickToday, playerLevel, reconcileToday, streakOf, syncTrophies, ventureLevels, type TodayLog } from "../progress.js";
 import { AGENTS, CHARTERS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
 import { ModelRouter } from "../router/index.js";
 import type { MemoryItem, MetricPoint, RecordItem, Store } from "../store/types.js";
@@ -695,6 +695,60 @@ export class Jarvis {
   }
 
   /** Phil rewrites an item in place: its title, the why, or the due date (null or "" clears it). */
+  /**
+   * The agents a to-do concerns: whoever raised it, plus any agent named in it ("Buffett and Mantis say test it").
+   * Jarvis is always there to fall back on.
+   */
+  taskAgents(item: Pick<AttentionItem, "agentId" | "title" | "why">): string[] {
+    const text = `${item.title} ${item.why}`;
+    const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // The full name, or a surname on its own ("Buffett"), matched as written so a word like "coach" doesn't count.
+    const GENERIC = new Set(["Coach", "Team", "Sales", "Email", "Mindset", "Scheduler", "Intern"]);
+    const says = (n: string) => new RegExp(`\\b${esc(n)}\\b`, "i").test(text) || n.split(" ").some((w, i, all) => i > 0 && all.length > 1 && w.length >= 4 && !GENERIC.has(w) && new RegExp(`\\b${esc(w)}\\b`).test(text));
+    const named = AGENTS.filter((a) => a.id !== "jarvis" && a.id !== item.agentId && says(a.name)).map((a) => a.id);
+    return [...new Set([item.agentId, ...named, "jarvis"])].filter((id) => !!getAgent(id)).slice(0, 6);
+  }
+
+  /**
+   * Phil talks a to-do over with one of the agents on it. His line is saved at once; the agent's answer follows in the
+   * background and lands on the same item (screens hear an "attention" edit). The agent may act on it the usual way:
+   * anything it proposes goes through the approval rules like any other run.
+   */
+  async askAboutAttention(id: string, question: string, agentId?: string): Promise<AttentionItem | undefined> {
+    const list = await this.attentionList();
+    const item = list.find((i) => i.id === id);
+    if (!item) return undefined;
+    const who = agentId && this.taskAgents(item).includes(agentId) ? agentId : item.agentId;
+    const agent = getAgent(who) ?? getAgent("jarvis")!;
+    const prior = item.thread ?? [];
+    item.thread = [...prior, { at: new Date().toISOString(), from: "phil" as const, agentId: agent.id, text: question.trim() }].slice(-100);
+    item.replying = agent.id;
+    await this.saveAttention(list);
+    bus.emitEvent({ type: "attention", item, change: "edited" });
+    const name = (m: { from: string; agentId?: string }) => (m.from === "phil" ? "Phil" : getAgent(m.agentId ?? "")?.name ?? "Agent");
+    const task = [
+      `Phil wants to talk about a to-do on his list. Answer him directly and briefly, in plain words, using your tools to check anything you need. If something should be done, do your part now (an approval block for anything that leaves HQ, a hand-off to whoever owns it). If you think it's finished, say so; Phil ticks it off himself.`,
+      `To-do: "${item.title}"${item.due ? ` (due ${item.due})` : ""}\nWhy it's there: ${item.why || "(no note)"}\nRaised by ${getAgent(item.agentId)?.name ?? item.agentId} on ${item.at.slice(0, 10)}.`,
+      prior.length ? `The conversation so far:\n${prior.map((m) => `${name(m)}: ${m.text}`).join("\n")}` : "",
+      `Phil, to ${agent.name}: ${question.trim()}`,
+    ].filter(Boolean).join("\n\n");
+    void (async () => {
+      let text: string;
+      try {
+        const r = await this.runAgent(agent, task, { direct: true, from: "Phil (about a to-do)" });
+        text = r.blocked ? `(${agent.name} didn't run: ${r.blocked})` : r.text.trim() || "(no answer)";
+      } catch (e) { text = `(${agent.name} hit an error: ${(e as Error).message})`; }
+      const now = await this.attentionList();
+      const cur = now.find((i) => i.id === id);
+      if (!cur) return;
+      cur.thread = [...(cur.thread ?? []), { at: new Date().toISOString(), from: "agent" as const, agentId: agent.id, text }].slice(-100);
+      cur.replying = undefined;
+      await this.saveAttention(now);
+      bus.emitEvent({ type: "attention", item: cur, change: "edited" });
+    })();
+    return item;
+  }
+
   async editAttention(id: string, patch: { title?: string; why?: string; due?: string | null }): Promise<AttentionItem | undefined> {
     const list = await this.attentionList();
     const item = list.find((i) => i.id === id);
@@ -1115,7 +1169,10 @@ export class Jarvis {
   async baseSummary(): Promise<BaseSummary> {
     const trophies = await this.trophies();
     const { today, streak } = await this.today();
-    return { trophies: trophies.slice(-100), levels: ventureLevels(trophies), today, streak };
+    const log = await this.store.settings.get<TodayLog>("today.log", {});
+    const decisions = (await this.store.approvals.list()).filter((a) => (a.status === "approved" || a.status === "edited" || a.status === "rejected") && !/^(auto|superseded|refused)/.test(a.note ?? "")).length;
+    const player = playerLevel({ trophies: trophies.length, fullDays: Object.values(log).filter((d) => d.total > 0 && d.done >= d.total).length, todosDone: (await this.attentionList()).filter((i) => i.status === "done").length, decisions });
+    return { trophies: trophies.slice(-100), levels: ventureLevels(trophies), today, streak, player };
   }
 
   // ---- Undo ---------------------------------------------------------------------

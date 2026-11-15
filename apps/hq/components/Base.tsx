@@ -6,6 +6,7 @@ import { useLive } from "@/lib/live";
 import { api, post } from "@/lib/api";
 import { LEVEL_NAME, horizonOf, useBase } from "@/lib/base";
 import { useAutoDone } from "@/components/DonePanel";
+import { useTask, type TaskRef } from "@/lib/task";
 import type { AgentLive, Approval, AttentionItem } from "@/lib/types";
 import type { CoreState } from "@/components/Core";
 import { approveLabel } from "@/components/ApprovalsPanel";
@@ -214,8 +215,9 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
   const [error, setError] = useState<string>();
   const { base, goals, toggle, repick } = useBase();
   const { data: autoDone } = useAutoDone();
+  const task = useTask();
   const doneToday = (autoDone?.items ?? []).filter((x) => !x.undone && Date.now() - Date.parse(x.at) < 86_400_000).length;
-  const [menu, setMenu] = useState<"today" | "health" | null>(null);
+  const [menu, setMenu] = useState<"today" | "health" | "level" | null>(null);
   const [ready, setReady] = useState<{ phase: number; agents: Ready[] } | null>(null);
   const levels = base?.levels;
 
@@ -280,9 +282,9 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
 
   // Everything waiting, in one list, for the phone: problems, then approvals, then to-dos.
   const queue = rows.flatMap((r) => [
-    ...r.errors.map((a) => ({ key: `e${a.id}`, tag: r.label, color: r.color, text: `${a.name} hit an error`, act: <Link className="btn btn-sm" href={`/web?agent=${a.id}`}>Open ›</Link> })),
-    ...r.approvals.map((a) => ({ key: a.id, tag: r.label, color: r.color, text: a.title, act: heavy(a) ? <Link className="btn btn-sm" href="/attention#approve">Review ›</Link> : <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void approve(a)}>{approveLabel(a)}</button> })),
-    ...r.todos.map((t) => ({ key: t.id, tag: r.label, color: r.color, text: t.title, act: <button className="btn btn-sm" disabled={busy} onClick={() => void done(t)}>Done ✓</button> })),
+    ...r.errors.map((a) => ({ key: `e${a.id}`, ref: undefined as TaskRef | undefined, tag: r.label, color: r.color, text: `${a.name} hit an error`, act: <Link className="btn btn-sm" href={`/web?agent=${a.id}`}>Open ›</Link> })),
+    ...r.approvals.map((a) => ({ key: a.id, ref: { kind: "approval" as const, id: a.id }, tag: r.label, color: r.color, text: a.title, act: heavy(a) ? <Link className="btn btn-sm" href="/attention#approve">Review ›</Link> : <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void approve(a)}>{approveLabel(a)}</button> })),
+    ...r.todos.map((t) => ({ key: t.id, ref: { kind: "todo" as const, id: t.id }, tag: r.label, color: r.color, text: t.title, act: <button className="btn btn-sm" disabled={busy} onClick={() => void done(t)}>Done ✓</button> })),
   ]);
 
   const orb = P(7.5, 7.5, 150), corePt = P(7.5, 7.5);
@@ -309,14 +311,14 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
             <b>{a.title}</b>
             <span className="base-dim">{who(a.agentId)} · {clipText(a.effect ?? "Approving only records your decision.", 200)}</span>
             {heavy(a)
-              ? <><span className="base-dim">Money, trades and code changes are decided on the full card.</span><div className="base-btns"><Link className="btn btn-sm btn-primary" href="/attention#approve">Review the full card ›</Link></div></>
-              : <div className="base-btns"><button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void approve(a)}>{approveLabel(a)}</button><Link className="btn btn-sm" href="/attention#approve">Edit or reject ›</Link></div>}
+              ? <><span className="base-dim">Money, trades and code changes are decided on the full card.</span><div className="base-btns"><Link className="btn btn-sm btn-primary" href="/attention#approve">Review the full card ›</Link><button className="btn btn-sm" onClick={() => { setPop(null); task.open({ kind: "approval", id: a.id }); }}>Discuss ›</button></div></>
+              : <div className="base-btns"><button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void approve(a)}>{approveLabel(a)}</button><button className="btn btn-sm" onClick={() => { setPop(null); task.open({ kind: "approval", id: a.id }); }}>Discuss ›</button></div>}
           </>
         ) : t ? (
           <>
             <b>{t.title}</b>
             <span className="base-dim">{who(t.agentId)}{t.why ? ` · ${clipText(t.why, 180)}` : ""}</span>
-            <div className="base-btns"><button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void done(t)}>Done ✓</button><Link className="btn btn-sm" href="/attention#todo">Open ›</Link></div>
+            <div className="base-btns"><button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void done(t)}>Done ✓</button><button className="btn btn-sm" onClick={() => { setPop(null); task.open({ kind: "todo", id: t.id }); }}>Open ›</button></div>
           </>
         ) : null}
         {error && <span style={{ color: "var(--red)" }}>{error}</span>}
@@ -327,6 +329,31 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
   return (
     <section aria-label="Your base" className="w-full flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2 text-[11px] tracking-[0.14em] uppercase">
+        {base && (() => {
+          const p = base.player, live = rows.filter((r) => r.live), baseLv = live.reduce((n, r) => n + r.level, 0);
+          return (
+            <div className="relative mr-2">
+              <button className="lvl" aria-expanded={menu === "level"} onClick={() => setMenu(menu === "level" ? null : "level")} aria-label={`Level ${p.level}, ${p.xp} of ${p.next} XP to the next. Base level ${baseLv}.`}>
+                <svg className="lvl-hex" viewBox="0 0 40 44" aria-hidden="true"><defs><linearGradient id="lvl-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#9FD8FF" /><stop offset="1" stopColor="#2F6FD8" /></linearGradient></defs><path d="M20 2 37 11.5v21L20 42 3 32.5v-21z" fill="url(#lvl-g)" stroke="#0B2350" strokeWidth="2.5" strokeLinejoin="round" /><path d="M9 13 20 7l11 6" fill="none" stroke="#fff" strokeOpacity=".55" strokeWidth="2" strokeLinecap="round" /><text x="20" y="28" textAnchor="middle">{p.level}</text></svg>
+                <span className="lvl-body"><span className="lvl-name">Phil <i>· base lv {baseLv}</i></span><span className="lvl-bar"><b style={{ width: `${Math.round((p.xp / p.next) * 100)}%` }} /></span><span className="lvl-xp">{p.xp} / {p.next} XP</span></span>
+              </button>
+              {menu === "level" && (
+                <div className="base-menu" role="dialog" aria-label="Your level">
+                  <span className="base-tag" style={{ color: "var(--accent)" }}>Level {p.level} · {p.total} XP in all · {p.next - p.xp} to level {p.level + 1}</span>
+                  <span className="base-dim">XP comes only from things that got done:</span>
+                  <ul className="m-0 pl-4 flex flex-col gap-0.5">
+                    <li>Trophies (goal steps met) · {p.from.trophies} × 10</li>
+                    <li>Days with all of today&apos;s 3 done · {p.from.fullDays} × 15</li>
+                    <li>To-dos ticked off · {p.from.todosDone} × 5</li>
+                    <li>Cards you decided · {p.from.decisions} × 2</li>
+                  </ul>
+                  <span className="base-dim">Base level is every live building&apos;s level added up ({live.map((r) => `${r.label} ${r.level}`).join(", ")}). Buildings level up when their goals&apos; milestones are met.</span>
+                  <Link href="/goals" className="btn btn-sm self-start">Goals ›</Link>
+                </div>
+              )}
+            </div>
+          );
+        })()}
         <Link href="/attention" className="base-chip" style={waiting ? { borderColor: "var(--amber)", color: "var(--amber)" } : undefined}>{waiting} need you ›</Link>
         {doneToday > 0 && <Link href="/attention#done" className="base-chip" style={{ borderColor: "var(--green)", color: "var(--green)" }} title="Reversible work agents did on their own in the last day; each can be undone">{doneToday} done for you ›</Link>}
         <div className="relative">
@@ -456,7 +483,7 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
 
       {queue.length > 0 && (
         <ul className="base-queue" aria-label="Waiting on you">
-          {queue.slice(0, 6).map((q) => <li key={q.key}><span className="base-tag" style={{ color: q.color }}>{q.tag}</span><span className="flex-1 min-w-0">{q.text}</span>{q.act}</li>)}
+          {queue.slice(0, 6).map((q) => <li key={q.key}><span className="base-tag" style={{ color: q.color }}>{q.tag}</span>{q.ref ? <button className="flex-1 min-w-0 text-left bg-transparent border-0 p-0 cursor-pointer" style={{ color: "var(--ink-bright)" }} onClick={() => task.open(q.ref!)}>{q.text}</button> : <span className="flex-1 min-w-0">{q.text}</span>}{q.act}</li>)}
           {queue.length > 6 && <li><Link href="/attention">{queue.length - 6} more ›</Link></li>}
         </ul>
       )}

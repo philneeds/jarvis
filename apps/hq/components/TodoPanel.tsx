@@ -1,5 +1,6 @@
 "use client";
 
+import { useTask } from "@/lib/task";
 import { useEffect, useState, type FormEvent } from "react";
 import { useLive } from "@/lib/live";
 import { api, post, put, fmtTime, timeAgo } from "@/lib/api";
@@ -7,6 +8,7 @@ import type { AttentionItem } from "@/lib/types";
 
 /** Things Phil has to do himself. Raised by agents (or by Phil), they wait here until ticked off. The To do section of Needs you. */
 export function TodoPanel({ id = "todo", showDone = false }: { id?: string; showDone?: boolean }) {
+  const task = useTask();
   const { state, attention } = useLive();
   const tab: "open" | "done" = showDone ? "done" : "open";
   const [done, setDone] = useState<AttentionItem[]>([]);
@@ -85,6 +87,7 @@ export function TodoPanel({ id = "todo", showDone = false }: { id?: string; show
               </>
             )}
             {editing !== i.id && <div className="flex flex-wrap gap-2 justify-end">
+              <button className="btn btn-sm" onClick={() => task.open({ kind: "todo", id: i.id })} aria-label={`Talk about ${i.title}`}>Talk{i.thread?.length ? ` · ${i.thread.length}` : ""}</button>
               <button className="btn btn-sm" disabled={busy === i.id} onClick={() => startEdit(i)} aria-label={`Edit ${i.title}`}>Edit</button>
               {i.status === "done" ? <button className="btn btn-sm" disabled={busy === i.id} onClick={() => act(i, "reopened")}>Reopen</button> : (
                 <>

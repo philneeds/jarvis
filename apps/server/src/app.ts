@@ -152,6 +152,17 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const item = await jarvis.editAttention(c.req.param("id"), p.data);
     return item ? c.json({ item }) : c.json({ error: "not found" }, 404);
   });
+  // Talk a to-do over with one of the agents on it; the answer arrives as an "attention" event.
+  api.get("/attention/:id/agents", async (c) => {
+    const item = (await jarvis.attention(true)).find((i) => i.id === c.req.param("id"));
+    return item ? c.json({ agents: jarvis.taskAgents(item) }) : c.json({ error: "not found" }, 404);
+  });
+  api.post("/attention/:id/ask", async (c) => {
+    const p = z.object({ question: z.string().trim().min(1).max(4000), agentId: z.string().max(40).optional() }).strict().safeParse(await c.req.json().catch(() => null));
+    if (!p.success) return c.json({ error: "question required" }, 400);
+    const item = await jarvis.askAboutAttention(c.req.param("id"), p.data.question, p.data.agentId);
+    return item ? c.json({ item }) : c.json({ error: "not found" }, 404);
+  });
   api.post("/attention/:id/:change", async (c) => {
     const change = c.req.param("change");
     if (!["done", "snoozed", "reopened"].includes(change)) return c.json({ error: "change must be done, snoozed or reopened" }, 400);

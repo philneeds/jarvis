@@ -151,3 +151,26 @@ test("undo expires", async () => {
   try { assert.equal(await jarvis.undo(f!.undoId), undefined); } finally { Jarvis.UNDO_MS = was; }
   assert.equal(await store.memory.get("phil", "coffee"), undefined);
 });
+
+test("talking a to-do over: who's on it, Phil's line saved at once, the chosen agent's answer lands on the item", async () => {
+  const { Jarvis, ModelRouter, memoryStore, mockProvider, bus } = await import("../src/index.js");
+  const store = memoryStore();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
+  const item = await jarvis.raiseAttention({ title: "Get murky.news details from your friend", why: "Buffett and Mantis say test it, but first need the API or feed URL.", agentId: "jarvis" });
+  assert.deepEqual(jarvis.taskAgents(item), ["jarvis", "buffett", "mantis"]);
+  const answered = new Promise<void>((res) => { const on = (e: { type: string; item?: { id: string; replying?: string; thread?: unknown[] } }) => { if (e.type === "attention" && e.item?.id === item.id && !e.item.replying && (e.item.thread?.length ?? 0) >= 2) { bus.off("event", on); res(); } }; bus.on("event", on); });
+  const after = await jarvis.askAboutAttention(item.id, "What exactly do you need from him?", "mantis");
+  assert.equal(after!.replying, "mantis", "the screen can say Mantis is answering");
+  assert.equal(after!.thread![0]!.from, "phil");
+  await answered;
+  const saved = (await jarvis.attention(true)).find((i) => i.id === item.id)!;
+  assert.equal(saved.thread!.length, 2);
+  assert.equal(saved.thread![1]!.from, "agent");
+  assert.equal(saved.thread![1]!.agentId, "mantis");
+  assert.equal(saved.replying, undefined);
+  // Someone not on the task can't be picked; it falls back to whoever raised it.
+  const again = await jarvis.askAboutAttention(item.id, "And the pricing?", "stella");
+  assert.equal(again!.replying, "jarvis");
+  assert.equal(await jarvis.askAboutAttention("nope", "hi"), undefined);
+  await new Promise((r) => setTimeout(r, 300));
+});
