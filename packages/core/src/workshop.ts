@@ -36,7 +36,12 @@ export const defaultRunner: Runner = (cmd, args, opts) => new Promise((resolve) 
   p.stderr.on("data", (d) => { out += d.toString(); });
   const t = setTimeout(() => { p.kill("SIGTERM"); out += `\n(timed out after ${Math.round((opts.timeoutMs ?? 600_000) / 1000)}s)`; }, opts.timeoutMs ?? 600_000);
   p.on("error", (e) => { clearTimeout(t); resolve({ code: 127, out: `${out}\n${e.message}` }); });
-  p.on("exit", (code) => { clearTimeout(t); resolve({ code: code ?? 1, out }); });
+  // "close", not "exit": exit can fire before the last of the output has been read, and under load a command that
+  // succeeded came back with an empty answer (a good deploy reported as failed, "nothing to submit" for real work).
+  // If a grandchild keeps the pipe open after the command is gone, don't wait on it for ever.
+  let code: number | null = null;
+  p.on("exit", (c) => { code = c; setTimeout(() => resolve({ code: code ?? 1, out }), 3000).unref(); });
+  p.on("close", (c) => { clearTimeout(t); resolve({ code: c ?? code ?? 1, out }); });
 });
 
 export interface WorkshopOptions {
@@ -246,12 +251,24 @@ export class Workshop {
     return this.must(["rev-parse", "HEAD"]);
   }
 
-  /** The commit's message, files and diff, for the approval card. */
-  async describe(sha: string): Promise<{ title: string; files: string[]; stat: string }> {
+  /**
+   * What approving this commit puts on the deploy branch, for the approval card: its message, and the files and diff
+   * of everything between the branch and it. Shipping a commit ships the commits under it, so a card that listed only
+   * its own files hid an earlier, unapproved change riding along (a guardrail edit under a harmless one). `carries`
+   * names those earlier commits, newest first.
+   */
+  async describe(sha: string): Promise<{ title: string; files: string[]; stat: string; carries: string[] }> {
     const title = await this.must(["log", "-1", "--format=%s", sha]);
-    const files = (await this.must(["diff-tree", "--no-commit-id", "--name-only", "-r", sha])).split("\n").filter(Boolean);
-    const stat = await this.must(["show", "--stat", "--format=", sha]);
-    return { title, files, stat };
+    const { branch } = await this.target();
+    const base = await this.git(["merge-base", sha, `origin/${branch}`]);
+    const from = base.code === 0 && base.out.trim() && !sha.startsWith(base.out.trim()) ? base.out.trim() : undefined;
+    if (!from) {
+      const files = (await this.must(["diff-tree", "--no-commit-id", "--name-only", "-r", sha])).split("\n").filter(Boolean);
+      return { title, files, stat: await this.must(["show", "--stat", "--format=", sha]), carries: [] };
+    }
+    const files = (await this.must(["diff", "--name-only", from, sha])).split("\n").filter(Boolean);
+    const carries = (await this.must(["log", "--format=%s", `${from}..${sha}`])).split("\n").filter(Boolean).slice(1);
+    return { title, files, stat: await this.must(["diff", "--stat", from, sha]), carries };
   }
 
   /**
@@ -327,14 +344,21 @@ export class Workshop {
   static WAIT_FOR_RUNS_MS = 65 * 60_000;
 
   /** On boot: read the deploy script's verdict for a ship that was in flight, revert the branch if it rolled back. */
-  async finish(store: Store): Promise<{ record: ShipRecord; message: string } | undefined> {
+  /**
+   * `wait` is for the first looks after a boot: the deploy script writes its verdict only once it has seen HQ answer,
+   * seconds after this process starts, so "no verdict yet" then means "not known yet". With it, an unsettled ship is
+   * left as it is (returns nothing) for the caller to look again; without it, the last word is given.
+   */
+  async finish(store: Store, opts: { wait?: boolean } = {}): Promise<{ record: ShipRecord; message: string } | undefined> {
     const rec = await store.settings.get<ShipRecord | null>(SHIP_KEY, null);
     if (!rec || rec.status !== "shipping") return undefined;
     const file = this.opts.outcomeFile ?? "/var/lib/jarvis/last-deploy.json";
     let outcome: { at?: string; ok?: boolean; sha?: string; rolledBackTo?: string; error?: string } = {};
     try { outcome = JSON.parse(await fs.readFile(file, "utf8")) as typeof outcome; } catch { /* no verdict file */ }
-    const live = await this.must(["rev-parse", "HEAD"], this.opts.appDir).catch(() => "");
+    let live = "";
+    for (let i = 0; i < 3 && !live; i++) live = await this.must(["rev-parse", "HEAD"], this.opts.appDir).catch(() => "");
     const fresh = outcome.at && rec.at && outcome.at >= rec.at;
+    if (opts.wait && !fresh && !live.startsWith(rec.sha)) return undefined;
     let message: string;
     if (live.startsWith(rec.sha) || (fresh && outcome.ok)) {
       rec.status = "done"; message = rec.kind === "update" ? `Updated: HQ is back up on ${rec.sha.slice(0, 7)}, the newest code on its branch.` : `Shipped "${rec.title}" (${rec.sha.slice(0, 7)}): HQ is back up on the new code.`;
@@ -357,7 +381,7 @@ export class Workshop {
       } catch (e) { reverted = ` I couldn't revert it on the branch (${(e as Error).message.slice(0, 120)}); the next deploy would try it again, so tell Einstein.`; }
       message = `"${rec.title}" (${rec.sha.slice(0, 7)}) was rolled back: HQ didn't come up on it${outcome.error ? ` (${outcome.error.slice(0, 200)})` : ""}. Running ${(outcome.rolledBackTo ?? rec.previous ?? "").slice(0, 7)} again.${reverted}`;
     } else {
-      rec.status = "failed"; message = `"${rec.title}" (${rec.sha.slice(0, 7)}): the deploy didn't report back and HQ is on ${live.slice(0, 7)}. Check journalctl -u jarvis-server and /var/log/jarvis-deploy.log.`;
+      rec.status = "failed"; message = `"${rec.title}" (${rec.sha.slice(0, 7)}): the deploy didn't report back and ${live ? `HQ is on ${live.slice(0, 7)}` : "I couldn't read which commit HQ is on"}. Check journalctl -u jarvis-server and /var/log/jarvis-deploy.log.`;
     }
     rec.note = message;
     await store.settings.set(SHIP_KEY, rec);
@@ -475,7 +499,8 @@ export function workshopTools(w: Workshop, deps: WorkshopToolDeps = {}): ToolDef
           const d = await w.describe(sha);
           // A change to the guardrails themselves is still Phil's call, but it must be impossible to miss on the card.
           const rails = d.files.filter((f) => GUARDRAIL_FILES.test(f));
-          const body = `${rails.length ? `GUARDRAILS TOUCHED: ${rails.join(", ")}. This change edits the code that limits what Einstein can do (the workshop guard, the deploy script, approvals or safety rules). Read the diff before approving.\n\n` : ""}${why.trim()}\n\nFiles: ${d.files.join(", ")}\n${d.stat}\n\nChecks: all green (build, typecheck, tests).`;
+          const riders = d.carries.length ? `ALSO SHIPS ${d.carries.length} earlier change${d.carries.length === 1 ? "" : "s"} from the workshop that ${d.carries.length === 1 ? "isn't" : "aren't"} live yet: ${d.carries.map((t) => `"${t}"`).join(", ")}. Approving this card ships ${d.carries.length === 1 ? "it" : "them"} too; the files below cover all of it.\n\n` : "";
+          const body = `${riders}${rails.length ? `GUARDRAILS TOUCHED: ${rails.join(", ")}. This change edits the code that limits what Einstein can do (the workshop guard, the deploy script, approvals or safety rules). Read the diff before approving.\n\n` : ""}${why.trim()}\n\nFiles: ${d.files.join(", ")}\n${d.stat}\n\nChecks: all green (build, typecheck, tests).`;
           const block = { kind: "config", title: `${rails.length ? "Ship (touches guardrails)" : "Ship"}: ${title}`, body, payload: { action: "code.ship", sha, title, files: d.files, guardrails: rails }, context: `Einstein changed ${d.files.length} file${d.files.length === 1 ? "" : "s"} in the workshop on branch ${w.current?.branch ?? "einstein"}; every check passed. Approving pushes commit ${sha.slice(0, 7)} to the live branch and redeploys HQ (two or three minutes, HQ restarts); if HQ doesn't come back it rolls back on its own.` };
           return `Committed ${sha.slice(0, 7)}. Put this in your reply, exactly:\n\n\`\`\`approval\n${JSON.stringify(block)}\n\`\`\``;
         } catch (e) { return `Submit failed: ${(e as Error).message}`; }

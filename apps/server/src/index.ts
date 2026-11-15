@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { DiscordConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, Watchers, XConnector, Workshop, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
+import { DiscordConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, Watchers, XConnector, Workshop, SHIP_KEY, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
 import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
 import { authEnabled, fromHq, isAuthedRequest } from "./auth.js";
@@ -113,7 +113,17 @@ const stale = await jarvis.clearStaleWork();
 const pruned = await jarvis.pruneRunReports().catch(() => 0);
 if (pruned) console.log(`Took ${pruned} run summaries off the venture boards`);
 // A ship that was in flight when HQ restarted: say how it went.
-void jarvis.finishShip().catch((e) => console.warn("[workshop] finish:", (e as Error).message));
+// The deploy script writes its verdict only after it has seen HQ answer, which is after this line runs: look now, and
+// keep looking for four minutes before giving the last word. (Looking once called every rollback "didn't report
+// back", so the bad commit was never taken off the branch and the next update offered it again.)
+{
+  const settle = async (tries: number): Promise<void> => {
+    const last = tries >= 12;
+    const said = await jarvis.finishShip({ wait: !last }).catch((e) => { console.warn("[workshop] finish:", (e as Error).message); return "error"; });
+    if (said === undefined && !last && (await store.settings.get<{ status?: string } | null>(SHIP_KEY, null))?.status === "shipping") setTimeout(() => void settle(tries + 1), 20_000).unref();
+  };
+  void settle(0);
+}
 // Hourly: new code on GitHub that HQ isn't running becomes one "Update HQ" card under Needs you.
 if (workshop) jarvis.tasks.set("update-check", () => jarvis.checkForUpdate());
 if (stale.length) console.log(`[boot] cleared stale work: ${stale.join(", ")}`);

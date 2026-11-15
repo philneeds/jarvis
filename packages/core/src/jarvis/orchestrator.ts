@@ -378,10 +378,12 @@ export class Jarvis {
   private async autoShipRefusal(a: Approval): Promise<string | undefined> {
     if (!this.workshop || !(await this.store.settings.get<boolean>(AUTO_SHIP_KEY, false))) return "auto-ship is off";
     const sha = String((a.payload as { sha?: unknown } | undefined)?.sha ?? "");
-    let files: string[];
-    try { files = (await this.workshop.describe(sha)).files; } catch { return "the commit isn't in the workshop"; }
+    let files: string[], carries: string[];
+    try { ({ files, carries } = await this.workshop.describe(sha)); } catch { return "the commit isn't in the workshop"; }
+    // The files of everything it would ship, not only its own: an earlier change underneath goes out with it.
     const rails = files.filter((f) => GUARDRAIL_FILES.test(f));
     if (rails.length) return `it touches guardrails (${rails.join(", ")})`;
+    if (carries.length) return `it sits on ${carries.length} earlier change${carries.length === 1 ? "" : "s"} you haven't shipped (${carries.map((t) => `"${t}"`).join(", ")}), and shipping it ships ${carries.length === 1 ? "that" : "those"} too`;
     const today = new Date().toISOString().slice(0, 10);
     const log = (await this.store.settings.get<string[]>(AUTO_SHIP_LOG_KEY, [])).filter((d) => d.startsWith(today));
     const cap = Number(process.env.AUTO_SHIP_PER_DAY ?? 3);
@@ -391,9 +393,9 @@ export class Jarvis {
   }
 
   /** On boot: report how the last ship went, if one was in flight when HQ restarted. */
-  async finishShip(): Promise<string | undefined> {
+  async finishShip(opts: { wait?: boolean } = {}): Promise<string | undefined> {
     if (!this.workshop) return undefined;
-    const r = await this.workshop.finish(this.store).catch((e) => ({ record: undefined, message: `Couldn't read the last deploy's outcome: ${(e as Error).message}` }));
+    const r = await this.workshop.finish(this.store, opts).catch((e) => ({ record: undefined, message: `Couldn't read the last deploy's outcome: ${(e as Error).message}` }));
     if (!r) return undefined;
     await this.router.log("einstein", r.record?.status === "done" ? "system" : "error", r.message);
     if (r.record?.approvalId) { const a = await this.store.approvals.get(r.record.approvalId); if (a) await this.store.approvals.update(a.id, { note: [a.note, r.message].filter(Boolean).join(" · ") }); }

@@ -11,6 +11,8 @@ set -euo pipefail
 rand() { head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-"${1:-32}"; }
 
 DOMAIN="${DOMAIN:-}"
+# A redeploy keeps the domain HQ was installed on (a custom one must not be swapped for an sslip.io name on the next ship).
+if [[ -z "$DOMAIN" && -f /opt/jarvis/.env ]]; then DOMAIN="$(grep -oP '(?<=^HQ_ORIGIN=https://)[^,/ ]+' /opt/jarvis/.env | head -n1 || true)"; fi
 if [[ -z "$DOMAIN" ]]; then
   # No domain given: use a free sslip.io name built from this server's public IP.
   IP="$(curl -fsS https://api.ipify.org || hostname -I | awk '{print $1}')"
@@ -112,6 +114,30 @@ EOF
   chown "$APP_USER:$APP_USER" "$APP_DIR/.env"; chmod 600 "$APP_DIR/.env"
 fi
 
+SERVICES_UP=0; systemctl is-active -q jarvis-server 2>/dev/null && SERVICES_UP=1
+# Don't cut off an agent mid-run (Einstein editing code, a lead's routine): wait for live runs, up to 65 minutes.
+# That is longer than any run HQ allows (Einstein's code jobs get 60 minutes, everything else 20), so the wait ends
+# when the run does. At 20 minutes it cut off his longer jobs. FORCE=1 skips the wait. Runs older than 70 minutes
+# are ignored; HQ ends every run before that. If the database can't be asked, the wait is skipped, never the deploy.
+# The long wait comes before the build: once the new code is built, the old HQ is serving half-replaced files, so
+# only a short second wait (3 minutes, for a run that started during the build) sits between the build and the restart.
+wait_for_runs() {
+  local tries="${1:-260}"
+  [[ -n "${FORCE:-}" ]] && return 0
+  systemctl is-active -q jarvis-server || return 0
+  local url n i
+  url="$(grep -oP '^DATABASE_URL=\K.*' "$APP_DIR/.env" 2>/dev/null || true)"
+  [[ -z "$url" ]] && return 0
+  for i in $(seq 1 "$tries"); do
+    n="$(psql "$url" -tAc "select count(*) from runs where status='running' and started_at > now() - interval '70 minutes'" 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ -z "$n" || "$n" == "0" ]] && return 0
+    [[ $i -eq 1 ]] && log "Waiting for $n agent run(s) to finish (up to $((tries / 4)) minutes; FORCE=1 to skip)"
+    sleep 15
+  done
+  log "Runs still going after $((tries / 4)) minutes; carrying on (a run cut off by the restart shows as lost and can be asked again)"
+}
+[[ "$SERVICES_UP" == 1 ]] && wait_for_runs 260
+
 log "Build"
 sudo -u "$APP_USER" -H bash -lc "cd $APP_DIR && pnpm install --frozen-lockfile --prod=false >/dev/null && pnpm --filter @jarvis/core build >/dev/null && set -a && . ./.env && set +a && pnpm --filter @jarvis/core db:migrate && pnpm --filter @jarvis/server build >/dev/null && pnpm --filter @jarvis/hq build >/dev/null"
 
@@ -154,7 +180,7 @@ if BRANCH="$BRANCH" bash "$APP/deploy/setup.sh" >> "$LOG" 2>&1 && healthy; then
   echo "== ok" >> "$LOG"; exit 0
 fi
 echo "== failed; rolling back to $PREV" >> "$LOG"
-ERR=$(tail -n 5 "$LOG" | tr -d '"\\' | tr '\n' ' ')
+ERR=$(tail -n 5 "$LOG" | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' | tr -d '"\\' | tr -c '[:print:]' ' ' | cut -c1-600)
 if BRANCH="$BRANCH" REF="$PREV" bash "$APP/deploy/setup.sh" >> "$LOG" 2>&1 && healthy; then
   report false "$(sudo -u jarvis git -C "$APP" rev-parse HEAD)" "$PREV" "$ERR"
 else
@@ -212,25 +238,7 @@ $DOMAIN {
 EOF
 systemctl daemon-reload
 systemctl enable --now jarvis-server jarvis-hq >/dev/null
-# Don't cut off an agent mid-run (Einstein editing code, a lead's routine): wait for live runs, up to 65 minutes.
-# That is longer than any run HQ allows (Einstein's code jobs get 60 minutes, everything else 20), so the wait ends
-# when the run does. At 20 minutes it cut off his longer jobs. FORCE=1 skips the wait. Runs older than 70 minutes
-# are ignored; HQ ends every run before that.
-wait_for_runs() {
-  [[ -n "${FORCE:-}" ]] && return 0
-  systemctl is-active -q jarvis-server || return 0
-  local url n i
-  url="$(grep -oP '^DATABASE_URL=\K.*' "$APP_DIR/.env" 2>/dev/null || true)"
-  [[ -z "$url" ]] && return 0
-  for i in $(seq 1 260); do
-    n="$(psql "$url" -tAc "select count(*) from runs where status='running' and started_at > now() - interval '70 minutes'" 2>/dev/null | tr -d '[:space:]')"
-    [[ -z "$n" || "$n" == "0" ]] && return 0
-    [[ $i -eq 1 ]] && log "Waiting for $n agent run(s) to finish before restarting (up to 65 minutes; FORCE=1 to skip)"
-    sleep 15
-  done
-  log "Runs still going after 65 minutes; restarting anyway (they'll show as lost and can be asked again)"
-}
-wait_for_runs
+[[ "$SERVICES_UP" == 1 ]] && wait_for_runs 12
 systemctl restart jarvis-server jarvis-hq caddy
 
 log "Firewall"

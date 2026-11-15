@@ -78,7 +78,7 @@ test("auto-ship is off until Phil turns it on; then only guardrail-free commits 
   const dir = path.join(root, "workshop");
   const w = new Workshop({ dir, appDir: app, token: "t0ken", deployCmd: `${process.execPath} -e process.exit(0)`, outcomeFile: path.join(root, "out.json"), waitForRunsMs: 0, verify: async () => ({ ok: true, report: "" }) });
   const { store, jarvis } = make(w);
-  await w.prepare("change");
+  const first = await w.prepare("change");
   const commit = async (file: string, msg: string) => { await fs.mkdir(path.dirname(path.join(dir, file)), { recursive: true }); await fs.writeFile(path.join(dir, file), msg); return (await w.commit(msg))!; };
   const ship = (sha: string, title: string) => jarvis.requestApproval({ agentId: "einstein", kind: "config", title: `Ship: ${title}`, body: "", payload: { action: "code.ship", sha, title, guardrails: [] }, runId: `r-${title}` });
   const off = await ship(await commit("apps/hq/app/about/page.tsx", "copy tweak"), "copy tweak");
@@ -88,6 +88,16 @@ test("auto-ship is off until Phil turns it on; then only guardrail-free commits 
   const sneaky = await ship(await commit("packages/core/src/jarvis/rules.ts", "loosen"), "loosen rules");
   assert.equal(sneaky.status, "pending");
   assert.match((await store.approvals.get(sneaky.id))?.note ?? "", /Not auto-shipped: it touches guardrails \(packages\/core\/src\/jarvis\/rules\.ts\)/);
+  // A harmless commit on top of those two doesn't go out on its own either: shipping it would ship them with it.
+  const stacked = await ship(await commit("apps/hq/app/x-stacked.tsx", "stacked"), "stacked");
+  assert.equal(stacked.status, "pending");
+  assert.match((await store.approvals.get(stacked.id))?.note ?? "", /Not auto-shipped: it touches guardrails/, "the guardrail edit underneath counts");
+  const d = await w.describe((stacked.payload as { sha: string }).sha);
+  assert.deepEqual(d.carries, ["loosen", "copy tweak"], "the card can name what rides along");
+  assert.ok(d.files.includes("packages/core/src/jarvis/rules.ts") && d.files.includes("apps/hq/app/x-stacked.tsx"));
+  // A fresh run starts from the deploy branch again; clean single commits go out, three a day.
+  w.release(first.claim);
+  await w.prepare("next change");
   const ok: string[] = [];
   for (const t of ["a", "b", "c", "d"]) ok.push((await ship(await commit(`apps/hq/app/x-${t}.tsx`, t), t)).status);
   assert.deepEqual(ok, ["approved", "approved", "approved", "pending"], "three a day, then Phil decides");
