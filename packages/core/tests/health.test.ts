@@ -28,7 +28,7 @@ test("Apple Health: a payload folds into days; a resend doesn't double; Metro re
   assert.match(s, /2026-11-04: steps 9,200 · resting HR 60 · weight 180\.6 lb · time in daylight 35 · workouts: Traditional Strength Training 50 min 310 kcal/);
   assert.match(s, /last sync under an hour ago/);
   await assert.rejects(ingestHealth(store, { nope: 1 }, now), /not a Health Auto Export payload/);
-  // The tool is on every agent's list; Doc's charter gives it to him by default.
+  // The tool is on every agent's list; Metro's charter gives it to him by default.
   const j = new Jarvis({ store });
   assert.ok(j.allTools().some((t) => t.name === "health_summary"));
 });

@@ -38,6 +38,7 @@ test("the health team is one agent: Metro leads, Doc, Sean and Gordon are retire
   const metro = AGENT_BY_ID["metro"]!;
   assert.equal(metro.layer, 1); assert.equal(metro.parent, "jarvis"); assert.equal(metro.venture, "personal"); assert.equal(metro.phase, 3);
   assert.ok(leads().some((a) => a.id === "metro"), "Metro took Doc's seat among the 12 leads");
+  assert.deepEqual(AGENTS.filter((a) => a.venture === "personal").map((a) => a.id), ["lip", "david", "metro"], "the Personal & health venture is three agents, all under Jarvis");
   assert.equal(teamSize("metro"), 0, "no coaches under him: the coaching is his");
   // Metro reads the Apple Health data himself and each former coach is a playbook in his memory (agent:metro).
   assert.ok(CHARTERS.metro!.tools?.includes("health_summary"));

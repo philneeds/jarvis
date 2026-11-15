@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
  */
 type Provider = "elevenlabs" | "openai" | "groq";
 /** Names the transcriber would otherwise mangle ("Jarvis" came back as "Jerk It"). Whisper-style services take these as a hint. */
-export const VOICE_VOCABULARY = "Jarvis, Monica, Einstein, Oscar, Adam, Joi, Lip, David, Doc, Munger, Buffett, Mayne, Mantis, Pentoshi, Tux, Cat, Ansem, Claw, Lucas, Block, Boo, ncrypt, Jeff, Poseidon, Paul, Mark, Allmin, Justin, Jason, Stella, Karol, Jake, Bill, Stephanie, Frog, Brian, Stevon, House, Marcus, Exxon, Altman, Armstrong. JD PM, ProEdge, Range.cool, Philneeds, Airdrop Acres, Hyperliquid, Kubera, Robinhood, Kalshi, GoHighLevel, Vest Markets, Backed, Grok, Claude. Approve, reject, to-do, watchlist, brief.";
+export const VOICE_VOCABULARY = "Jarvis, Monica, Einstein, Oscar, Adam, Joi, Lip, David, Metro, Munger, Buffett, Mayne, Mantis, Pentoshi, Tux, Cat, Ansem, Claw, Lucas, Block, Boo, ncrypt, Jeff, Poseidon, Paul, Mark, Allmin, Justin, Jason, Stella, Karol, Jake, Bill, Stephanie, Frog, Brian, Stevon, House, Marcus, Exxon, Altman, Armstrong. JD PM, ProEdge, Range.cool, Philneeds, Airdrop Acres, Hyperliquid, Kubera, Robinhood, Kalshi, GoHighLevel, Vest Markets, Backed, Grok, Claude. Approve, reject, to-do, watchlist, brief.";
 /** The services with a key, in the order they're tried. STT_PROVIDER pins one. */
 export function transcriptionProviders(): Provider[] {
   const all: Provider[] = [];

@@ -13,7 +13,7 @@ export const VENTURE_DASH: Record<VentureId, VentureDash> = {
     records: [{ kind: "upgrade", label: "Proposed upgrades (Einstein)", statuses: ["proposed", "approved", "done", "dropped"], fields: [{ key: "why", label: "Why" }, { key: "effort", label: "Effort" }] }],
   },
   personal: {
-    blurb: "Lip, David and Doc's team: life, goals and health.",
+    blurb: "Lip, David and Metro: life, goals and health.",
     metrics: [{ key: "sleep_hours", label: "Sleep", unit: "h", good: "up" }, { key: "workouts_week", label: "Workouts / week", unit: "n", good: "up" }, { key: "weight_lb", label: "Weight", unit: "n" }, { key: "recovery", label: "Recovery", unit: "%", good: "up" }],
     records: [{ kind: "goal", label: "Goals (David)", statuses: ["set", "on track", "slipping", "done"], fields: [{ key: "by", label: "By", type: "date" }, { key: "next", label: "Next step" }] }],
   },

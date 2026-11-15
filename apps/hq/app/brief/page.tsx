@@ -29,7 +29,7 @@ export default function BriefPage() {
           <span className="text-[12px]" style={{ color: "var(--muted)" }}>{brief ? fmtTime(brief.at) : "none yet"}</span>
           <button className="btn btn-sm btn-primary ml-auto" disabled={busy} onClick={run}>{busy ? "Jarvis is writing…" : "Run now"}</button>
         </div>
-        <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>Jarvis&apos;s morning rundown: Monica&apos;s day, Munger&apos;s money, Stella&apos;s leads, Mantis&apos;s markets, Doc&apos;s health. Runs on its own every morning (BRIEF_AT); leads that aren&apos;t live yet say so.</p>
+        <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>Jarvis&apos;s morning rundown: Monica&apos;s day, Munger&apos;s money, Stella&apos;s leads, Mantis&apos;s markets, Metro&apos;s health. Runs on its own every morning (BRIEF_AT); leads that aren&apos;t live yet say so.</p>
         {err && <p className="m-0 text-[12px]" style={{ color: "var(--red)" }}>{err}</p>}
         {brief ? <article className="card text-[13px] leading-relaxed whitespace-pre-wrap"><Md text={brief.text} /></article> : <div className="card text-center py-10" style={{ color: "var(--muted)" }}>No brief yet. Jarvis writes one every morning{at ? ` at ${at}` : ""}; press Run now for today&apos;s.</div>}
         {history.length > 1 && (

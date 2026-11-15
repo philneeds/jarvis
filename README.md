@@ -1,6 +1,6 @@
 # Jarvis
 
-One front door to Phil's web of 52 specialist agents across nine ventures. Phil talks to Jarvis in **HQ**, a private phone-first web app; Jarvis routes work to agents, each on the model that fits it, and anything that moves money, posts publicly or messages a customer waits for Phil's OK.
+One front door to Phil's web of 47 specialist agents across nine ventures. Phil talks to Jarvis in **HQ**, a private phone-first web app; Jarvis routes work to agents, each on the model that fits it, and anything that moves money, posts publicly or messages a customer waits for Phil's OK.
 
 This is **Phase 0 — Foundation** of the [scope outline](https://claude.ai/artifact/DVX4ekT1tjMJuaN3je54vp): the web terminal, Jarvis, the model router (Claude + Grok, others pluggable), shared memory, the action log, the approval queue, and the five MVP screens (Command, Agent Web, Approvals, Activity log, Usage). Gate: Phil can ask Jarvis something and get an answer from a Claude agent and a Grok agent.
 
@@ -143,4 +143,4 @@ pnpm db:generate   # after changing packages/core/src/db/schema.ts
 
 ## Open questions (from the scope doc)
 
-Which Claude and Grok plans exactly; what other AI plans or keys exist; JD PM's CRM, scheduling and invoicing tools; a name and domain for HQ, push vs Telegram for approvals; the Memecoin Analyzer stack; which cloud server; how Doc gets health data.
+Which Claude and Grok plans exactly; what other AI plans or keys exist; JD PM's CRM, scheduling and invoicing tools; a name and domain for HQ, push vs Telegram for approvals; the Memecoin Analyzer stack; which cloud server; how Metro gets health data (answered: Apple Health, via the Health Auto Export app).

@@ -806,6 +806,13 @@ test("Jarvis knows how HQ itself works", async () => {
   const p = jarvisSystemPrompt([], "ok");
   assert.match(p, /clap on\/off button at the bottom enables clap-to-wake/);
   assert.match(p, /\/voice on\|off/);
+  // The agent count is read off the registry, so a fold never leaves the prompt a few agents out of date.
+  const { AGENTS, briefPrompt, agentSystemPrompt, getAgent } = await import("../src/index.js");
+  assert.match(p, new RegExp(`web of ${AGENTS.length - 1} specialist agents`));
+  // Health is Metro's since the Nov 14 2026 fold: no prompt still points at Doc.
+  const brief = briefPrompt({ pending: 0, working: [], errors: [], recent: [], reports: [] }, new Date());
+  for (const text of [p, brief, agentSystemPrompt(getAgent("monica")!, [])]) assert.doesNotMatch(text, /\bDoc\b/);
+  assert.match(brief, /Metro's health/);
 });
 
 test("one agent can file research into another's brain, and Phil can add to any agent's memory with /brain", async () => {

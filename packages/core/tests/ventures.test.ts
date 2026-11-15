@@ -31,6 +31,19 @@ test("an agent's reply feeds its venture dashboard; unknown kinds and statuses a
   assert.equal((await store.records.list("jdpm")).length, 1);
 });
 
+test("the Personal & health tab is Lip, David and Metro, with Joi helping; a stale agent_state row for Doc can't bring him back (Phil, Nov 14 2026)", async () => {
+  const { jarvis, store } = make();
+  // The live DB still carries Doc's idle agent_state row from before the fold; the tab lists the registry, not the table.
+  await store.agentState.set("doc", { status: "idle" });
+  const d = await jarvis.ventureDashboard("personal");
+  assert.deepEqual(d.agents.filter((a) => a.venture === "personal").map((a) => a.id), ["lip", "david", "metro"]);
+  assert.deepEqual(d.agents.filter((a) => a.venture !== "personal").map((a) => a.id), ["joi"], "Joi serves the tab from Command and shows as helping");
+  assert.ok(!d.agents.some((a) => ["doc", "sean", "gordon"].includes(a.id)));
+  assert.match(d.blurb, /Metro/); assert.doesNotMatch(d.blurb, /Doc/);
+  const personal = (await jarvis.ventureSummaries()).find((s) => s.venture.id === "personal")!;
+  assert.equal(personal.agents, 3);
+});
+
 test("summaries cover every venture and the board tool reads back", async () => {
   const { jarvis, store } = make();
   await jarvis.recordMetric("money", "net_worth", 125000, "phil");

@@ -315,7 +315,7 @@ export default function HomePage() {
               <div className="flex items-center gap-3 order-2 lg:order-1">
                 {!minimal && <>
                   <div className="w-11 h-11 rounded-full border-2 flex items-center justify-center" style={{ borderColor: "var(--accent)", boxShadow: "0 0 12px rgba(124,196,255,0.6)" }}><span className="display font-bold text-lg" style={{ color: "var(--ink-strong)" }}>P</span></div>
-                  <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.12em]"><span style={{ color: "var(--ink-strong)" }}>PHIL</span><span style={{ color: "var(--muted)" }}>RECOVERY — · DOC</span></div>
+                  <div className="flex flex-col gap-0.5 text-[11px] tracking-[0.12em]"><span style={{ color: "var(--ink-strong)" }}>PHIL</span><span style={{ color: "var(--muted)" }}>RECOVERY — · METRO</span></div>
                 </>}
               </div>
               <div className="order-1 lg:order-2 w-full max-w-2xl justify-self-center min-w-0">{!minimal && <Objective />}</div>
