@@ -65,6 +65,16 @@ export const looksLikeRunReport = (title: string) =>
   /\bno new\b|\bnothing new\b|\b(could|did) not run\b|\(\s*\d{1,2}:\d{2}\s*run\s*\)/i.test(title)
   || /^(daily|morning|nightly|weekly)\s+[\w-]+\s+(check|run|scan|sweep|review)\b/i.test(title)
   || /^[\w-]+(\s+[\w-]+)?\s+(check|run|scan|sweep)\s+\d{4}-\d{2}-\d{2}\b/i.test(title);
+/** An agent's way of saying "this one is a copy": "DUPLICATE – Mick Kuberka (see a223ae20)". */
+export const isDuplicateMark = (title: string) => /^\s*duplicate\b/i.test(title);
+/** Who or what an item is about: the part of the title before " – ", " - " or a comma, lower-cased. */
+const itemKey = (title: string) => title.split(/\s[–—-]\s|,/)[0]!.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const digits = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v).replace(/\D/g, "") : "");
+/** The item already on the board that a new entry is about: the same phone number, or the same name. */
+function sameItem(items: RecordItem[], r: { title: string; fields?: Record<string, unknown> }): RecordItem | undefined {
+  const phone = digits(r.fields?.phone).slice(-10), key = itemKey(r.title);
+  return items.find((x) => (phone.length >= 7 && digits(x.fields.phone).slice(-10) === phone) || (key.length >= 3 && itemKey(x.title) === key));
+}
 /** A goal can belong to any venture with a building: not Jarvis himself. */
 const goalVenture = (v: string) => v !== "root" && Object.prototype.hasOwnProperty.call(VENTURES, v);
 
@@ -92,18 +102,20 @@ export class Jarvis {
   async pruneRunReports(): Promise<number> {
     const gone: RecordItem[] = [];
     for (const v of Object.keys(VENTURE_DASH) as VentureId[]) {
-      for (const r of await this.store.records.list(v)) {
-        if (r.source === "phil" || !looksLikeRunReport(r.title)) continue;
-        await this.store.records.remove(r.id);
-        gone.push(r);
-      }
+      for (const r of await this.store.records.list(v)) if (r.source !== "phil" && (looksLikeRunReport(r.title) || isDuplicateMark(r.title))) gone.push(r);
     }
     if (!gone.length) return 0;
-    const kept = await this.store.settings.get<RecordItem[]>("records.pruned", []);
-    await this.store.settings.set("records.pruned", [...kept, ...gone].slice(-500));
-    for (const v of new Set(gone.map((r) => r.venture))) bus.emitEvent({ type: "venture", venture: v });
-    await this.router.log("jarvis", "system", `Took ${gone.length} run summar${gone.length === 1 ? "y" : "ies"} off the boards (they weren't leads, jobs or posts): ${gone.slice(0, 5).map((r) => `"${r.title.slice(0, 60)}"`).join(", ")}${gone.length > 5 ? "…" : ""}`);
+    await this.archiveRecords(gone, "run summaries and items agents marked as duplicates");
     return gone.length;
+  }
+
+  /** Take items off their boards, keeping a copy under settings "records.pruned" (nothing is lost) and saying so in the log. */
+  private async archiveRecords(items: RecordItem[], why: string): Promise<void> {
+    for (const r of items) await this.store.records.remove(r.id);
+    const kept = await this.store.settings.get<RecordItem[]>("records.pruned", []);
+    await this.store.settings.set("records.pruned", [...kept, ...items].slice(-500));
+    for (const v of new Set(items.map((r) => r.venture))) bus.emitEvent({ type: "venture", venture: v });
+    await this.router.log("jarvis", "system", `Took ${items.length} item${items.length === 1 ? "" : "s"} off the boards (${why}): ${items.slice(0, 5).map((r) => `"${r.title.slice(0, 60)}"`).join(", ")}${items.length > 5 ? "…" : ""}`);
   }
 
   async clearStaleWork(): Promise<string[]> {
@@ -719,8 +731,30 @@ export class Jarvis {
     if (!VENTURES[r.venture]) throw new Error(`no such venture: ${r.venture}`);
     const def = recordKind(r.venture, r.kind);
     if (!def) throw new Error(`${VENTURES[r.venture].label} has no record kind "${r.kind}" (has: ${VENTURE_DASH[r.venture].records.map((k) => k.kind).join(", ") || "none"})`);
-    const existing = r.id ? await this.store.records.get(r.id) : undefined;
+    const agent = r.source !== "phil";
+    let existing = r.id ? await this.store.records.get(r.id) : undefined;
+    // An agent marking an item as a duplicate means "take this one off": it's archived, not renamed and left on the board.
+    if (agent && isDuplicateMark(r.title)) {
+      if (existing) await this.archiveRecords([existing], `${getAgent(r.source)?.name ?? r.source} marked a duplicate`);
+      return existing;
+    }
+    // An agent logging someone already on the board updates that item instead of adding the same person again.
+    let merged = false;
+    if (agent && !existing) {
+      existing = sameItem(await this.store.records.list(r.venture, r.kind), r);
+      merged = !!existing;
+    }
     const now = new Date().toISOString();
+    if (merged && existing) {
+      // Keep what's there (title, status: re-logging "Mike Tracy" must not turn a won job back into new); only fill gaps.
+      const fill = Object.fromEntries(Object.entries(r.fields ?? {}).filter(([k, v]) => v !== undefined && v !== "" && (existing!.fields[k] === undefined || existing!.fields[k] === "")));
+      if (!Object.keys(fill).length) return existing;
+      const item = { ...existing, fields: { ...existing.fields, ...fill }, updatedAt: now };
+      await this.store.records.upsert(item);
+      await this.router.log(r.source, "memory", `${VENTURES[r.venture].short} · ${def.label.split(" (")[0]}: ${item.title} was already on the board; added ${Object.keys(fill).join(", ")}`, runId, { venture: r.venture, kind: r.kind, id: item.id });
+      bus.emitEvent({ type: "venture", venture: r.venture });
+      return item;
+    }
     const status = r.status && def.statuses.includes(r.status) ? r.status : existing?.status ?? def.statuses[0]!;
     const item = { id: existing?.id ?? r.id ?? randomUUID(), venture: r.venture, kind: r.kind, title: r.title || existing?.title || "(untitled)", status, fields: { ...(existing?.fields ?? {}), ...(r.fields ?? {}) }, source: r.source, createdAt: existing?.createdAt ?? now, updatedAt: now };
     await this.store.records.upsert(item);

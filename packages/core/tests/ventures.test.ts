@@ -84,3 +84,36 @@ test("run summaries already on the boards are taken off on start; Phil's own ent
   assert.deepEqual((await store.settings.get<{ id: string }[]>("records.pruned", [])).map((r) => r.id).sort(), ["a", "b"], "kept, not lost");
   assert.equal(await jarvis.pruneRunReports(), 0, "a second start finds nothing");
 });
+
+test("duplicates: an agent re-logging someone updates them, a DUPLICATE mark takes the copy off, and old marks are cleared on start", async () => {
+  const { Jarvis, ModelRouter, memoryStore, mockProvider, isDuplicateMark } = await import("../src/index.js");
+  assert.equal(isDuplicateMark("DUPLICATE – Mick Kuberka (see a223ae20)"), true);
+  assert.equal(isDuplicateMark("Duplicate check for Tracy"), true);
+  assert.equal(isDuplicateMark("Mick Kuberka – duplicate roof quote"), false);
+  const store = memoryStore();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
+  const tracy = (await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "Mike Tracy – roof only, 260 Longridge Ave", status: "won", fields: { phone: "585-621-2237" }, source: "karol" }))!;
+  // Same person by name, and by phone: no new row, nothing downgraded, gaps filled.
+  const again = await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "Mike Tracy", status: "new", fields: { source: "info@ mailbox" }, source: "karol" });
+  assert.equal(again!.id, tracy.id);
+  await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "M. Tracy (roof)", fields: { phone: "(585) 621-2237", source: "ignored, already set" }, source: "stella" });
+  let leads = await store.records.list("jdpm", "lead");
+  assert.equal(leads.length, 1);
+  assert.equal(leads[0]!.status, "won", "re-logging never turns a won lead back into new");
+  assert.equal(leads[0]!.fields.source, "info@ mailbox");
+  assert.equal(leads[0]!.title, "Mike Tracy – roof only, 260 Longridge Ave");
+  // Phil adding by hand is never merged: he may mean a second job for the same customer.
+  await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", title: "Mike Tracy – gutters", source: "phil" });
+  leads = await store.records.list("jdpm", "lead");
+  assert.equal(leads.length, 2);
+  // An agent marking a copy as a duplicate takes it off the board (kept in the archive).
+  const copy = leads.find((l) => l.title === "Mike Tracy – gutters")!;
+  await jarvis.upsertRecord({ venture: "jdpm", kind: "lead", id: copy.id, title: "DUPLICATE – Mike Tracy (see b9ad269e)", source: "karol" });
+  assert.equal((await store.records.list("jdpm", "lead")).length, 1);
+  assert.ok((await store.settings.get<{ id: string }[]>("records.pruned", [])).some((r) => r.id === copy.id));
+  // Marks left on the board from before are cleared on start.
+  const now = new Date().toISOString();
+  await store.records.upsert({ id: "old", venture: "jdpm", kind: "lead", title: "DUPLICATE – Mick Kuberka (see a223ae20)", status: "quoted", fields: {}, source: "karol", createdAt: now, updatedAt: now });
+  assert.equal(await jarvis.pruneRunReports(), 1);
+  assert.equal((await store.records.list("jdpm", "lead")).length, 1);
+});
