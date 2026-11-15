@@ -19,7 +19,12 @@ export type JarvisEvent =
   | { type: "attention"; item: AttentionItem; change: "raised" | "done" | "snoozed" | "reopened" | "edited" }
   | { type: "goals"; goals: Goal[] }
   /** Trophies, levels, today's three or the streak changed: screens that show them fetch the summary again. */
-  | { type: "base" };
+  | { type: "base" }
+  /** An agent did something reversible on its own, or Phil undid one. */
+  | { type: "autodone" };
+
+/** Something an agent did on its own because HQ can put it back. `snapshot` is what it looked like before. */
+export interface AutoDone { id: string; at: string; approvalId: string; agentId: string; title: string; action: string; outcome: string; snapshot?: unknown; after?: string; undone?: { at: string; result: string } }
 
 /** How far out a goal sits. */
 export type Horizon = "long" | "mid" | "short";

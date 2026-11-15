@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLive } from "@/lib/live";
 import { api, post } from "@/lib/api";
 import { LEVEL_NAME, horizonOf, useBase } from "@/lib/base";
+import { useAutoDone } from "@/components/DonePanel";
 import type { AgentLive, Approval, AttentionItem } from "@/lib/types";
 import type { CoreState } from "@/components/Core";
 import { approveLabel } from "@/components/ApprovalsPanel";
@@ -185,6 +186,8 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const { base, goals, toggle, repick } = useBase();
+  const { data: autoDone } = useAutoDone();
+  const doneToday = (autoDone?.items ?? []).filter((x) => !x.undone && Date.now() - Date.parse(x.at) < 86_400_000).length;
   const [menu, setMenu] = useState<"today" | "health" | null>(null);
   const [ready, setReady] = useState<{ phase: number; agents: Ready[] } | null>(null);
   const levels = base?.levels;
@@ -298,6 +301,7 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
     <section aria-label="Your base" className="w-full flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2 text-[11px] tracking-[0.14em] uppercase">
         <Link href="/attention" className="base-chip" style={waiting ? { borderColor: "var(--amber)", color: "var(--amber)" } : undefined}>{waiting} need you ›</Link>
+        {doneToday > 0 && <Link href="/attention#done" className="base-chip" style={{ borderColor: "var(--green)", color: "var(--green)" }} title="Reversible work agents did on their own in the last day; each can be undone">{doneToday} done for you ›</Link>}
         <div className="relative">
           <button className="base-chip" aria-expanded={menu === "health"} onClick={() => setMenu(menu === "health" ? null : "health")} style={{ borderColor: problems.length ? "var(--red)" : "var(--green)", color: problems.length ? "var(--red)" : "var(--green)" }}>{problems.length ? `${problems.length} problem${problems.length === 1 ? "" : "s"} ▾` : "Healthy ▾"}</button>
           {menu === "health" && (

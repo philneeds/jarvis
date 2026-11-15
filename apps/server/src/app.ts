@@ -492,6 +492,15 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     ship: await jarvis.store.settings.get(SHIP_KEY, null),
     startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
   }));
+  // Done for you: reversible work agents did on their own, with Undo; and Phil's switch for it.
+  api.get("/autodone", async (c) => c.json({ on: await jarvis.reversibleOn(), items: await jarvis.autoDone(Number(c.req.query("limit") ?? 50)) }));
+  api.post("/autodone/:id/undo", async (c) => { const r = await jarvis.undoAuto(c.req.param("id")); return c.json(r, r.ok ? 200 : r.result === "not found" ? 404 : 409); });
+  api.post("/autonomy", async (c) => {
+    const p = z.object({ reversible: z.boolean() }).strict().safeParse(await c.req.json().catch(() => ({})));
+    if (!p.success) return c.json({ error: "reversible: true or false" }, 400);
+    await jarvis.setReversible(p.data.reversible);
+    return c.json({ on: p.data.reversible });
+  });
   // Phil's auto-ship switch for Einstein's guardrail-free changes; and "check for an update now".
   api.post("/workshop/autoship", async (c) => {
     const p = z.object({ on: z.boolean() }).safeParse(await c.req.json().catch(() => ({})));

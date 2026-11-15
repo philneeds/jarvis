@@ -22,6 +22,8 @@ export default function SettingsPage() {
   const [googleMsg, setGoogleMsg] = useState<string>();
 
   const [wsMsg, setWsMsg] = useState<string>();
+  const [reversible, setReversible] = useState<boolean | null>(null);
+  useEffect(() => { api<{ on: boolean }>("/api/autodone?limit=1").then((r) => setReversible(r.on)).catch(() => undefined); }, []);
   const load = () => Promise.all([
     api<{ passkeys: Passkey[]; rpID: string }>("/api/passkeys").then((r) => { setPasskeys(r.passkeys); setRpID(r.rpID); }),
     api<Connectors>("/api/connectors").then(setConn),
@@ -127,6 +129,13 @@ export default function SettingsPage() {
             {bk?.last?.error && <p className="m-0 pl-5" style={{ color: "var(--red)" }}>{bk.last.error}</p>}
             {bkMsg && <p className="m-0 pl-5" style={{ color: /FAILED|error/i.test(bkMsg) ? "var(--red)" : "var(--ink)" }}>{bkMsg}</p>}
           </div>
+        </section>
+        <section id="autonomy" className="card flex flex-col gap-3 scroll-mt-20" aria-label="Agents on their own">
+          <span className="label">Agents on their own</span>
+          <label className="flex items-start gap-2 cursor-pointer text-[12px]">
+            <input type="checkbox" className="mt-0.5" checked={reversible ?? true} disabled={reversible === null} onChange={async (e) => { const on = e.target.checked; setReversible(on); await post("/api/autonomy", { reversible: on }).catch(() => setReversible(!on)); }} />
+            <span><b>Let agents do reversible work without asking.</b> Oscar tidying memory, filing or labelling mail (200 messages at a time), David ticking goals and picking today&apos;s three. Each lands under <Link href="/attention#done">Needs you → Done for you</Link> with an Undo button. A change too big to undo comfortably (dropping more than half of memory) still waits. Sending, posting, spending, trashing mail, calendar and GoHighLevel changes, and code always wait.</span>
+          </label>
         </section>
         <section className="card flex flex-col gap-3" aria-label="Build phase">
           <span className="label">Build phase</span>

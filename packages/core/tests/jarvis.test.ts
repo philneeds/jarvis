@@ -132,9 +132,14 @@ test("tools answer from the store", async () => {
   assert.match(await s.handler({}, { store, agentId: "stella" }), /Everyone idle/);
 });
 
-test("Oscar condenses memory through an approval that executes on approve", async () => {
+test("Oscar condenses memory on his own (reversible), or through an approval when Phil turns that off", async () => {
   const { jarvis, store } = make();
   for (let i = 0; i < 6; i++) await store.memory.set({ scope: "phil", key: `k${i}`, value: `v${i}` });
+  assert.equal(await jarvis.condenseMemory(), "Memory condensed.");
+  assert.equal((await store.memory.list()).length, 3);
+  assert.equal((await jarvis.autoDone())[0]!.action, "memory.replace");
+  for (let i = 0; i < 6; i++) await store.memory.set({ scope: "phil", key: `k${i}`, value: `v${i}` });
+  await store.settings.set(Jarvis.REVERSIBLE_KEY, false);
   const msg = await jarvis.condenseMemory();
   assert.match(msg, /waiting in Needs you/);
   const pending = await store.approvals.list("pending");
@@ -448,9 +453,10 @@ test("when the web is paused, the reply is still marked final so the chat never 
   assert.equal(last.kind, "final");
 });
 
-test("Oscar's rule: every plan waits for Phil, and approving it carries it out", async () => {
+test("Oscar's rule: with reversible work switched off, every plan waits for Phil, and approving it carries it out", async () => {
   const { jarvis, store } = make();
   const { setAgentConfig } = await import("../src/index.js");
+  await store.settings.set(Jarvis.REVERSIBLE_KEY, false);
   // A saved setting that would auto-approve archives can't get around the rule.
   await setAgentConfig(store, "oscar", { rules: { autoApprove: ["record"], maxAutoDollars: 0, maxAutoItems: 1000 } });
   let archived = 0;

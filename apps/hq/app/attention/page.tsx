@@ -5,8 +5,9 @@ import { Shell } from "@/components/Shell";
 import { useLive } from "@/lib/live";
 import { ApprovalsPanel } from "@/components/ApprovalsPanel";
 import { TodoPanel } from "@/components/TodoPanel";
+import { DonePanel, useAutoDone } from "@/components/DonePanel";
 
-type Section = "approve" | "todo";
+type Section = "approve" | "todo" | "done";
 
 /**
  * Everything waiting on Phil: Approve (drafts) and To do (things only he can do), one tab at a time. The tab with
@@ -22,7 +23,7 @@ export default function NeedsYouPage() {
 
   // #approve / #todo (from the home screen, Telegram, old links) pick the tab; ?tab=decided opens finished approvals.
   useEffect(() => {
-    const read = () => { const h = window.location.hash.slice(1); if (h === "approve" || h === "todo") setChosen(h); };
+    const read = () => { const h = window.location.hash.slice(1); if (h === "approve" || h === "todo" || h === "done") setChosen(h); };
     read();
     if (new URLSearchParams(window.location.search).get("tab") === "decided") { setChosen("approve"); setFinished(true); }
     window.addEventListener("hashchange", read);
@@ -33,7 +34,10 @@ export default function NeedsYouPage() {
   const [first, setFirst] = useState<Section | null>(null);
   useEffect(() => { if (loaded && !first) setFirst(toApprove > 0 ? "approve" : "todo"); }, [loaded, first, toApprove]);
   const active: Section = chosen ?? first ?? "todo";
-  const order: Section[] = (first ?? "todo") === "approve" ? ["approve", "todo"] : ["todo", "approve"];
+  const order: Section[] = [...((first ?? "todo") === "approve" ? ["approve", "todo"] as const : ["todo", "approve"] as const), "done"];
+  // Things agents did on their own in the last day, shown as a count on the third tab.
+  const { data: done } = useAutoDone();
+  const doneToday = (done?.items ?? []).filter((x) => !x.undone && Date.now() - Date.parse(x.at) < 86_400_000).length;
   const pick = (s: Section) => { setChosen(s); history.replaceState(null, "", `#${s}`); };
 
   const summary = !loaded
@@ -50,21 +54,21 @@ export default function NeedsYouPage() {
         <div className="flex flex-wrap items-center gap-3 sticky top-0 py-1.5 -my-1.5" style={{ zIndex: 10, background: "rgba(5,12,32,0.92)", backdropFilter: "blur(6px)" }}>
           <nav className="tabs flex-1 min-w-56" aria-label="Sections" role="tablist">
             {order.map((s) => {
-              const n = s === "approve" ? toApprove : toDo;
+              const n = s === "approve" ? toApprove : s === "todo" ? toDo : 0;
               return (
                 <button key={s} role="tab" aria-selected={active === s} aria-controls={s} onClick={() => pick(s)} style={active === s ? { borderColor: "var(--accent)", color: "var(--ink-bright)", background: "rgba(60,130,255,0.25)" } : undefined}>
-                  {s === "approve" ? "Approve" : "To do"}{n > 0 && <span className="badge">{n}</span>}
+                  {s === "approve" ? "Approve" : s === "todo" ? "To do" : `Done for you${doneToday ? ` · ${doneToday}` : ""}`}{n > 0 && <span className="badge">{n}</span>}
                 </button>
               );
             })}
           </nav>
-          <label className="flex items-center gap-2 text-[11px] tracking-[0.12em] uppercase cursor-pointer min-h-9" style={{ color: finished ? "var(--ink-bright)" : "var(--muted)" }}>
+          {active !== "done" && <label className="flex items-center gap-2 text-[11px] tracking-[0.12em] uppercase cursor-pointer min-h-9" style={{ color: finished ? "var(--ink-bright)" : "var(--muted)" }}>
             <input type="checkbox" checked={finished} onChange={(e) => setFinished(e.target.checked)} />
             Show finished
-          </label>
+          </label>}
         </div>
         <div role="tabpanel">
-          {active === "approve" ? <ApprovalsPanel tab={finished ? "decided" : "pending"} /> : <TodoPanel showDone={finished} />}
+          {active === "approve" ? <ApprovalsPanel tab={finished ? "decided" : "pending"} /> : active === "todo" ? <TodoPanel showDone={finished} /> : <DonePanel />}
         </div>
       </div>
     </Shell>

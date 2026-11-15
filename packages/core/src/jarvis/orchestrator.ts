@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { bus, type Approval, type AttentionItem, type BaseSummary, type ChatMessage, type Goal, type Benchmark, type Horizon, type SystemStatus, type Today, type Trophy } from "../events.js";
+import { bus, type Approval, type AttentionItem, type AutoDone, type BaseSummary, type ChatMessage, type Goal, type Benchmark, type Horizon, type SystemStatus, type Today, type Trophy } from "../events.js";
 import { HORIZONS, philDay, pickToday, reconcileToday, streakOf, syncTrophies, ventureLevels, type TodayLog } from "../progress.js";
 import { AGENTS, CHARTERS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
 import { ModelRouter } from "../router/index.js";
@@ -53,8 +53,8 @@ export function spokenAddress(text: string): RegExpMatchArray | null {
   return [m[0]!, agent.id, m[2]!] as unknown as RegExpMatchArray;
 }
 
-export { isOutbound, alwaysWaits } from "./rules.js";
-import { isOutbound, alwaysWaits } from "./rules.js";
+export { isOutbound, alwaysWaits, isReversible } from "./rules.js";
+import { isOutbound, alwaysWaits, isReversible } from "./rules.js";
 
 /** Something Phil deleted, kept for a while so he can undo it. */
 interface TrashEntry { id: string; at: string; kind: "memory" | "record" | "metric" | "goal"; label: string; data: unknown; index?: number }
@@ -226,13 +226,17 @@ export class Jarvis {
   onApproved(action: string, fn: Executor) { this.executors.set(action, fn); }
 
   /** Plug in a connector: its tools become available in agent settings, its actions run on approval. */
-  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer>; normalize?: Normalizer }, hint?: string) {
+  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer>; normalize?: Normalizer; undoers?(): Record<string, (a: Approval) => Promise<string>> }, hint?: string) {
+    for (const [k, fn] of Object.entries(c.undoers?.() ?? {})) this.undoers.set(k, fn);
     for (const t of c.tools()) this.connectorTools.set(t.name, t);
     for (const [k, fn] of Object.entries(c.executors())) this.executors.set(k, fn);
     for (const [k, fn] of Object.entries(c.describe?.() ?? {})) this.describers.set(k, fn);
     if (c.normalize) this.normalizers.push(c.normalize.bind(c));
     if (hint) this.promptHints.push(hint);
   }
+
+  /** How to put back a connector's action (Gmail archive and label), for the ones agents ran on their own. */
+  private undoers = new Map<string, (a: Approval) => Promise<string>>();
 
   /** Connectors fill in what an agent left implicit (for example which account sends) before Phil sees the card. */
   private normalizers: Normalizer[] = [];
@@ -933,6 +937,107 @@ export class Jarvis {
     return { goal: goal!, undoId };
   }
 
+  // ---- Done for you: reversible work agents do on their own --------------------
+
+  static REVERSIBLE_KEY = "autonomy.reversible";
+  static AUTODONE_KEY = "autodone";
+  /** Phil's switch (Settings). On unless he turns it off. */
+  async reversibleOn(): Promise<boolean> { return (await this.store.settings.get<boolean>(Jarvis.REVERSIBLE_KEY, true)) !== false; }
+  async setReversible(on: boolean): Promise<void> {
+    await this.store.settings.set(Jarvis.REVERSIBLE_KEY, on);
+    await this.router.log("jarvis", "system", `Phil turned reversible work ${on ? "on: agents tidy memory, file mail, tick goals and pick today's three on their own, each with Undo" : "off: those wait for him again"}`);
+  }
+
+  /** A reversible change that is still too big to make alone. Returns why it waits, or nothing. */
+  private async tooBigToRunAlone(a: Approval): Promise<string | undefined> {
+    const p = (a.payload ?? {}) as { action?: string; keep?: unknown[]; ids?: unknown[]; max?: unknown; query?: unknown };
+    if (p.action === "memory.replace") {
+      const now = (await this.store.memory.list()).length, keep = Array.isArray(p.keep) ? p.keep.length : 0;
+      if (!keep) return "it would empty memory";
+      if (now >= 6 && keep < now / 2) return `it drops more than half of memory (${now} → ${keep})`;
+    }
+    if (p.action?.startsWith("gmail.")) {
+      // 200 messages at a time, or less if Phil set a lower cap for this agent.
+      const cap = Math.min(200, (await getAgentConfig(this.store, a.agentId)).rules.maxAutoItems ?? 200);
+      const n = Array.isArray(p.ids) && p.ids.length ? p.ids.length : Number(p.max ?? 200);
+      if (n > cap) return `it touches up to ${n} messages; ${cap} at a time is the limit for doing it alone`;
+    }
+    return undefined;
+  }
+
+  /** What an HQ-internal action changes, captured before it runs so Undo can put it back exactly. */
+  private async snapshotFor(a: Approval): Promise<unknown> {
+    const action = (a.payload as { action?: string } | undefined)?.action;
+    if (action === "memory.replace") return { memory: await this.store.memory.list() };
+    if (action?.startsWith("goals.")) return { goals: await this.goalList(), trophies: await this.trophies() };
+    if (action === "today.set") return { today: await this.store.settings.get<Today | null>("today", null) };
+    return undefined;
+  }
+
+  private async runReversible(approval: Approval): Promise<Approval> {
+    // A deep copy: the stores hand back live objects that the action is about to change.
+    const snapshot = structuredClone(await this.snapshotFor(approval));
+    const who = getAgent(approval.agentId)?.name ?? approval.agentId;
+    await this.router.log(approval.agentId, "approval", `${who}: "${approval.title}" done on its own (reversible; Undo is under Done for you)`, approval.runId, { kind: approval.kind });
+    const done = (await this.decide(approval.id, "approved", "auto: reversible, Undo under Done for you")) ?? approval;
+    const failed = /^Failed to execute/.test(done.note ?? "") || /Failed to execute/.test(done.note ?? "");
+    if (!failed) {
+      const list = await this.store.settings.get<AutoDone[]>(Jarvis.AUTODONE_KEY, []);
+      const action = String((done.payload as { action?: unknown } | undefined)?.action ?? "");
+      // What goals looked like right after, so Undo can tell if anyone changed them since.
+      const after = action.startsWith("goals.") ? JSON.stringify(await this.goalList()) : undefined;
+      const entry: AutoDone = { id: randomUUID(), at: new Date().toISOString(), after, approvalId: done.id, agentId: done.agentId, title: done.title, action, outcome: (done.note ?? "").split(" · ").pop() ?? "", snapshot: snapshot ?? (action.startsWith("gmail.") ? { payload: done.payload } : undefined) };
+      await this.store.settings.set(Jarvis.AUTODONE_KEY, [entry, ...list].slice(0, 200));
+      bus.emitEvent({ type: "autodone" });
+    }
+    return done;
+  }
+
+  /** What agents did on their own, newest first. Snapshots stay on the server. */
+  async autoDone(limit = 50): Promise<Omit<AutoDone, "snapshot">[]> {
+    return (await this.store.settings.get<AutoDone[]>(Jarvis.AUTODONE_KEY, [])).slice(0, limit).map(({ snapshot: _s, after: _a, ...rest }) => rest);
+  }
+
+  /** Put back one thing an agent did on its own. */
+  async undoAuto(id: string): Promise<{ ok: boolean; result: string }> {
+    const list = await this.store.settings.get<AutoDone[]>(Jarvis.AUTODONE_KEY, []);
+    const e = list.find((x) => x.id === id);
+    if (!e) return { ok: false, result: "not found" };
+    if (e.undone) return { ok: false, result: "already undone" };
+    // Memory, goals and today's list are put back as a whole, so only the newest change of each can be undone safely.
+    // The list is newest first, so everything before this entry happened after it (even within the same millisecond).
+    const newer = list.slice(0, list.indexOf(e)).find((x) => !x.undone && x.action.split(".")[0] === e.action.split(".")[0] && !e.action.startsWith("gmail."));
+    if (newer) return { ok: false, result: `"${newer.title}" changed the same thing after this; undo that one first` };
+    const s = (e.snapshot ?? {}) as { memory?: MemoryItem[]; goals?: Goal[]; trophies?: Trophy[]; today?: Today | null; payload?: Record<string, unknown> };
+    let result: string;
+    try {
+      if (e.action === "memory.replace" && s.memory) {
+        // Back to what it was, plus anything remembered since the tidy (those are newer than it and stay).
+        const since = (await this.store.memory.list()).filter((m) => m.updatedAt && m.updatedAt > e.at);
+        for (const m of await this.store.memory.list()) await this.store.memory.remove(m.scope, m.key);
+        for (const m of s.memory) await this.store.memory.set({ scope: m.scope, key: m.key, value: m.value, source: m.source });
+        for (const m of since) await this.store.memory.set({ scope: m.scope, key: m.key, value: m.value, source: m.source });
+        result = `Memory is back to the ${s.memory.length} items it had before${since.length ? `, plus ${since.length} remembered since` : ""}.`;
+      } else if (e.action.startsWith("goals.") && s.goals) {
+        if (e.after && JSON.stringify(await this.goalList()) !== e.after) return { ok: false, result: "your goals changed after this, so putting them back would undo that too; change it on the Goals screen instead" };
+        await this.saveGoals(s.goals);
+        await this.store.settings.set("trophies", s.trophies ?? []);
+        bus.emitEvent({ type: "base" });
+        result = "Goals are back to how they were.";
+      } else if (e.action === "today.set" && "today" in s) {
+        if (s.today) await this.saveToday(s.today); else { await this.store.settings.set("today", null); bus.emitEvent({ type: "base" }); }
+        result = "Today's three are back to the earlier pick.";
+      } else if (this.undoers.has(e.action) && s.payload) {
+        result = await this.undoers.get(e.action)!({ ...(await this.store.approvals.get(e.approvalId))!, payload: s.payload });
+      } else return { ok: false, result: "this one can't be put back from HQ" };
+    } catch (err) { return { ok: false, result: (err as Error).message }; }
+    e.undone = { at: new Date().toISOString(), result };
+    await this.store.settings.set(Jarvis.AUTODONE_KEY, list);
+    await this.router.log("jarvis", "decision", `Phil undid "${e.title}" (${getAgent(e.agentId)?.name ?? e.agentId}): ${result}`, undefined, { approvalId: e.approvalId });
+    bus.emitEvent({ type: "autodone" });
+    return { ok: true, result };
+  }
+
   // ---- Trophies, levels, today's three -----------------------------------------
 
   /** What was really achieved, oldest first: benchmarks met and goals finished. */
@@ -1389,6 +1494,13 @@ export class Jarvis {
         return done ?? approval;
       }
       if (why !== "auto-ship is off") await this.store.approvals.update(approval.id, { note: `Not auto-shipped: ${why}.` });
+    }
+    // Reversible work goes through on its own, whatever the agent's charter says: HQ keeps what it looked like before,
+    // and Phil gets an Undo button under "Done for you" instead of a card to approve.
+    if (await this.reversibleOn() && isReversible(approval)) {
+      const why = await this.tooBigToRunAlone(approval);
+      if (!why) return this.runReversible(approval);
+      await this.store.approvals.update(approval.id, { note: `Waits for you: ${why}.` });
     }
     // Phil's per-agent rules: low-risk kinds under the dollar cap go through on their own, logged.
     const rules = (await getAgentConfig(this.store, a.agentId)).rules;

@@ -298,3 +298,26 @@ test("the base summary over the API: goal horizons and ventures, trophies, level
   const cleared = await json<{ goal: { venture?: string; horizon?: string } }>(send(`/api/goals/${mid.goal.id}`, "PUT", { venture: null, horizon: null }));
   assert.equal(cleared.goal.venture, undefined);
 });
+
+test("Done for you over the API: the list, Undo, and Phil's switch", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const json = async <T,>(r: Response | Promise<Response>) => (await (await r).json()) as T;
+  const send = (path: string, method: string, body?: unknown) => call(path, { method, cookie, body: body === undefined ? undefined : JSON.stringify(body) });
+  assert.equal((await call("/api/autodone")).status, 401);
+  for (let i = 0; i < 4; i++) await store.memory.set({ scope: "phil", key: `api-k${i}`, value: "v", source: "phil" });
+  const before = (await store.memory.list()).length;
+  const a = await jarvisInst.requestApproval({ agentId: "oscar", kind: "record", title: "Oscar: tidy", body: "", payload: { action: "memory.replace", keep: (await store.memory.list()).slice(0, before - 1).map((m) => ({ scope: m.scope, key: m.key, value: m.value })) } });
+  assert.equal(a.status, "approved");
+  const list = await json<{ on: boolean; items: { id: string; title: string; undone?: unknown }[] }>(send("/api/autodone", "GET"));
+  assert.equal(list.on, true);
+  const item = list.items.find((x) => x.title === "Oscar: tidy")!;
+  assert.equal((await send(`/api/autodone/${item.id}/undo`, "POST")).status, 200);
+  assert.equal((await store.memory.list()).length, before);
+  assert.equal((await send(`/api/autodone/${item.id}/undo`, "POST")).status, 409, "already undone");
+  assert.equal((await send("/api/autodone/nope/undo", "POST")).status, 404);
+  assert.equal((await send("/api/autonomy", "POST", { reversible: "yes" })).status, 400);
+  assert.equal((await json<{ on: boolean }>(send("/api/autonomy", "POST", { reversible: false }))).on, false);
+  assert.equal((await json<{ on: boolean }>(send("/api/autodone", "GET"))).on, false);
+  await send("/api/autonomy", "POST", { reversible: true });
+});

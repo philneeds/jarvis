@@ -5,7 +5,7 @@ import { defineTool, type ToolDef } from "../tools/index.js";
 import type { Executor, Describer } from "../jarvis/orchestrator.js";
 import { getAgentConfig } from "../config.js";
 import type { ToolContext } from "../tools/index.js";
-import { bus } from "../events.js";
+import { bus, type Approval } from "../events.js";
 import { getAgent } from "../registry/index.js";
 
 /**
@@ -459,15 +459,18 @@ export class GoogleConnector {
         return `Email sent to ${p.to}${p.account ? ` from ${p.account}` : ""} (${r.id}).`;
       },
       "gmail.archive": async (a) => {
-        const p = a.payload as { ids?: string[]; query?: string; max?: number; account?: string };
+        const p = a.payload as { ids?: string[]; query?: string; max?: number; account?: string; doneIds?: string[] };
         if (!p.ids?.length && !p.query) throw new Error("gmail.archive needs ids or a query");
-        const n = await this.modifyMessages("archive", p);
+        // Resolve the query once and keep the ids on the card, so Undo puts back exactly these messages.
+        p.doneIds = p.ids?.length ? p.ids : await this.listMessageIds(p.query!, Math.min(p.max ?? 200, 2000), p.account);
+        const n = await this.modifyMessages("archive", { ...p, ids: p.doneIds, query: undefined });
         return `Archived ${n} message(s)${p.query ? ` matching "${p.query}"` : ""}${p.account ? ` in ${p.account}` : ""}.`;
       },
       "gmail.label": async (a) => {
-        const p = a.payload as { ids?: string[]; query?: string; max?: number; label?: string; account?: string };
+        const p = a.payload as { ids?: string[]; query?: string; max?: number; label?: string; account?: string; doneIds?: string[] };
         if ((!p.ids?.length && !p.query) || !p.label) throw new Error("gmail.label needs ids or a query, and a label");
-        const n = await this.modifyMessages("label", p);
+        p.doneIds = p.ids?.length ? p.ids : await this.listMessageIds(p.query!, Math.min(p.max ?? 200, 2000), p.account);
+        const n = await this.modifyMessages("label", { ...p, ids: p.doneIds, query: undefined });
         return `Labelled ${n} message(s) "${p.label}"${p.account ? ` in ${p.account}` : ""}.`;
       },
       "gmail.trash": async (a) => {
@@ -522,6 +525,20 @@ export class GoogleConnector {
   }
 
   /** What each action does, in Phil's words, shown on the card before he approves. */
+  /** How to put back what an action did, for actions an agent ran on its own (see Jarvis.undoAuto). */
+  undoers(): Record<string, (a: Approval) => Promise<string>> {
+    const back = async (a: Approval, body: Record<string, unknown>, verb: string) => {
+      const p = a.payload as { doneIds?: string[]; account?: string };
+      if (!p.doneIds?.length) throw new Error("this one didn't record which messages it touched, so it can't be put back from here");
+      for (let i = 0; i < p.doneIds.length; i += 1000) await this.api<void>(p.account, "https://gmail.googleapis.com/gmail/v1/users/me/messages/batchModify", { method: "POST", body: JSON.stringify({ ids: p.doneIds.slice(i, i + 1000), ...body }) });
+      return `${verb} ${p.doneIds.length} message(s)${p.account ? ` in ${p.account}` : ""}.`;
+    };
+    return {
+      "gmail.archive": (a) => back(a, { addLabelIds: ["INBOX"] }, "Moved back to the inbox:"),
+      "gmail.label": async (a) => back(a, { removeLabelIds: [await this.labelId(String((a.payload as { label?: unknown }).label ?? ""), (a.payload as { account?: string }).account)] }, `Took the label "${String((a.payload as { label?: unknown }).label ?? "")}" off`),
+    };
+  }
+
   describe(): Record<string, Describer> {
     const acct = (p: { account?: unknown }) => (typeof p.account === "string" && p.account ? p.account : "your first Google account");
     const scope = (p: { ids?: unknown; query?: unknown; max?: unknown }) => Array.isArray(p.ids) ? `${p.ids.length} chosen message(s)` : `up to ${Number(p.max ?? 500)} messages matching "${String(p.query ?? "")}"`;
