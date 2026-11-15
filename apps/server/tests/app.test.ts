@@ -34,7 +34,7 @@ test("login gates the API", async () => {
   const state = await call("/api/state", { cookie });
   assert.equal(state.status, 200);
   const j = await state.json() as { agents: unknown[]; status: { level: string } };
-  assert.equal(j.agents.length, 52); // Jarvis + 51 agents (Sales Coach folded into Stevon, Nov 14 2026)
+  assert.equal(j.agents.length, 48); // Jarvis + 47 agents (Sales Coach and Mindset Coach folded into Stevon; Doc, Sean, Gordon folded into Metro, Nov 14-15 2026)
   assert.equal(j.status.level, "green");
 
   const quick = await call("/api/chat", { method: "POST", cookie, body: JSON.stringify({ text: "@stella anything new?" }) });

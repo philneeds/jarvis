@@ -722,6 +722,20 @@ test("leads report to Jarvis's inbox, not Phil; the next daily brief folds them 
   assert.deepEqual(SCHEDULES.filter((s) => s.push).map((s) => s.id), ["stevon-weekly"]);
 });
 
+test("the brief asks Metro only once Apple Health has data: no model run just to hear \"no health data yet\"", async () => {
+  const { jarvis, store } = make();
+  await store.init();
+  const { ingestHealth } = await import("../src/index.js");
+  // Metro has run before (so the brief would normally poll him), but Phil's phone hasn't sent anything yet.
+  await store.agentState.set("metro", { status: "idle", lastRunAt: new Date().toISOString() });
+  const metroRuns = async () => (await store.activity.list({ agentId: "metro", limit: 100 })).filter((e) => e.kind === "run").length;
+  await jarvis.brief();
+  assert.equal(await metroRuns(), 0, "no health data, no Metro run");
+  await ingestHealth(store, { data: { metrics: [{ name: "step_count", units: "count", data: [{ date: "2026-11-15 08:00:00 -0500", qty: 4000 }] }] } }, new Date("2026-11-15T13:00:00Z"));
+  await jarvis.brief();
+  assert.equal(await metroRuns(), 1, "with data, Metro gives his read for the brief");
+});
+
 test("one tick hands the five scouts' notes to Munger in one go; a routine still running isn't started again", async () => {
   const { jarvis, store } = make();
   await store.settings.set("phase", 2);

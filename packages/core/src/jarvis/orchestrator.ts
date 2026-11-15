@@ -16,7 +16,7 @@ import { VENTURES, type VentureId } from "../registry/ventures.js";
 import { VENTURE_DASH, recordKind } from "../ventures/dashboards.js";
 import { TOOLS } from "../tools/index.js";
 import { imageInputs } from "../uploads.js";
-import { HEALTH_TOOLS, healthSummary } from "../health.js";
+import { HEALTH_TOOLS, healthStatus, healthSummary } from "../health.js";
 import { XREAD_TOOLS, expandXLinks, xPostIds, readXTimeline, type XPost } from "../xread.js";
 import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
@@ -1705,7 +1705,7 @@ export class Jarvis {
     const now = new Date();
     // A morning lead still working (Monica at 6:45, Stella at 6:50, Mantis at 6:55) gets up to two minutes to finish,
     // so its report goes in today's brief rather than tomorrow's.
-    const morning = ["monica", "stella", "mantis", "munger", "doc"];
+    const morning = ["monica", "stella", "mantis", "munger", "metro"];
     for (let i = 0; i < 12; i++) {
       const working = (await this.store.agentState.all()).filter((x) => morning.includes(x.id) && x.status === "working");
       if (!working.length) break;
@@ -1721,8 +1721,12 @@ export class Jarvis {
     const leadIds = morning.filter((id) => !fresh.has(id));
     const reporters: AgentDef[] = [];
     const settle = new Map<string, () => Promise<void>>();
+    // Metro has nothing to read until Apple Health is sending data, so he isn't asked: no model run just to say
+    // "no health data yet" (that was Doc's whole daily cost, nine runs for nothing, before the health team became one agent).
+    const healthDays = leadIds.includes("metro") ? (await healthStatus(this.store)).days : 0;
     for (const id of leadIds) {
       const a = getAgent(id)!;
+      if (id === "metro" && !healthDays) continue;
       const cfg = await getAgentConfig(this.store, id);
       if (!(cfg.tools.length || (await this.store.agentState.get(id))?.lastRunAt)) continue;
       // Doc reads Apple Health and nothing else for the brief: with no new data there is nothing to report, so he

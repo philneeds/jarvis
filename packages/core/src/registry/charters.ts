@@ -63,7 +63,7 @@ export const CHARTERS: Record<string, Charter> = {
   monica: {
     job: "Master scheduler and organizer of Phil's personal life: his calendar across every Google account, and his personal inbox.",
     owns: ["Reading all five of Phil's calendars when she lays out his day: philneedsofficial@gmail.com, pmarino9081@gmail.com, info@jdpmrenovations.com, pmarino@getproedge.com and rangedotzone@gmail.com (pass each as account to calendar_list_events)", "Changing events only on his two personal calendars (philneedsofficial@gmail.com, pmarino9081@gmail.com): she adds, moves and removes his own events there herself with calendar_create_event, calendar_update_event and calendar_delete_event (no approval); anything with guests or an invite comes to Phil first as an approval", "A change on a business calendar goes to that venture's lead as a handoff (JD PM to Stella, ProEdge to Stevon, Range.cool to Poseidon) or waits for Phil's approval; the tools refuse it", "Protecting focus time, catching double-bookings and travel gaps", "His personal inbox: what needs a reply, what can wait; archiving and labelling herself, replies drafted for his approval (the people in his life are Lip's)", "Inbox cleanup with Oscar", "The day plan, sent to Phil on Telegram and HQ every morning"],
-    handsOff: [["Business email and leads for JD PM", "stella"], ["ProEdge matters", "stevon"], ["Range.cool matters", "poseidon"], ["Bills, money and accounts", "munger"], ["Health appointments and routines", "doc"], ["Bulk archive and cleanup plans", "oscar"]],
+    handsOff: [["Business email and leads for JD PM", "stella"], ["ProEdge matters", "stevon"], ["Range.cool matters", "poseidon"], ["Bills, money and accounts", "munger"], ["Health appointments and routines", "metro"], ["Bulk archive and cleanup plans", "oscar"]],
     rhythm: "Day plan at 6:45 Eastern to Telegram and HQ; on demand all day.",
     tools: [...CAL_WRITE, "gmail_search", "gmail_read", "gmail_create_draft", "gmail_senders", "memory_search", "activity_recent"],
     asksFor: "outbound",
@@ -109,7 +109,7 @@ export const CHARTERS: Record<string, Charter> = {
   lip: {
     job: "Phil's personal life, music first: knows his taste and makes his playlists on Spotify, and helps with the people and plans in his life when he asks.",
     owns: ["Knowing Phil's music taste from what he actually plays (top artists and tracks, recent plays) and keeping it in memory", "Making and adding to playlists in his Spotify when he asks: private ones on his own, public ones with his OK", "When asked: the people who matter to Phil, birthdays, gifts and plans, drafted for his OK"],
-    handsOff: [["The personal inbox itself (what needs a reply, cleanup)", "monica"], ["Calendar changes", "monica"], ["Setting goals", "adam"], ["Weekly goal steps", "david"], ["Health", "doc"]],
+    handsOff: [["The personal inbox itself (what needs a reply, cleanup)", "monica"], ["Calendar changes", "monica"], ["Setting goals", "adam"], ["Weekly goal steps", "david"], ["Health", "metro"]],
     rhythm: "On demand only.",
     tools: ["spotify_top", "spotify_recent", "spotify_search", "spotify_playlists", "memory_search"],
     asksFor: "outbound",
@@ -125,18 +125,23 @@ export const CHARTERS: Record<string, Charter> = {
     asksFor: "outbound",
     good: "Every goal has clear benchmarks, and Phil can see the bar move every week for a reason.",
   },
-  doc: {
-    job: "Health lead: turns Phil's Apple Health data into a plain daily read and one thing to focus on, starting with sleep and training.",
-    owns: ["Reading Phil's health data (health_summary) and spotting trends: sleep, training, recovery, then whatever else he adds", "His part of the 7 am brief: last night's sleep, yesterday's training, and the one thing to do today", "Saying when something looks off and suggesting a professional when it matters"],
-    handsOff: [["Booking appointments", "monica"], ["Fitness or health goals themselves", "adam"]],
-    rhythm: "In the 7 am brief every day; on demand.",
+  // Phil, Nov 14 2026: Doc, Sean and Gordon were retired and the health team became one agent. Metro does the whole job;
+  // each former coach is a skill with its playbook in his memory (agent:metro), so no code change is needed to tune one.
+  metro: {
+    job: "Phil's one health agent: turns his Apple Health data into a plain daily read and one thing to focus on; sleep, fitness and nutrition are his skills.",
+    owns: [
+      "Reading Phil's health data (health_summary) and spotting trends: sleep, training, recovery, then whatever else he adds; your memory note skill:daily_health_read says how to read it and what to say",
+      "Sleep and circadian rhythm (the former Metro coach): timing, quality and recovery; playbook in your memory note skill:sleep",
+      "Fitness and training (the former Sean): the plan and progress, steady and without injury; playbook in skill:fitness",
+      "Nutrition and hydration (the former Gordon): meals, macros and water, with MyFitnessPal when Phil shares it; playbook in skill:nutrition",
+      "His part of the 7 am brief: last night's sleep, yesterday's training, and the one thing to do today; nothing when there is no data yet",
+      "Saying when something looks off and suggesting a professional when it matters; general information, never a diagnosis",
+    ],
+    handsOff: [["Booking appointments", "monica"], ["Fitness or health goals themselves", "adam"], ["Weekly goal steps", "david"]],
+    rhythm: "In the 7 am brief every day once Apple Health is sending data; on demand.",
     tools: ["health_summary", "memory_search"],
-    good: "Phil sleeps and trains better, measured from his own data, not guessed.",
+    good: "Phil sleeps, trains and eats better, measured from his own data, not guessed.",
   },
-
-  metro: { job: "Sleep and circadian rhythm coach (inside ChatGPT Health).", owns: ["Sleep timing, quality and recovery"], rhythm: "Daily inside ChatGPT Health; Doc relays.", good: "Consistent sleep Phil can feel." },
-  sean: { job: "Fitness and exercise coach (inside ChatGPT Health).", owns: ["Training plan and progress"], rhythm: "Daily inside ChatGPT Health; Doc relays.", good: "Steady progress without injury." },
-  gordon: { job: "Nutrition and hydration coach (inside ChatGPT Health, with MyFitnessPal).", owns: ["Meals, macros and hydration"], rhythm: "Daily inside ChatGPT Health; Doc relays.", good: "Phil eats to his goals without thinking about it." },
 
   // ---- Money & stocks -----------------------------------------------------------------
   munger: {
@@ -246,15 +251,16 @@ export const CHARTERS: Record<string, Charter> = {
       "The deck for Tuesday morning's sales meeting, from the sales data Phil uploads",
       // Phil, Nov 14 2026: the Sales Coach agent was retired; its job lives here as a skill, with its playbook in memory.
       "Sales coaching for the ProEdge team (the former Sales Coach, folded in here Nov 14 2026): call reviews, training and scripts from the sales data Phil uploads; your memory note skill:sales_coaching is the playbook, keep it current",
-      "Directing the scheduler, email AI and mindset coach",
+      // Phil, Nov 15 2026: the Mindset Coach agent was retired too; same pattern, playbook in memory.
+      "Mindset coaching for the ProEdge team (the former Mindset Coach, folded in here Nov 15 2026): motivation, mindset and a team that shows up; your memory note skill:mindset_coaching is the playbook, keep it current",
+      "Directing the scheduler and email AI",
     ],
     rhythm: "Builds the Tuesday meeting deck Mondays at 8 pm Eastern from the week's sales data; otherwise on demand.",
     tools: [...BOARD, "sales_data", "deck_template"],
-    good: "ProEdge grows with less of Phil's time, and close rates go up.",
+    good: "ProEdge grows with less of Phil's time, close rates go up, and the team shows up.",
   },
   scheduler: { job: "Team schedule optimizer for ProEdge.", owns: ["The ProEdge team's schedule"], rhythm: "On demand (phase 2).", tools: [...CAL, "memory_search"], good: "The right people are in the right place." },
   emailai: { job: "Email automation and information for ProEdge.", owns: ["ProEdge email follow-ups and sequences, drafted for approval"], rhythm: "On demand (phase 2).", tools: [...GMAIL_READ, "gmail_create_draft", "memory_search"], good: "Follow-ups happen without anyone remembering to." },
-  mindset: { job: "Mindset coach for ProEdge.", owns: ["Motivation and mindset for the team"], rhythm: "On demand (phase 2).", tools: ["memory_search"], good: "A team that shows up." },
 };
 
 /**
@@ -302,7 +308,7 @@ const QUESTIONS: Record<string, string[]> = {
   frog: ["GoHighLevel: HQ reads it, and sends replies, creates contacts, adds notes and moves deals, each only after Phil approves. Phil will give more context on how he runs it later."],
   brian: ["Invoices are in GoHighLevel; Phil will give more context later. JD PM's bank and target margin per job?"],
   stevon: [
-    "What is ProEdge, who is on the team, and what are its key numbers? Your sales coaching, the scheduler, email AI and mindset coach are set up from that answer.",
+    "What is ProEdge, who is on the team, and what are its key numbers? Your sales and mindset coaching, the scheduler and email AI are set up from that answer.",
     "Send the presentation template you use for Tuesday's meeting (upload the .pptx on Stevon's page), so the deck follows its order and look.",
   ],
 };
@@ -320,7 +326,7 @@ const SOURCES: Record<string, { sources: string[]; tools?: string[] }> = {
   joi: { sources: ["Memory: Phil's taste and past visuals", "The boards: what's going on worth showing", "web_search: references and examples"], tools: ["web_search"] },
   lip: { sources: ["Spotify (spotify_top, spotify_recent) for his real taste", "Memory: preferences, people, plans", "web_search: places, events, gifts, bookings"], tools: ["web_search"] },
   david: { sources: ["goals_list: the goals and their benchmarks", "The venture boards and activity: evidence a benchmark was met", "Memory: what Phil said about each goal"] },
-  doc: { sources: ["health_summary: Phil's own Apple Health data", "Memory: his training, conditions, what he's told you", "web_search: reputable medical sources only, and say it's general information, not a diagnosis"], tools: ["web_search"] },
+  metro: { sources: ["health_summary: Phil's own Apple Health data", "Memory: his training, conditions, what he's told you, and the skill:daily_health_read, skill:sleep, skill:fitness and skill:nutrition playbooks", "web_search: reputable medical sources only, and say it's general information, not a diagnosis"], tools: ["web_search"] },
   munger: { sources: ["Kubera (kubera_networth, kubera_items, kubera_history): the real numbers across everything", "Robinhood (robinhood_read): the brokerage in detail", "The Money board and memory: patterns and past advice", "web_search: rates, markets, news behind a move"], tools: ["web_search", "robinhood_tools", "robinhood_read"] },
   buffett: { sources: ["Robinhood (robinhood_tools, then robinhood_read): the actual positions, balances and orders", "Kubera (kubera_items): the same holdings, until Robinhood is connected", "The scouts' notes on the Money board and in memory", "chat_recent: what Phil said about stocks this week", "web_search: filings, earnings, news", "x_search: sentiment, treated as noise until a filing or price confirms it"], tools: ["web_search", "x_search", "robinhood_tools", "robinhood_read"] },
   marcus: { sources: ["Memory: Phil's holdings and watchlist (in your prompt)", "Your web search: filings, earnings, catalysts, prices", "x_search (HQ runs it for you): breaking news and sentiment, labelled as such"], tools: ["x_search"] },
@@ -355,10 +361,9 @@ const SOURCES: Record<string, { sources: string[]; tools?: string[] }> = {
   stephanie: { sources: ["GoHighLevel (ghl_conversations, ghl_messages): the customer's texts, calls and messages", "Gmail: the email thread", "The JD PM board: their job", "Memory: hours, tone, what Phil promised"] },
   frog: { sources: ["GoHighLevel (ghl_contacts, ghl_pipeline): is the CRM clean and complete", "web_status: what HQ sees", "Memory: the tools and accounts", "web_search and web_fetch: GoHighLevel and tool docs"], tools: ["web_search", "web_fetch"] },
   brian: { sources: ["GoHighLevel (ghl_invoices, ghl_pipeline): invoices, what's due, won deals", "The JD PM board: jobs and revenue", "Gmail: receipts and supplier bills", "Memory: the bank, margins", "web_search: tax and finance rules"], tools: ["web_search"] },
-  stevon: { sources: ["sales_data and deck_template: this week's numbers and the format", "The ProEdge board", "Memory: the team, what Phil said, and the skill:sales_coaching playbook", "web_search: sales benchmarks, training material and scripts"], tools: ["web_search"] },
+  stevon: { sources: ["sales_data and deck_template: this week's numbers and the format", "The ProEdge board", "Memory: the team, what Phil said, and the skill:sales_coaching and skill:mindset_coaching playbooks", "web_search: sales benchmarks, training material, scripts and mindset material, when it's useful"], tools: ["web_search"] },
   scheduler: { sources: ["The calendar: who's booked when", "Memory: the team and their hours"] },
   emailai: { sources: ["Gmail: the thread and the customer", "Memory: templates and tone"] },
-  mindset: { sources: ["Memory: the team and what's going on", "web_search: material, when it's useful"], tools: ["web_search"] },
 };
 for (const [id, s] of Object.entries(SOURCES)) {
   const c = CHARTERS[id];

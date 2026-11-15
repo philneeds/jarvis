@@ -4,7 +4,7 @@ import type { Store } from "./store/types.js";
 import { defineTool, type ToolDef } from "./tools/index.js";
 
 /**
- * Phil's Apple Health data for Doc. The iPhone app Health Auto Export posts its JSON to
+ * Phil's Apple Health data for Metro, the health agent. The iPhone app Health Auto Export posts its JSON to
  * POST /api/apple-health/ingest with "Authorization: Bearer <key>"; the key is made in HQ Settings, so no secret is
  * ever typed into the server. Each sample is folded into one record per day and metric; any metric the app sends is
  * kept, so adding one in the app is all it takes. 120 days are kept.

@@ -44,7 +44,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const body = await c.req.json().catch(() => null);
     try {
       const r = await ingestHealth(jarvis.store, body);
-      await jarvis.router.log("doc", "system", `Apple Health synced: ${r.samples} readings and ${r.workouts} workouts${r.days.length ? ` for ${r.days[0]}${r.days.length > 1 ? ` to ${r.days[r.days.length - 1]}` : ""}` : ""}`);
+      await jarvis.router.log("metro", "system", `Apple Health synced: ${r.samples} readings and ${r.workouts} workouts${r.days.length ? ` for ${r.days[0]}${r.days.length > 1 ? ` to ${r.days[r.days.length - 1]}` : ""}` : ""}`);
       return c.json({ ok: true, ...r });
     } catch (e) { return c.json({ error: (e as Error).message }, 400); }
   });

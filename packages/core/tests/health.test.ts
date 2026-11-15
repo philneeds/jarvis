@@ -16,7 +16,7 @@ const payload = {
   },
 };
 
-test("Apple Health: a payload folds into days; a resend doesn't double; Doc reads it plainly", async () => {
+test("Apple Health: a payload folds into days; a resend doesn't double; Metro reads it plainly", async () => {
   const store = memoryStore(); await store.init();
   const now = new Date("2026-11-05T12:00:00Z");
   const r = await ingestHealth(store, payload, now);

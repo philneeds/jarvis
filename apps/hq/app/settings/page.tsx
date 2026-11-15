@@ -272,7 +272,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Apple Health">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${health?.lastIngest ? "dot-working" : "dot-idle"}`} />
-              <span><b>Apple Health</b> · Doc reads your sleep, training and more, sent from your iPhone by the Health Auto Export app.</span>
+              <span><b>Apple Health</b> · Metro reads your sleep, training and more, sent from your iPhone by the Health Auto Export app.</span>
               {health?.lastIngest
                 ? <span className="ml-auto" style={{ color: "var(--dim)" }}>last sync {fmtTime(health.lastIngest.at)} · {health.days} day(s)</span>
                 : <button className="btn btn-sm btn-primary ml-auto" onClick={() => void makeHealthKey(false)}>Set up Apple Health</button>}

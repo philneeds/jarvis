@@ -43,10 +43,8 @@ export interface AgentDef {
 }
 
 const SECTOR = "Reviews current holdings in its sector and suggests changes to Buffett.";
-const HEALTH_NOTE =
-  "Coaches inside ChatGPT Health on Phil's ChatGPT plan, where his Apple Health data lives. Not reachable by API; Doc brings the summaries back.";
 
-/** Jarvis and the 51 agents in four layers, as Phil laid them out. Order matters for display. */
+/** Jarvis and the 47 agents in four layers, as Phil laid them out. Order matters for display. */
 export const AGENTS: AgentDef[] = [
   // ---- Main layer -------------------------------------------------------
   {
@@ -89,13 +87,12 @@ export const AGENTS: AgentDef[] = [
     id: "david", name: "David", short: "Goals & growth", layer: 1, parent: "jarvis", links: ["lip", "joi"], venture: "personal", model: "claude-sonnet", phase: 2, priority: "room",
     desc: "In charge of Phil's personal goals and growth altogether. Works with Lip, and with Joi to get the goals visualized.",
   },
+  // Phil, Nov 14 2026: the four-agent health team (Doc as lead; Metro, Sean, Gordon coaching inside ChatGPT Health) became
+  // one health agent. Metro is a normal HQ agent under Jarvis; sleep, fitness, nutrition and the daily read are his skills.
   {
-    id: "doc", name: "Doc", short: "Health lead", layer: 1, parent: "jarvis", venture: "personal", model: "claude-sonnet", phase: 0, priority: "room",
-    desc: "Manages the three-agent health team: sleep, fitness and nutrition. The team coaches inside ChatGPT Health; Doc pulls their summaries back to Jarvis.",
+    id: "metro", name: "Metro", short: "Health", layer: 1, parent: "jarvis", venture: "personal", model: "claude-sonnet", phase: 3, priority: "room",
+    desc: "Phil's one health agent: turns his Apple Health data into a plain daily read and one thing to focus on. Sleep and circadian rhythm, fitness and training, nutrition and hydration (with MyFitnessPal) are his skills, kept as playbooks in his memory.",
   },
-  { id: "metro", name: "Metro", short: "Sleep & circadian rhythm", layer: 2, parent: "doc", venture: "personal", model: "claude-sonnet", phase: 3, priority: "room", desc: "Sleep optimization and circadian rhythm. " + HEALTH_NOTE },
-  { id: "sean", name: "Sean", short: "Fitness & exercise", layer: 2, parent: "doc", venture: "personal", model: "claude-sonnet", phase: 3, priority: "room", desc: "Physical health, fitness and exercise. " + HEALTH_NOTE },
-  { id: "gordon", name: "Gordon", short: "Nutrition", layer: 2, parent: "doc", venture: "personal", model: "claude-sonnet", phase: 3, priority: "room", desc: "Nutrition: eating, drinking, hydration and everything to do with food. Also uses MyFitnessPal. " + HEALTH_NOTE },
 
   // ---- Money & stocks ----------------------------------------------------
   {
@@ -168,9 +165,9 @@ export const AGENTS: AgentDef[] = [
   { id: "brian", name: "Brian", short: "CFO, JD PM", layer: 2, parent: "stella", venture: "jdpm", model: "claude-sonnet", phase: 1, priority: "always", desc: "CFO for JD PM only: expenses, invoices, cash flow and everything to do with the dollar sign." },
 
   // ---- ProEdge -----------------------------------------------------------
-  // Phil, Nov 14 2026: the Sales Coach agent (salescoach) was retired and folded into Stevon as his "sales coaching" skill.
-  { id: "stevon", name: "Stevon", short: "ProEdge", layer: 1, parent: "jarvis", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", desc: "Responsible for everything to do with ProEdge, including sales coaching for the team, with three sub-agents that optimize the business." },
+  // Phil, Nov 14 2026: the Sales Coach agent (salescoach) was retired and folded into Stevon as his "sales coaching" skill;
+  // Nov 15 2026: the Mindset Coach (mindset) followed, as his "mindset coaching" skill.
+  { id: "stevon", name: "Stevon", short: "ProEdge", layer: 1, parent: "jarvis", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", desc: "Responsible for everything to do with ProEdge, including sales coaching and mindset coaching for the team, with two sub-agents that optimize the business." },
   { id: "scheduler", name: "Scheduler", short: "Team schedule optimizer", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Schedule optimizer and maker for managing the team." },
   { id: "emailai", name: "Email AI", short: "Email automation & info", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Email automation and information." },
-  { id: "mindset", name: "Mindset Coach", short: "Mindset coaching", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Mindset coach for the ProEdge team." },
 ];
