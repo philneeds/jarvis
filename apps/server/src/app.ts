@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type EagleViewConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, clientIp, fromHq, isAuthed, login, loginFailed, loginWait, logout, requireAuth } from "./auth.js";
@@ -10,7 +10,7 @@ import { authEnabled, clientIp, fromHq, isAuthed, login, loginFailed, loginWait,
 /** A count from the query string: a whole number from 1 to max, else the default ("abc" and -5 used to reach the store). */
 const count = (raw: string | undefined, fallback: number, max: number) => { const n = Math.floor(Number(raw)); return Number.isFinite(n) && n >= 1 ? Math.min(n, max) : fallback; };
 
-export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; spotify?: SpotifyConnector; kubera?: KuberaConnector; ghl?: GoHighLevelConnector; discord?: DiscordConnector; github?: GithubConnector; robinhood?: RobinhoodConnector; guard?: TradingGuard; workshop?: Workshop } = {}) {
+export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; spotify?: SpotifyConnector; kubera?: KuberaConnector; ghl?: GoHighLevelConnector; eagleview?: EagleViewConnector; discord?: DiscordConnector; github?: GithubConnector; robinhood?: RobinhoodConnector; guard?: TradingGuard; workshop?: Workshop } = {}) {
   const app = new Hono();
   const origins = (process.env.HQ_ORIGIN ?? "http://localhost:3000").split(",").map((s) => s.trim());
   app.use("/api/*", cors({ origin: origins, credentials: true }));
@@ -223,6 +223,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     if (connectors.robinhood && (await connectors.robinhood.status()).connected) connected.add("Robinhood");
     // A key GoHighLevel refused isn't a connection; it counts again after the next call that succeeds.
     if (connectors.ghl && !/refused the key/.test((await connectors.ghl.status()).lastFetch?.error ?? "")) connected.add("GoHighLevel");
+    if (connectors.eagleview && !/refused the credentials/.test((await connectors.eagleview.status()).lastFetch?.error ?? "")) connected.add("EagleView");
     if (connectors.discord) connected.add("Discord");
     if (connectors.github) connected.add("GitHub");
     if (process.env.XAI_API_KEY) connected.add("X search");
@@ -413,6 +414,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     spotify: connectors.spotify ? { configured: true, ...(await connectors.spotify.status()) } : { configured: false, connected: false },
     kubera: connectors.kubera ? await connectors.kubera.status() : { configured: false },
     ghl: connectors.ghl ? await connectors.ghl.status() : { configured: false },
+    eagleview: connectors.eagleview ? await connectors.eagleview.status() : { configured: false },
     discord: connectors.discord ? await connectors.discord.status() : { configured: false },
     github: connectors.github ? await connectors.github.status() : { configured: false },
     robinhood: connectors.robinhood ? await connectors.robinhood.status() : { configured: false, connected: false },
@@ -520,6 +522,10 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.post("/connectors/ghl/test", async (c) => {
     if (!connectors.ghl) return c.json({ error: "GHL_API_KEY and GHL_LOCATION_ID aren't set" }, 400);
     try { return c.json({ ok: true, summary: `${await connectors.ghl.check()}\n${await connectors.ghl.conversationsText(await connectors.ghl.conversations(true, 5), true)}` }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
+  });
+  api.post("/connectors/eagleview/test", async (c) => {
+    if (!connectors.eagleview) return c.json({ error: "EAGLEVIEW_CLIENT_ID and EAGLEVIEW_CLIENT_SECRET aren't set" }, 400);
+    try { return c.json({ ok: true, summary: `${await connectors.eagleview.check()}\n${await connectors.eagleview.reportsText(await connectors.eagleview.reports(5))}` }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
   });
   // Check the Kubera key works (one call, cached for 20 minutes) and show the net worth line.
   api.post("/connectors/kubera/test", async (c) => {

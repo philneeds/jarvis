@@ -9,7 +9,7 @@ import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 
 interface Passkey { id: string; label: string; createdAt: string }
-interface Connectors { workshop?: { configured: boolean; dir?: string; canShip: boolean; autoShip?: boolean; last?: { at: string; sha: string; title: string; status: string; note?: string } | null }; xsearch?: { configured: boolean; model: string; grokMode: string }; google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; robinhood?: { configured: boolean; connected: boolean; connectedAt?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
+interface Connectors { workshop?: { configured: boolean; dir?: string; canShip: boolean; autoShip?: boolean; last?: { at: string; sha: string; title: string; status: string; note?: string } | null }; xsearch?: { configured: boolean; model: string; grokMode: string }; google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; eagleview?: { configured: boolean; sandbox?: boolean; orders?: number; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; robinhood?: { configured: boolean; connected: boolean; connectedAt?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
 
 export default function SettingsPage() {
   const { state, refresh } = useLive();
@@ -33,6 +33,8 @@ export default function SettingsPage() {
   const [kbMsg, setKbMsg] = useState<string>();
   const [ghlMsg, setGhlMsg] = useState<string>();
   const testGhl = async () => { setGhlMsg("Checking…"); try { const r = await post<{ summary: string }>("/api/connectors/ghl/test", {}); setGhlMsg(r.summary); await load(); } catch (e) { setGhlMsg((e as Error).message); } };
+  const [evMsg, setEvMsg] = useState<string>();
+  const testEagleView = async () => { setEvMsg("Checking…"); try { const r = await post<{ summary: string }>("/api/connectors/eagleview/test", {}); setEvMsg(r.summary); await load(); } catch (e) { setEvMsg((e as Error).message); } };
   const [bk, setBk] = useState<{ last: { at: string; ok: boolean; file?: string; bytes?: number; drive?: string; error?: string; kept?: number } | null; dir: string; drive: boolean; healthcheck: boolean } | null>(null);
   const [bkMsg, setBkMsg] = useState<string>();
   useEffect(() => { api<typeof bk>("/api/backup").then(setBk).catch(() => undefined); }, []);
@@ -219,6 +221,16 @@ export default function SettingsPage() {
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GHL_API_KEY (a read-only Private Integration token) and GHL_LOCATION_ID</span>}
             </div>
             {(ghlMsg || (conn?.ghl?.lastFetch && !conn.ghl.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: ghlMsg && !/refused|error|limit|aren't set|failed/i.test(ghlMsg) ? "var(--ink)" : "var(--red)" }}>{ghlMsg ?? conn?.ghl?.lastFetch?.error}</p>}
+          </div>
+          <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="EagleView">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`dot ${conn?.eagleview?.lastFetch?.ok ? "dot-working" : conn?.eagleview?.lastFetch ? "dot-error" : "dot-idle"}`} />
+              <span><b>EagleView</b> · Stella, Jake and Bill read JD PM&apos;s roof measurement reports (squares, pitch, ridge/hip/valley/eave/rake) for estimates and material lists; a new report costs money and is ordered only after you approve the card{conn?.eagleview?.sandbox ? " (sandbox: test orders, nothing billed)" : ""}.</span>
+              {conn?.eagleview?.configured
+                ? <><span style={{ color: "var(--dim)" }}>{conn.eagleview.lastFetch ? `${conn.eagleview.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.eagleview.lastFetch.at)}` : "not read yet"}{conn.eagleview.orders ? ` · ${conn.eagleview.orders} ordered from HQ` : ""}</span><button className="btn btn-sm ml-auto" onClick={() => void testEagleView()}>Check now</button></>
+                : <span className="ml-auto" style={{ color: "var(--muted)" }}>set EAGLEVIEW_CLIENT_ID and EAGLEVIEW_CLIENT_SECRET (a Client Credentials app on developer.eagleview.com, linked to JD PM&apos;s EagleView login)</span>}
+            </div>
+            {(evMsg || (conn?.eagleview?.lastFetch && !conn.eagleview.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: evMsg && !/refused|error|limit|aren't set|failed/i.test(evMsg) ? "var(--ink)" : "var(--red)" }}>{evMsg ?? conn?.eagleview?.lastFetch?.error}</p>}
           </div>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Discord">
             <div className="flex flex-wrap items-center gap-3">
