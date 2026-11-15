@@ -167,6 +167,33 @@ interface Row {
 const LEVEL_SCALE = [0.8, 0.8, 0.86, 0.92, 0.99, 1.07];
 interface Ready { agentId: string; name: string; missing: string[] }
 
+/**
+ * The "your call" sign over a building: a raised gold tile with a "!", pointing down at it, bobbing. Red when an agent
+ * there hit a problem. More than one waiting shows as a small count on its corner.
+ */
+function Alert({ x, y, n, kind, label, onOpen, onKey }: { x: number; y: number; n: number; kind: "need" | "bad"; label: string; onOpen: () => void; onKey: (e: React.KeyboardEvent) => void }) {
+  const w = 40, h = 40, t = y - h / 2, l = x - w / 2, g = kind === "need" ? "base-alert-gold" : "base-alert-red";
+  const edge = kind === "need" ? "#4A2A00" : "#4A0A14";
+  // The tile, with a short point under its middle.
+  const d = `M${l + 8},${t} h${w - 16} q8,0 8,8 v${h - 16} q0,8 -8,8 h-${w / 2 - 14} l-6,8 l-6,-8 h-${w / 2 - 14} q-8,0 -8,-8 v-${h - 16} q0,-8 8,-8 z`;
+  return (
+    <>
+    <ellipse cx={x} cy={y + h / 2 + 22} rx={11} ry={3.5} fill="#000" fillOpacity={0.35} className="base-bub-shadow" />
+    <g role="button" tabIndex={0} aria-label={label} className="base-bub" onClick={onOpen} onKeyDown={onKey}>
+      <path d={d} fill={`url(#${g})`} stroke={edge} strokeWidth={2.5} strokeLinejoin="round" />
+      <path d={`M${l + 6},${t + 9} q0,-6 6,-6 h${w - 24} q6,0 6,6`} fill="none" stroke="#fff" strokeOpacity={0.55} strokeWidth={2.5} strokeLinecap="round" />
+      <text x={x} y={y + 11} textAnchor="middle" className="base-alert-mark">!</text>
+      {n > 1 && (
+        <g>
+          <circle cx={l + w - 1} cy={t + 1} r={9} fill="#0A1226" stroke={edge === "#4A2A00" ? "#FFD27A" : "#FF8A9A"} strokeWidth={1.5} />
+          <text x={l + w - 1} y={t + 5} textAnchor="middle" className="base-alert-count">{n}</text>
+        </g>
+      )}
+    </g>
+    </>
+  );
+}
+
 function Person({ at, body, ring, dot }: { at: Pt; body: string; ring?: boolean; dot?: string }) {
   return (
     <g className={ring ? "base-bob" : undefined}>
@@ -333,6 +360,8 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
             <linearGradient id="base-ground" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#0A1430" /><stop offset="1" stopColor="#0F1E44" /></linearGradient>
             <radialGradient id="base-orb"><stop offset="0" stopColor="#BFE2FF" stopOpacity=".95" /><stop offset=".4" stopColor="#6EB8FF" stopOpacity=".55" /><stop offset="1" stopColor="#6EB8FF" stopOpacity="0" /></radialGradient>
             <filter id="base-glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="16" /></filter>
+            <linearGradient id="base-alert-gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#FFE58A" /><stop offset=".55" stopColor="#FFC23A" /><stop offset="1" stopColor="#E8920A" /></linearGradient>
+            <linearGradient id="base-alert-red" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#FF9AA8" /><stop offset=".55" stopColor="#FF5068" /><stop offset="1" stopColor="#C8203C" /></linearGradient>
           </defs>
           <g dangerouslySetInnerHTML={{ __html: GROUND }} />
           {/* A line from the core to every live venture; it runs while someone there is working. */}
@@ -403,7 +432,7 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
           <text x={orb[0]} y={orb[1] - 50} textAnchor="middle" className="base-lbl base-big" fill="#EAF6FF">JARVIS</text>
           {rows.map((r) => {
             const n = r.approvals.length + r.todos.length, both = n > 0 && r.errors.length > 0, work = r.working.length > 0;
-            const by = r.L[1] - (work ? 68 : 42);
+            const by = r.L[1] - (work ? 72 : 46);
             const open = () => { setSel(r.id); setPop(r.id); setError(undefined); };
             return (
               <g key={r.id}>
@@ -415,18 +444,8 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
                     <text x={r.L[0]} y={r.L[1] - 33} textAnchor="middle" className="base-lbl" fontSize={10.5} fill="#CFE8FF">{r.working.length > 1 ? `${r.working.length} WORKING` : clipText(r.working[0]!.detail || "working", 26).toUpperCase()}</text>
                   </g>
                 )}
-                {n > 0 && (
-                  <g role="button" tabIndex={0} aria-label={`${r.label}: ${n} waiting on you. Open.`} className="base-bub" onClick={open} onKeyDown={key(open)}>
-                    <circle cx={r.L[0] - (both ? 22 : 0)} cy={by} r={18} fill="#FFB547" />
-                    <text x={r.L[0] - (both ? 22 : 0)} y={by + 6} textAnchor="middle" className="base-bubtext" fill="#1A1002">{n}</text>
-                  </g>
-                )}
-                {r.errors.length > 0 && (
-                  <g role="button" tabIndex={0} aria-label={`${r.label}: ${r.errors.length} problem${r.errors.length === 1 ? "" : "s"}. Open.`} className="base-bub" onClick={open} onKeyDown={key(open)}>
-                    <circle cx={r.L[0] + (both ? 22 : 0)} cy={by} r={18} fill="#FF4F6A" />
-                    <text x={r.L[0] + (both ? 22 : 0)} y={by + 6} textAnchor="middle" className="base-bubtext" fill="#fff">!</text>
-                  </g>
-                )}
+                {n > 0 && <Alert x={r.L[0] - (both ? 28 : 0)} y={by} n={n} kind="need" label={`${r.label}: ${n} waiting on your decision. Open.`} onOpen={open} onKey={key(open)} />}
+                {r.errors.length > 0 && <Alert x={r.L[0] + (both ? 28 : 0)} y={by} n={r.errors.length} kind="bad" label={`${r.label}: ${r.errors.length} problem${r.errors.length === 1 ? "" : "s"}. Open.`} onOpen={open} onKey={key(open)} />}
               </g>
             );
           })}
@@ -492,7 +511,7 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
           </div>
         </div>
       ) : (
-        <p className="m-0 text-center text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>Click a building, a bubble, or an agent standing outside</p>
+        <p className="m-0 text-center text-[11px] tracking-[0.14em] uppercase" style={{ color: "var(--muted)" }}>Click a building, a ! sign, or an agent standing outside</p>
       )}
     </section>
   );
