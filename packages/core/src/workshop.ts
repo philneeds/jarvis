@@ -155,6 +155,24 @@ export class Workshop {
     try { return { ...(await this.prepareUnlocked(task)), claim }; }
     catch (e) { this.release(claim); throw e; }
   }
+  /**
+   * A run that died mid-edit (HQ restarted to deploy, a crash, a time limit) leaves its half-finished files, and
+   * sometimes a half-done rebase or git's own lock, in the working copy. Git then refuses to switch branches and every
+   * later run fails the same way until someone with a shell clears it (Nov 15: three runs lost to two dirty files).
+   * This run holds the workshop's claim, so nothing else is using the copy: put the leftovers in the stash, where they
+   * can still be looked at, keep the last ten, and carry on.
+   */
+  private async clearLeftovers(): Promise<void> {
+    const dir = this.opts.dir;
+    await fs.rm(path.join(dir, ".git", "index.lock"), { force: true }).catch(() => undefined);
+    for (const op of ["rebase", "merge", "cherry-pick", "revert"]) await this.git([op, "--abort"]).catch(() => undefined);
+    const dirty = await this.git(["status", "--porcelain", "--untracked-files=no"]);
+    if (dirty.code !== 0 || !dirty.out.trim()) return;
+    const stashed = await this.git(["stash", "push", "-q", "-m", `left by a lost run, found ${(this.opts.now?.() ?? new Date()).toISOString()}`]);
+    if (stashed.code !== 0) return; // the forced checkout and reset below still clear it
+    const count = (await this.git(["stash", "list"])).out.split("\n").filter(Boolean).length;
+    for (let i = count; i > 10; i--) await this.git(["stash", "drop", "-q", `stash@{${i - 1}}`]);
+  }
   private async prepareUnlocked(task: string): Promise<WorkshopState> {
     const { branch, remote } = await this.target();
     const dir = this.opts.dir;
@@ -171,7 +189,8 @@ export class Workshop {
     const base = fetched.code === 0 ? `origin/${branch}` : await this.must(["rev-parse", "HEAD"], this.opts.appDir);
     if (fetched.code !== 0) await this.must(["fetch", "-q", this.opts.appDir, branch]);
     const work = `einstein/${(this.opts.now?.() ?? new Date()).toISOString().slice(0, 10)}-${SLUG(task)}`;
-    await this.must(["checkout", "-q", "-B", work, fetched.code === 0 ? base : "FETCH_HEAD"]);
+    await this.clearLeftovers();
+    await this.must(["checkout", "-q", "-f", "-B", work, fetched.code === 0 ? base : "FETCH_HEAD"]);
     await this.must(["reset", "-q", "--hard"]);
     await this.must(["clean", "-fdq", "-e", "node_modules", "-e", ".env"]);
     const hasModules = await fs.stat(path.join(dir, "node_modules")).then(() => true).catch(() => false);

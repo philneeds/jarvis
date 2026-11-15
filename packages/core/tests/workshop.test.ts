@@ -162,3 +162,23 @@ test("Einstein is HQ's engineer: Fable by default, the workshop tools in his cha
   await jarvis.runAgent(getAgent("stella")!, "status", { direct: true });
   assert.equal(seen?.workspace, undefined);
 });
+
+test("a run lost mid-edit doesn't block the workshop: its leftovers go to the stash and the next run starts clean", async () => {
+  const { root, app } = await repo();
+  const dir = path.join(root, "workshop");
+  const w = new Workshop({ dir, appDir: app, token: "t0ken", deployCmd: `${process.execPath} -e process.exit(0)`, outcomeFile: path.join(root, "last-deploy.json"), verify: async () => ({ ok: true, report: "PASS all" }), now: () => new Date("2026-11-15T03:17:00Z") });
+  const first = await w.prepare("Fold the coaches");
+  // The run dies mid-edit: a tracked file half-changed, git's lock left behind, and the claim gone with the process.
+  await fs.writeFile(path.join(dir, "README.md"), "hq\nhalf an edit\n");
+  await fs.writeFile(path.join(dir, ".git", "index.lock"), "");
+  w.release(first.claim);
+  // Meanwhile the deploy branch moved on in the same file, which is what made git refuse the checkout.
+  await fs.writeFile(path.join(app, "README.md"), "hq\nshipped\n");
+  git(app, "commit", "-qam", "ship"); git(app, "push", "-q", "origin", "HEAD:deploy");
+  const next = await w.prepare("Health fold");
+  assert.equal(git(dir, "rev-parse", "--abbrev-ref", "HEAD"), next.branch);
+  assert.equal(await fs.readFile(path.join(dir, "README.md"), "utf8"), "hq\nshipped\n", "the new run starts from the deploy branch, clean");
+  assert.equal((await w.status()).files.length, 0);
+  assert.match(git(dir, "stash", "list"), /left by a lost run, found 2026-11-15T03:17/, "the half-edit is kept, not thrown away");
+  assert.match(git(dir, "stash", "show", "-p", "stash@{0}"), /\+half an edit/);
+});
