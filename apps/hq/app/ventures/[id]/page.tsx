@@ -79,6 +79,8 @@ export default function VenturePage({ params }: { params: Promise<{ id: string }
           </section>
         )}
 
+        <Setup venture={id} color={c} />
+
         {id === "money" && <MayneLimits />}
 
         {d.records.map((k) => <Board key={k.kind} k={k} color={c} busy={busy}
@@ -144,6 +146,57 @@ function MetricTile({ m, color, busy, onAdd, onFix, onDelete }: { m: Metric; col
         </form>
       )}
     </div>
+  );
+}
+
+interface AgentSetup { id: string; name: string; venture: string; missing: string[]; tried: boolean; error?: string; ok: boolean }
+
+/**
+ * Setup quests: which live agents here still lack a connection or have never been tried. The Command center shows
+ * every venture's, since getting the whole web ready is its job. Hidden once everyone is ready.
+ */
+function Setup({ venture, color }: { venture: string; color: string }) {
+  const { state } = useLive();
+  const [agents, setAgents] = useState<AgentSetup[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [said, setSaid] = useState<Record<string, string>>({});
+  const load = () => api<{ agents: AgentSetup[] }>("/api/setup").then((r) => setAgents(r.agents)).catch(() => undefined);
+  useEffect(() => { void load(); }, [venture]);
+  if (!agents) return null;
+  const mine = agents.filter((a) => venture === "command" || a.venture === venture);
+  const todo = mine.filter((a) => !a.ok);
+  if (!mine.length || !todo.length) return null;
+  const tryOne = async (a: AgentSetup) => {
+    setBusy(a.id);
+    const r = await api<{ text: string; blocked?: string }>(`/api/agents/${a.id}/try`, { method: "POST" }).catch((e) => ({ text: "", blocked: (e as Error).message }));
+    setSaid((s) => ({ ...s, [a.id]: r.blocked ? `Didn't run: ${r.blocked}` : r.text }));
+    setBusy(null); await load();
+  };
+  const short = (v: string) => state?.ventures[v as keyof NonNullable<typeof state>["ventures"]]?.short ?? v;
+  return (
+    <section className="card flex flex-col gap-2" aria-label="Setup quests" style={{ borderColor: "var(--gold)" }}>
+      <div className="flex flex-wrap items-baseline gap-3">
+        <h2 className="label m-0 font-normal" style={{ color: "var(--gold)" }}>Setup quests · {mine.length - todo.length} of {mine.length} ready</h2>
+        <span className="text-[11px]" style={{ color: "var(--muted)" }}>An agent is ready once its tools are connected and it has run once without an error.{venture === "command" ? " Each team that gets there is a trophy for Command." : ""}</span>
+      </div>
+      <ul className="m-0 p-0 list-none flex flex-col">
+        {todo.map((a) => (
+          <li key={a.id} className="vitem" style={{ gridTemplateColumns: "minmax(0,1fr) auto auto" }}>
+            <div className="vitem-main" style={{ cursor: "default" }}>
+              <b>{a.name}{venture === "command" && a.venture !== "command" ? <span className="ml-2 text-[10px] tracking-[0.12em]" style={{ color: state?.ventures[a.venture as keyof NonNullable<typeof state>["ventures"]]?.color ?? color }}>{short(a.venture)}</span> : null}</b>
+              <span>
+                {a.error ? <span style={{ color: "var(--red)" }}>Last run failed: {a.error.slice(0, 140)}</span>
+                  : a.missing.length ? <>Needs {a.missing.join(", ")} connected{a.tried ? "" : ", then a first run"}</>
+                  : "Tools are connected. Never been tried."}
+              </span>
+              {said[a.id] && <span className="whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{said[a.id]}</span>}
+            </div>
+            {a.missing.length > 0 ? <Link className="btn btn-sm" href="/settings">Connect ›</Link> : <span />}
+            <button className="btn btn-sm btn-primary" disabled={busy !== null} onClick={() => void tryOne(a)} title="A first check-in: what it does, which of its tools answer, and what it still needs from you. Changes nothing.">{busy === a.id ? "Checking…" : a.tried ? "Check again" : "Try"}</button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

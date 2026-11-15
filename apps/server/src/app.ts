@@ -196,6 +196,23 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     return r ? c.json({ ok: true, undoId: r.undoId }) : c.json({ error: "not found" }, 404);
   });
 
+  // Which connections work right now: the setup quests and the phase readiness card both ask this.
+  const connectedNow = async (): Promise<Set<Connection>> => {
+    const connected = new Set<Connection>();
+    if (connectors.google && (await connectors.google.status()).connected) connected.add("Google");
+    if (connectors.x && (await connectors.x.status()).accounts.length) connected.add("X");
+    if (connectors.spotify && (await connectors.spotify.status()).connected) connected.add("Spotify");
+    if (connectors.kubera) connected.add("Kubera");
+    if (connectors.robinhood && (await connectors.robinhood.status()).connected) connected.add("Robinhood");
+    if (connectors.ghl) connected.add("GoHighLevel");
+    if (connectors.discord) connected.add("Discord");
+    if (connectors.github) connected.add("GitHub");
+    if (process.env.XAI_API_KEY) connected.add("X search");
+    if ((await healthStatus(jarvis.store)).days > 0) connected.add("Apple Health");
+    return connected;
+  };
+  jarvis.connectionProbe = connectedNow;
+
   // ---- Goals -------------------------------------------------------------------
   const goalDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "deadline must be YYYY-MM-DD");
   const goalHorizon = z.enum(["long", "mid", "short"]);
@@ -304,25 +321,22 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.get("/phase", async (c) => c.json({ phase: await jarvis.store.settings.get("phase", 0) }));
   // What the next phase's agents still lack (connections), so Phil knows who starts thin before flipping the switch.
   api.get("/phase/readiness", async (c) => {
-    const connected = new Set<Connection>();
-    if (connectors.google && (await connectors.google.status()).connected) connected.add("Google");
-    if (connectors.x && (await connectors.x.status()).accounts.length) connected.add("X");
-    if (connectors.spotify && (await connectors.spotify.status()).connected) connected.add("Spotify");
-    if (connectors.kubera) connected.add("Kubera");
-    if (connectors.robinhood && (await connectors.robinhood.status()).connected) connected.add("Robinhood");
-    if (connectors.ghl) connected.add("GoHighLevel");
-    if (connectors.discord) connected.add("Discord");
-    if (connectors.github) connected.add("GitHub");
-    if (process.env.XAI_API_KEY) connected.add("X search");
-    if ((await healthStatus(jarvis.store)).days > 0) connected.add("Apple Health");
+    const connected = await connectedNow();
     const phase = Math.min(3, Math.max(0, Number(c.req.query("phase") ?? (await jarvis.store.settings.get("phase", 0)) + 1)));
     return c.json({ phase, agents: phaseReadiness(phase, connected) });
+  });
+  // Setup quests: each live agent's missing connections and whether it has been tried; and a first check-in.
+  api.get("/setup", async (c) => c.json({ agents: await jarvis.setupStatus() }));
+  api.post("/agents/:id/try", async (c) => {
+    const r = await jarvis.tryAgent(c.req.param("id"));
+    return r ? c.json(r) : c.json({ error: "no such agent" }, 404);
   });
   api.post("/phase", async (c) => {
     const p = z.object({ phase: z.number().int().min(0).max(3) }).safeParse(await c.req.json().catch(() => ({})));
     if (!p.success) return c.json({ error: "phase 0-3" }, 400);
     await jarvis.store.settings.set("phase", p.data.phase);
     await jarvis.router.log("jarvis", "system", `Phil moved the web to Phase ${p.data.phase}`);
+    void jarvis.syncSetupGoal().catch(() => undefined);
     return c.json({ phase: p.data.phase });
   });
 

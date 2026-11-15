@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { bus, type Approval, type AttentionItem, type AutoDone, type BaseSummary, type ChatMessage, type Goal, type Benchmark, type Horizon, type SystemStatus, type Today, type Trophy } from "../events.js";
+import { bus, type AgentSetup, type Approval, type AttentionItem, type AutoDone, type BaseSummary, type ChatMessage, type Goal, type Benchmark, type Horizon, type SystemStatus, type Today, type Trophy } from "../events.js";
+import { connectionsFor, type Connection } from "../readiness.js";
 import { HORIZONS, philDay, pickToday, playerLevel, reconcileToday, streakOf, syncTrophies, ventureLevels, type TodayLog } from "../progress.js";
 import { AGENTS, CHARTERS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
 import { ModelRouter } from "../router/index.js";
@@ -1090,6 +1091,71 @@ export class Jarvis {
     await this.router.log("jarvis", "decision", `Phil undid "${e.title}" (${getAgent(e.agentId)?.name ?? e.agentId}): ${result}`, undefined, { approvalId: e.approvalId });
     bus.emitEvent({ type: "autodone" });
     return { ok: true, result };
+  }
+
+  // ---- Setup quests: every live agent connected and tried ------------------------
+
+  /** Which connections are working right now. The server sets this from its connectors; without it nothing counts as connected. */
+  connectionProbe?: () => Promise<Set<Connection>>;
+  static SETUP_GOAL_KEY = "setup.goalId";
+  static SETUP_GOAL_NAME = "Every live agent set up and tried";
+
+  /** Each live agent: what its tools still need connected, and whether it has run once without an error. Least ready first. */
+  async setupStatus(): Promise<AgentSetup[]> {
+    const connected = (await this.connectionProbe?.().catch(() => undefined)) ?? new Set<Connection>();
+    const live = (await this.snapshot()).filter((a) => a.live && a.id !== "jarvis" && a.id !== "interface");
+    return live.map((a) => {
+      const missing = connectionsFor(getAgent(a.id)!).filter((c) => !connected.has(c));
+      const tried = !!a.lastRunAt;
+      const error = a.status === "error" ? a.lastError ?? "error" : undefined;
+      return { id: a.id, name: a.name, venture: a.venture === "root" ? "command" : a.venture, missing, tried, error, ok: !missing.length && tried && !error };
+    }).sort((x, y) => Number(x.ok) - Number(y.ok) || Number(x.tried) - Number(y.tried) || y.missing.length - x.missing.length);
+  }
+
+  /**
+   * Keep the Command center's setup goal in step with reality: one benchmark per live venture ("JD PM team: connected
+   * and tried"), ticked when every live agent there is ready and unticked if one breaks. Met benchmarks are trophies,
+   * so getting the team set up levels the Command building; today's three pick the next one. If Phil deletes the
+   * goal it stays deleted.
+   */
+  async syncSetupGoal(): Promise<string> {
+    const status = await this.setupStatus();
+    if (!status.length) return "no live agents yet";
+    const goals = await this.goalList();
+    let id = await this.store.settings.get<string | null>(Jarvis.SETUP_GOAL_KEY, null);
+    if (id && !goals.some((g) => g.id === id)) return "Phil removed the setup goal; leaving it removed";
+    if (!id) {
+      id = (await this.addGoal({ name: Jarvis.SETUP_GOAL_NAME, venture: "command", horizon: "short" })).id;
+      await this.store.settings.set(Jarvis.SETUP_GOAL_KEY, id);
+    }
+    const byVenture = new Map<string, AgentSetup[]>();
+    for (const s of status) byVenture.set(s.venture, [...(byVenture.get(s.venture) ?? []), s]);
+    const text = (v: string) => `${VENTURES[v as VentureId]?.short ?? v} team: tools connected and each agent tried once`;
+    const marks = [...byVenture.keys()].sort().slice(0, 12).map((v) => ({ text: text(v), weight: byVenture.get(v)!.length }));
+    const goal = (await this.goalList()).find((g) => g.id === id)!;
+    const same = goal.benchmarks?.length === marks.length && marks.every((m) => goal.benchmarks!.some((b) => b.text === m.text && b.weight === m.weight));
+    if (!same) await this.updateGoal(id, { benchmarks: marks }, "jarvis");
+    const now = (await this.goalList()).find((g) => g.id === id)!;
+    const done: string[] = [], undone: string[] = [];
+    for (const b of now.benchmarks ?? []) {
+      const v = [...byVenture.keys()].find((k) => text(k) === b.text);
+      const ready = !!v && byVenture.get(v)!.every((s) => s.ok);
+      if (ready && !b.done) done.push(b.id);
+      if (!ready && b.done) undone.push(b.id);
+    }
+    if (done.length || undone.length) await this.updateGoal(id, { benchmarksDone: { done, undone } }, "jarvis");
+    const ready = status.filter((s) => s.ok).length;
+    return `setup: ${ready} of ${status.length} live agents ready`;
+  }
+
+  /** A first check-in for an agent Phil hasn't used much: what it does, which tools answer, what it still needs. */
+  async tryAgent(agentId: string): Promise<{ text: string; blocked?: string } | undefined> {
+    const agent = getAgent(agentId);
+    if (!agent) return undefined;
+    const r = await this.runAgent(agent, "First check-in for Phil, short enough to read on a phone. In three parts: what you do for him, in one line; each of your tools, called once read-only, and whether it answered (say plainly which didn't and why); what you still need from him to do your job well (a connection, a login, data, a decision). Change nothing and send nothing.", { direct: true, from: "Phil (setup check)" });
+    if (!r.blocked) await this.say({ role: "agent", agentId: agent.id, text: r.text, runId: r.runId });
+    void this.syncSetupGoal().catch(() => undefined);
+    return { text: r.text, blocked: r.blocked };
   }
 
   // ---- Trophies, levels, today's three -----------------------------------------

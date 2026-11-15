@@ -142,12 +142,19 @@ const SHAPE: Record<string, (i: number, j: number, st: Light, col: string, r: ()
 };
 
 /** The ground slab and its grid. Never changes. */
-const GROUND = (() => {
-  let g = poly([P(0, N), P(N, N), P(N, N, -22), P(0, N, -22)], "#070D1E") + poly([P(N, N), P(N, 0), P(N, 0, -22), P(N, N, -22)], "#050A17");
-  g += poly([P(0, 0), P(N, 0), P(N, N), P(0, N)], "url(#base-ground)", 'stroke="#6EB8FF" stroke-opacity=".45" stroke-width="1.5"');
-  for (let k = 1; k < N; k++) g += seg(P(k, 0), P(k, N), "#6EB8FF", 1, 'stroke-opacity=".06"') + seg(P(0, k), P(N, k), "#6EB8FF", 1, 'stroke-opacity=".06"');
+/**
+ * The ground. The raised, lit slab covers only what's built (from tile i0, j0 to the front corner); the rest of the
+ * plot is flat, dark, dashed land that the slab grows into as ventures open.
+ */
+function ground(i0: number, j0: number) {
+  let g = "";
+  if (i0 > 0 || j0 > 0) g += poly([P(0, 0), P(N, 0), P(N, N), P(0, N)], "#060A18", 'stroke="#6EB8FF" stroke-opacity=".22" stroke-width="1.2" stroke-dasharray="7 6"');
+  g += poly([P(i0, N), P(N, N), P(N, N, -22), P(i0, N, -22)], "#070D1E") + poly([P(N, N), P(N, j0), P(N, j0, -22), P(N, N, -22)], "#050A17");
+  g += poly([P(i0, j0), P(N, j0), P(N, N), P(i0, N)], "url(#base-ground)", 'stroke="#6EB8FF" stroke-opacity=".45" stroke-width="1.5"');
+  for (let k = Math.floor(i0) + 1; k < N; k++) g += seg(P(k, j0), P(k, N), "#6EB8FF", 1, 'stroke-opacity=".06"');
+  for (let k = Math.floor(j0) + 1; k < N; k++) g += seg(P(i0, k), P(N, k), "#6EB8FF", 1, 'stroke-opacity=".06"');
   return g;
-})();
+}
 /** Jarvis's core building (the orb on top is drawn live, so it can follow the voice state). */
 const CORE = (() => {
   const r = rng(31);
@@ -243,6 +250,13 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
       };
     }).filter((r) => r.agents.length > 0);
   }, [state, pending, attention, levels]);
+
+  // The slab reaches one tile past the farthest live building (and always holds the core), so opening a venture grows it.
+  const land = useMemo(() => {
+    const live = rows.filter((r) => r.live);
+    const edge = (k: "i" | "j") => Math.max(0, Math.floor(Math.min(5, ...live.map((r) => r[k])) - 1));
+    return ground(edge("i"), edge("j"));
+  }, [rows]);
 
   // An empty lot shows what its agents still need connected before its phase is worth starting.
   const lockedPhase = (() => { const r = rows.find((x) => x.id === sel); return r && !r.live ? r.phase : null; })();
@@ -390,7 +404,7 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
             <linearGradient id="base-alert-gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#FFE58A" /><stop offset=".55" stopColor="#FFC23A" /><stop offset="1" stopColor="#E8920A" /></linearGradient>
             <linearGradient id="base-alert-red" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#FF9AA8" /><stop offset=".55" stopColor="#FF5068" /><stop offset="1" stopColor="#C8203C" /></linearGradient>
           </defs>
-          <g dangerouslySetInnerHTML={{ __html: GROUND }} />
+          <g dangerouslySetInnerHTML={{ __html: land }} />
           {/* A line from the core to every live venture; it runs while someone there is working. */}
           {rows.filter((r) => r.live).map((r) => {
             const c = P(r.i + r.f / 2, r.j + r.f / 2), on = r.working.length > 0;

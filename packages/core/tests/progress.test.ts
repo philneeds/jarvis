@@ -182,3 +182,40 @@ test("Phil's level comes from what got done, each level a little further than th
   assert.deepEqual(after.from, { trophies: 0, fullDays: 0, todosDone: 1, decisions: 1 });
   assert.equal(after.total, 7);
 });
+
+test("setup quests: the Command goal tracks which live teams are connected and tried, and stays gone if Phil deletes it", async () => {
+  const { jarvis, store } = make();
+  await store.settings.set("phase", 1);
+  // Nothing is connected and nobody has run: every live team is a benchmark still to meet.
+  jarvis.connectionProbe = async () => new Set();
+  let status = await jarvis.setupStatus();
+  assert.ok(status.length > 5);
+  assert.ok(status.every((s) => !s.ok));
+  const karol = status.find((s) => s.id === "karol")!;
+  assert.ok(karol.missing.length > 0, "Karol's tools need a connection");
+  assert.match(await jarvis.syncSetupGoal(), /0 of \d+ live agents ready/);
+  const goal = () => jarvis.goals().then((gs) => gs.find((g) => g.name === Jarvis.SETUP_GOAL_NAME)!);
+  let g = await goal();
+  assert.equal(g.venture, "command");
+  assert.equal(g.horizon, "short");
+  assert.ok(g.benchmarks!.some((b) => /^JD PM team:/.test(b.text)));
+  // Connect everything and give every live agent a run: each team's benchmark is met, so Command earns trophies.
+  jarvis.connectionProbe = async () => new Set(["Google", "X", "X search", "Spotify", "Kubera", "Robinhood", "GoHighLevel", "Discord", "GitHub", "Apple Health"] as never);
+  for (const s of status) await store.agentState.set(s.id, { status: "idle", lastRunAt: new Date().toISOString() });
+  await jarvis.syncSetupGoal();
+  g = await goal();
+  assert.ok(g.benchmarks!.every((b) => b.done));
+  assert.equal(g.pct, 100);
+  assert.ok((await jarvis.baseSummary()).levels.command!.level >= 2, "the Command building levels up");
+  // An agent hitting an error unticks its team again.
+  await store.agentState.set("karol", { status: "error", lastError: "GoHighLevel 401", lastRunAt: new Date().toISOString() });
+  await jarvis.syncSetupGoal();
+  g = await goal();
+  assert.equal(g.benchmarks!.find((b) => /^JD PM team:/.test(b.text))!.done, false);
+  // Phil deletes the goal: it isn't put back.
+  await jarvis.deleteGoal(g.id);
+  assert.match(await jarvis.syncSetupGoal(), /leaving it removed/);
+  assert.equal((await jarvis.goals()).some((x) => x.name === Jarvis.SETUP_GOAL_NAME), false);
+  status = await jarvis.setupStatus();
+  assert.equal(status[0]!.id, "karol", "the agent with a problem is listed first");
+});
