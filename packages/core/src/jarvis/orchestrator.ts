@@ -82,6 +82,13 @@ const goalVenture = (v: string) => v !== "root" && Object.prototype.hasOwnProper
 /** Which payload field holds the text Phil edits on the card, per action. */
 const TEXT_FIELD: Record<string, string> = { "gmail.send": "body", "x.post": "text", "x.reply": "text", "x.dm": "text", "ghl.message": "message" };
 
+/** Phil has edited this card or asked the agent about it: it is his now, and nothing replaces it behind his back. */
+const philTouched = (x: Pick<Approval, "original" | "editedBy" | "thread">) => x.original !== undefined || !!x.editedBy || (x.thread?.length ?? 0) > 0;
+const isShipCard = (x: Pick<Approval, "payload">) => /^(code\.ship|hq\.update)$/.test(String((x.payload as { action?: unknown } | undefined)?.action ?? ""));
+const sameText = (x: string, y: string) => x.replace(/\s+/g, " ").trim().toLowerCase() === y.replace(/\s+/g, " ").trim().toLowerCase();
+/** JSON with keys in a fixed order, so two payloads compare equal whatever order the store returns them in. */
+const stable = (v: unknown): string => Array.isArray(v) ? `[${v.map(stable).join(",")}]` : v && typeof v === "object" ? `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(",")}}` : JSON.stringify(v) ?? "null";
+
 export class Jarvis {
   readonly store: Store;
   readonly router: ModelRouter;
@@ -466,7 +473,7 @@ export class Jarvis {
     const status = await this.systemStatus();
     const recent = (await this.store.chat.list(12)).slice(0, -1).map((m) => `${m.role === "phil" ? "Phil" : m.agentId ?? "Jarvis"}: ${m.text.slice(0, 300)}`).join("\n");
     const { recentReports, reportsText } = await import("../scheduler.js");
-    const system = jarvisSystemPrompt(memory, `${status.text}\n${await this.liveWorkText()}`, await this.attentionText(), reportsText(await recentReports(this.store, 48))) + await this.connectionsText();
+    const system = jarvisSystemPrompt(memory, `${status.text}\n${await this.liveWorkText()}`, await this.attentionText(), reportsText(await recentReports(this.store, 48))) + await this.connectionsText() + await this.pendingText("jarvis");
 
     const imageIds = this.convo.getStore()?.images ?? [];
     const byVoice = this.convo.getStore()?.voice ? "\n\n(Phil said this as a voice note; it was transcribed, so an odd word may be a mishearing. Don't say you can't tell how it arrived.)" : "";
@@ -557,7 +564,7 @@ export class Jarvis {
         workshopHint = `\n\n${WORKSHOP_HINT(w.dir, w.branch, w.base)}`;
       } catch (e) { workshopHint = `\n\nYour workshop couldn't be opened (${(e as Error).message.slice(0, 200)}), so you can't change code this run; say so and diagnose with the tools you have.`; }
     }
-    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "") + workshopHint + await this.connectionsText();
+    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "") + workshopHint + await this.connectionsText() + await this.pendingText(agent.id);
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
     // Images Phil attached to this conversation go with every run in it, including hand-offs; agents that read uploaded
     // data also see this week's screenshots.
@@ -637,7 +644,7 @@ export class Jarvis {
   }
 
   private async absorb(agent: AgentDef, approvals: ReturnType<typeof extractBlocks>["approvals"], remember: ReturnType<typeof extractBlocks>["remember"], runId?: string, metrics: ReturnType<typeof extractBlocks>["metrics"] = [], records: ReturnType<typeof extractBlocks>["records"] = []) {
-    for (const a of approvals) await this.requestApproval({ agentId: agent.id, ...a, runId });
+    for (const { replaces, ...a } of approvals) await this.requestApproval({ agentId: agent.id, ...a, runId }, { replaces });
     for (const m of remember) {
       await this.store.memory.set({ scope: m.scope, key: m.key, value: m.value, source: agent.id });
       await this.router.log(agent.id, "memory", memoryLine(agent.name, m.scope, m.key, agent.id), runId, { scope: m.scope, key: m.key, value: m.value });
@@ -1602,7 +1609,21 @@ export class Jarvis {
 
   // ---- Approvals ----------------------------------------------------------
 
-  async requestApproval(a: Omit<Approval, "id" | "at" | "status">): Promise<Approval> {
+  /**
+   * An agent's own cards still waiting on Phil, for its prompt: it checks a new proposal against these and names the
+   * ones the new card replaces, so a second request never leaves two cards about one thing.
+   */
+  async pendingText(agentId: string): Promise<string> {
+    const mine = (await this.store.approvals.list("pending")).filter((x) => x.agentId === agentId).slice(0, 12);
+    if (!mine.length) return "";
+    const line = (x: Approval) => {
+      const action = (x.payload as { action?: unknown } | undefined)?.action;
+      return `- ${x.id.slice(0, 8)} · ${x.kind}${typeof action === "string" ? ` · ${action}` : ""} · "${x.title.slice(0, 140)}" · filed ${x.at.slice(0, 16).replace("T", " ")} UTC${philTouched(x) ? " · Phil edited or asked about this one, so it can't be replaced: answer him on it instead" : ""}${x.body ? `\n  ${x.body.replace(/\s+/g, " ").slice(0, 260)}` : ""}`;
+    };
+    return `\n\nYour cards still waiting on Phil (HQ's live list, newest first). Check any new proposal against these before you file it; to replace one, put its id in "replaces":\n${mine.map(line).join("\n")}`;
+  }
+
+  async requestApproval(a: Omit<Approval, "id" | "at" | "status">, opts: { replaces?: string[] } = {}): Promise<Approval> {
     const payload0 = a.payload;
     if (payload0) for (const n of this.normalizers) { try { const p = await n(a.payload ?? payload0, a.agentId); if (p) a = { ...a, payload: p }; } catch { /* a connector that can't help leaves the payload as it was */ } }
     for (const pf of this.preflights) {
@@ -1615,10 +1636,26 @@ export class Jarvis {
         return refused;
       }
     }
-    // A revised card replaces the agent's older pending card for the same thing, so Phil never approves both.
-    const replaced = (await this.store.approvals.list("pending")).filter((old) => supersedes(a, old));
+    const pendingNow = await this.store.approvals.list("pending");
+    // The same card filed twice (same agent, title, text and payload) is one card: the one already waiting.
+    const twin = pendingNow.find((old) => old.agentId === a.agentId && old.kind === a.kind && sameText(old.title, a.title) && sameText(old.body, a.body) && stable(old.payload ?? {}) === stable(a.payload ?? {}));
+    if (twin) {
+      await this.router.log(a.agentId, "system", `${getAgent(a.agentId)?.name ?? a.agentId}: "${a.title}" is already waiting on Phil; not filed twice`, a.runId, { approvalId: twin.id });
+      return twin;
+    }
+    // A revised card replaces the agent's older pending card for the same thing, so Phil never approves both: the
+    // ones HQ can tell are the same (same event, same email, same record), and the ones the agent names in "replaces"
+    // after checking its waiting cards. Only its own cards, never a code ship or an update, and never one Phil has
+    // edited or asked about: that one stays, and the new card says so.
+    const named = pendingNow.filter((old) => old.agentId === a.agentId && (opts.replaces ?? []).some((n) => old.id === n || old.id.startsWith(n)));
+    const kept = named.filter((old) => philTouched(old) || isShipCard(old));
+    const replaced = [...new Map([...pendingNow.filter((old) => supersedes(a, old)), ...named.filter((old) => !kept.includes(old))].map((x) => [x.id, x])).values()];
     const effect0 = a.effect ?? this.effectOf(a);
-    const approval: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "pending", ...a, effect: replaced.length ? `${effect0 ?? ""}${effect0 ? " " : ""}Replaces ${replaced.length === 1 ? "the older card" : `${replaced.length} older cards`}: ${replaced.map((r) => `"${r.title}"`).join(", ")}.` : effect0 };
+    const notes = [
+      replaced.length ? `Replaces ${replaced.length === 1 ? "the older card" : `${replaced.length} older cards`}: ${replaced.map((r) => `"${r.title}"`).join(", ")}.` : "",
+      kept.length ? `Overlaps ${kept.map((r) => `"${r.title}"`).join(", ")}, still waiting because ${kept.every(isShipCard) ? "a code or update card is never replaced" : "you edited or asked about it"}: decide that one too.` : "",
+    ].filter(Boolean).join(" ");
+    const approval: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "pending", ...a, effect: notes ? `${effect0 ?? ""}${effect0 ? " " : ""}${notes}` : effect0 };
     await this.store.approvals.add(approval);
     for (const old of replaced) {
       const done = await this.store.approvals.update(old.id, { status: "rejected", decidedAt: new Date().toISOString(), note: `superseded: replaced by the newer card "${approval.title}"` });

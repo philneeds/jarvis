@@ -1,11 +1,18 @@
 import type { ApprovalKind } from "../events.js";
 
-export interface ApprovalBlock { kind: ApprovalKind; title: string; body: string; payload?: Record<string, unknown>; context?: string }
+/** `replaces`: ids (or their first 8 characters) of this agent's own pending cards that the new card takes the place of. */
+export interface ApprovalBlock { kind: ApprovalKind; title: string; body: string; payload?: Record<string, unknown>; context?: string; replaces?: string[] }
 export interface RememberBlock { scope: string; key: string; value: string }
 export interface MetricBlock { venture: string; key: string; value: number; at?: string }
 export interface RecordBlock { venture: string; kind: string; id?: string; title: string; status?: string; fields?: Record<string, unknown> }
 export interface HandoffBlock { agent: string; task: string }
 export interface AttentionBlock { title: string; why: string; due?: string; venture?: string }
+
+/** Card ids an agent named, as a list: a string, a comma list or an array; "#" and stray spaces dropped. */
+const idList = (v: unknown): string[] | undefined => {
+  const list = (Array.isArray(v) ? v : typeof v === "string" ? v.split(/[,\s]+/) : []).map((x) => String(x).trim().replace(/^#/, "").toLowerCase()).filter((x) => /^[0-9a-f-]{6,36}$/.test(x));
+  return list.length ? [...new Set(list)].slice(0, 12) : undefined;
+};
 
 const KINDS: ApprovalKind[] = ["send", "post", "money", "strategy", "config", "record", "other"];
 
@@ -28,7 +35,7 @@ export function extractBlocks(text: string): { text: string; approvals: Approval
       for (const it of items) {
         const o = it as Partial<ApprovalBlock>;
         if (!o || typeof o !== "object" || !o.title) continue;
-        approvals.push({ kind: KINDS.includes(o.kind as ApprovalKind) ? (o.kind as ApprovalKind) : "other", title: String(o.title), body: String(o.body ?? ""), payload: o.payload && typeof o.payload === "object" ? (o.payload as Record<string, unknown>) : undefined, context: o.context ? String(o.context) : undefined });
+        approvals.push({ kind: KINDS.includes(o.kind as ApprovalKind) ? (o.kind as ApprovalKind) : "other", title: String(o.title), body: String(o.body ?? ""), payload: o.payload && typeof o.payload === "object" ? (o.payload as Record<string, unknown>) : undefined, context: o.context ? String(o.context) : undefined, replaces: idList((o as { replaces?: unknown }).replaces) });
       }
       return approvals.length ? `[Approval queued: ${approvals[approvals.length - 1]!.title}]` : _m;
     }

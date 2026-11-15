@@ -187,7 +187,7 @@ export function ApprovalsPanel({ tab, id = "approve" }: { tab: ApprovalsTab; id?
             ) : (
               <p className="m-0 text-[13px] whitespace-pre-wrap leading-relaxed">{a.body}</p>
             )}
-            {(a.kind === "strategy" || a.kind === "money") && a.status === "pending" && <MayneLimits compact />}
+            {(a.kind === "strategy" || a.kind === "money") && a.status === "pending" && (a.agentId === "mayne" || /^(trade|strategy|order|hyperliquid)\./.test(typeof a.payload?.action === "string" ? a.payload.action : "")) && <MayneLimits compact />}
 
             {a.status === "pending" && !isEditing && (
               <div className="grid grid-cols-4 gap-2">
