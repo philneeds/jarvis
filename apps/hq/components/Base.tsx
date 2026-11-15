@@ -218,6 +218,7 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
   const { state, pending, attention, setPending } = useLive();
   const [sel, setSel] = useState<string | null>(null);
   const [pop, setPop] = useState<string | null>(null);
+  const [popAt, setPopAt] = useState(0); // which item of the open card: problems first, then approvals, then to-dos
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const { base, goals, toggle, repick } = useBase();
@@ -234,7 +235,7 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
     const home = (agentId: string) => { const v = state.agents.find((a) => a.id === agentId)?.venture; return !v || v === "root" ? "command" : v; };
     const open = attention.filter((x) => x.status === "open");
     return SPOTS.map((s) => {
-      const agents = state.agents.filter((a) => a.id !== "jarvis" && (a.venture === s.id || (s.id === "command" && a.venture === "root")));
+      const agents = state.agents.filter((a) => a.id !== "jarvis" && a.id !== "interface" && (a.venture === s.id || (s.id === "command" && a.venture === "root")));
       const live = agents.some((a) => a.live);
       const working = agents.filter((a) => a.status === "working"), errors = agents.filter((a) => a.status === "error");
       const approvals = pending.filter((p) => home(p.agentId) === s.id);
@@ -307,13 +308,15 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
   // The card that opens from a bubble: problems first, then approvals, then to-dos, one at a time.
   const card = popRow && (() => {
     const n = popRow.errors.length + popRow.approvals.length + popRow.todos.length;
-    const e = popRow.errors[0], a = popRow.approvals[0], t = popRow.todos[0];
     if (!n) return null;
+    const at = Math.min(popAt, n - 1);
+    const e = popRow.errors[at], a = e ? undefined : popRow.approvals[at - popRow.errors.length], t = e || a ? undefined : popRow.todos[at - popRow.errors.length - popRow.approvals.length];
     const who = (id: string) => state.agents.find((x) => x.id === id)?.name ?? id;
     return (
       <div className="base-pop" data-side={popRow.L[0] > 900 ? "left" : "right"} data-kind={e ? "bad" : "need"} style={pct([popRow.L[0], Math.max(VB.y + 20, popRow.L[1] - 130)])} role="dialog" aria-label={`${popRow.label}: waiting on you`}>
         <button className="base-x" onClick={() => setPop(null)} aria-label="Close">✕</button>
-        <span className="base-tag">{e ? "Problem" : a ? "Needs you" : "To do"} · {popRow.label}{n > 1 ? ` · 1 of ${n}` : ""}</span>
+        <span className="base-tag">{e ? "Problem" : a ? "Needs you" : "To do"} · {popRow.label}{n > 1 ? ` · ${at + 1} of ${n}` : ""}</span>
+        {n > 1 && <span className="base-btns" style={{ marginTop: 0 }}><button className="btn btn-sm" onClick={() => { setError(undefined); setPopAt((at + n - 1) % n); }} aria-label="Previous">‹</button><button className="btn btn-sm" onClick={() => { setError(undefined); setPopAt((at + 1) % n); }} aria-label="Next">Next ›</button></span>}
         {e ? (
           <>
             <b>{e.name} hit an error</b>
@@ -419,7 +422,8 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
             if (o.id === "core") {
               return (
                 <g key="core" role="button" tabIndex={0} aria-label="Jarvis. Clears your selection so the next message goes to him." className="base-hit" onClick={clear} onKeyDown={key(clear)}>
-                  <rect x={orb[0] - 110} y={orb[1] - 50} width={220} height={250} fill="transparent" />
+                  {/* The click area is the orb and the painted building, not a box: a box this size covered the agents standing outside PhilNeeds and parts of two buildings behind. */}
+                  <circle cx={orb[0]} cy={orb[1]} r={40} fill="transparent" />
                   <g dangerouslySetInnerHTML={{ __html: CORE }} />
                   <line x1={orb[0]} y1={orb[1] + 20} x2={orb[0]} y2={orb[1] + 40} stroke="#9FD2FF" strokeWidth={2} />
                   <circle className="base-breathe" cx={orb[0]} cy={orb[1]} r={40} fill="url(#base-orb)" />
@@ -474,7 +478,9 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
           {rows.map((r) => {
             const n = r.approvals.length + r.todos.length, both = n > 0 && r.errors.length > 0, work = r.working.length > 0;
             const by = r.L[1] - (work ? 72 : 46);
-            const open = () => { setSel(r.id); setPop(r.id); setError(undefined); };
+            const openAt = (at: number) => () => { setSel(r.id); setPop(r.id); setPopAt(at); setError(undefined); };
+            // The gold sign opens the first thing waiting on Phil; the red one opens the first problem.
+            const open = openAt(r.errors.length), openBad = openAt(0);
             return (
               <g key={r.id}>
                 <text x={r.L[0]} y={r.L[1]} textAnchor="middle" className={`base-lbl base-big ${r.live ? "" : "base-lot"}`} fill={r.color} fillOpacity={r.live ? 1 : 0.7}>{r.label}</text>
@@ -486,7 +492,7 @@ export function Base({ core = "idle", target, onTarget }: { core?: CoreState; ta
                   </g>
                 )}
                 {n > 0 && <Alert x={r.L[0] - (both ? 28 : 0)} y={by} n={n} kind="need" label={`${r.label}: ${n} waiting on your decision. Open.`} onOpen={open} onKey={key(open)} />}
-                {r.errors.length > 0 && <Alert x={r.L[0] + (both ? 28 : 0)} y={by} n={r.errors.length} kind="bad" label={`${r.label}: ${r.errors.length} problem${r.errors.length === 1 ? "" : "s"}. Open.`} onOpen={open} onKey={key(open)} />}
+                {r.errors.length > 0 && <Alert x={r.L[0] + (both ? 28 : 0)} y={by} n={r.errors.length} kind="bad" label={`${r.label}: ${r.errors.length} problem${r.errors.length === 1 ? "" : "s"}. Open.`} onOpen={openBad} onKey={key(openBad)} />}
               </g>
             );
           })}

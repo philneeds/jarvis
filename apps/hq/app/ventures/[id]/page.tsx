@@ -87,8 +87,8 @@ export default function VenturePage({ params }: { params: Promise<{ id: string }
           onSave={(body) => act(() => api(`/api/ventures/${id}/records`, { method: "PUT", body: JSON.stringify(body) }))}
           onRemove={async (r) => { const res = await api<{ undoId: string }>(`/api/ventures/${id}/records/${r.id}`, { method: "DELETE" }).catch((e) => { setErr((e as Error).message); return null; }); if (res) { await load(); showUndo(`Removed “${r.title}”`, res.undoId, () => void load()); } }} />)}
 
-        <div className="grid gap-4 md:grid-cols-2 items-start">
-          <section className="card flex flex-col gap-1" aria-label="Team">
+        <div className="grid gap-4 grid-cols-1 md:grid-cols-2 items-start">
+          <section className="card flex flex-col gap-1 min-w-0" aria-label="Team">
             <span className="label mb-1" style={{ color: c }}>Team · {d.agents.length}</span>
             {d.agents.map((a) => (
               <Link key={a.id} href={`/agents/${a.id}`} className="vrow" style={{ opacity: a.live ? 1 : 0.5 }}>
@@ -99,7 +99,7 @@ export default function VenturePage({ params }: { params: Promise<{ id: string }
               </Link>
             ))}
           </section>
-          <section className="card flex flex-col gap-2" aria-label="Recent">
+          <section className="card flex flex-col gap-2 min-w-0" aria-label="Recent">
             <span className="label" style={{ color: c }}>Recent</span>
             {recent.length === 0 && <span className="text-[12px]" style={{ color: "var(--muted)" }}>Nothing yet. Hand-offs, approvals and board changes show here{lead ? <>; <Link href={`/command?say=${encodeURIComponent(`@${lead.id} `)}`}>give {lead.name} a task</Link></> : ""}.</span>}
             {recent.slice(0, 8).map((e) => <div key={e.id} className="text-[12px] grid grid-cols-[6.5rem_minmax(0,1fr)] gap-2"><span style={{ color: "var(--dim)" }}>{fmtTime(e.at)}</span><span className="break-words">{e.summary}</span></div>)}
@@ -220,7 +220,7 @@ function Board({ k, color, busy, onSave, onRemove }: { k: Kind; color: string; b
   const save = async () => {
     if (!draft.title.trim()) return;
     const fields: Record<string, unknown> = {};
-    for (const [key, v] of Object.entries(draft.fields)) { if (v === "") continue; const f = k.fields.find((x) => x.key === key); fields[key] = f?.type === "number" || f?.type === "money" ? Number(v) : v; }
+    for (const [key, v] of Object.entries(draft.fields)) { if (v === "") { if (draft.id) fields[key] = ""; continue; } const f = k.fields.find((x) => x.key === key); fields[key] = f?.type === "number" || f?.type === "money" ? Number(v) : v; }
     if (await onSave({ kind: k.kind, id: draft.id, title: draft.title.trim(), status: draft.status, fields })) setEditing(null);
   };
   const form = (

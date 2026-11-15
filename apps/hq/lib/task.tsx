@@ -32,7 +32,7 @@ export function useTask() {
 }
 
 function TaskPanel({ task, onClose }: { task: TaskRef; onClose: () => void }) {
-  const { state, attention, pending, setPending } = useLive();
+  const { state, attention, pending, setPending, onEvent } = useLive();
   const [all, setAll] = useState<AttentionItem[] | null>(null); // includes finished ones, for a to-do ticked meanwhile
   const [agents, setAgents] = useState<string[]>([]);
   const [to, setTo] = useState<string | null>(null);
@@ -53,6 +53,9 @@ function TaskPanel({ task, onClose }: { task: TaskRef; onClose: () => void }) {
     api<{ agents: string[] }>(`/api/attention/${task.id}/agents`).then((r) => setAgents(r.agents)).catch(() => undefined);
     if (!attention.some((i) => i.id === task.id)) api<{ items: AttentionItem[] }>("/api/attention?all=1").then((r) => setAll(r.items)).catch(() => undefined);
   }, [task.kind, task.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The live list drops a to-do once it's finished, so keep this one's updates here too: a finished to-do's
+  // conversation, and one ticked on another device while this panel is open, used to go blank.
+  useEffect(() => (task.kind === "todo" ? onEvent((e) => { if (e.type === "attention" && e.item.id === task.id) setAll((l) => [e.item, ...(l ?? []).filter((i) => i.id !== e.item.id)]); }) : undefined), [task.kind, task.id, onEvent]);
   useEffect(() => { if (!to && agents.length) setTo(agents[0]!); }, [agents, to]);
   useEffect(() => { const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", esc); return () => window.removeEventListener("keydown", esc); }, [onClose]);
   useEffect(() => { input.current?.focus(); }, [task.id]);
@@ -66,7 +69,7 @@ function TaskPanel({ task, onClose }: { task: TaskRef; onClose: () => void }) {
     if (!q || asking) return;
     setErr(undefined); setText(""); setAsking(true);
     try {
-      if (task.kind === "todo") await post(`/api/attention/${task.id}/ask`, { question: q, agentId: to ?? undefined });
+      if (task.kind === "todo") { const r = await post<{ item?: AttentionItem }>(`/api/attention/${task.id}/ask`, { question: q, agentId: to ?? undefined }); if (r?.item) setAll((l) => [r.item!, ...(l ?? []).filter((i) => i.id !== r.item!.id)]); }
       else { const r = await post<{ approval: Approval }>(`/api/approvals/${task.id}/ask`, { question: q }); setPending((p) => p.map((x) => (x.id === r.approval.id ? r.approval : x))); }
     } catch (e) { setErr((e as Error).message); setText(q); } finally { setAsking(false); }
   };

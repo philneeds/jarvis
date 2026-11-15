@@ -94,7 +94,10 @@ export function pickToday(date: string, ctx: TodayContext, now: string = new Dat
 export function reconcileToday(today: Today, ctx: TodayContext, now: string = new Date().toISOString()): { today: Today; changed: boolean } {
   let changed = false;
   const pending = new Set(ctx.pending.map((a) => a.id));
-  const items = today.items.map((it) => {
+  // A "Decide" item whose card was withdrawn or replaced has nothing left to decide: it comes off the list.
+  const live = ctx.decided ? today.items.filter((it) => it.done || it.ref?.kind !== "approval" || pending.has(it.ref.id) || ctx.decided!.has(it.ref.id)) : today.items;
+  if (live.length !== today.items.length) changed = true;
+  const items = live.map((it) => {
     if (it.done || !it.ref) return it;
     // "Decide: …" is done when Phil decided it, not when the card went away: one that was replaced or withdrawn
     // would otherwise hand him a finished day (and its XP) for a decision he never made.

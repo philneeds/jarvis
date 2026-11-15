@@ -197,7 +197,7 @@ test("a 'Decide' item ticks when Phil decides, not when the card is replaced or 
   const second = await jarvis.requestApproval({ agentId: "stella", kind: "send", title: "Email Tracy (revised)", body: "v2", payload: { action: "gmail.send", to: "t@example.com", subject: "Roof", body: "v2" }, runId: "r2" });
   assert.match((await store.approvals.get(first.id))?.note ?? "", /^superseded/);
   ({ today } = await jarvis.today());
-  assert.equal(today.items.find((i) => i.ref?.id === first.id)?.done, false, "a withdrawn card isn't a decision");
+  assert.equal(today.items.find((i) => i.ref?.id === first.id), undefined, "a withdrawn card isn't a decision: it leaves the list unticked");
   assert.equal((await jarvis.baseSummary()).player.from.fullDays, 0);
   // Phil decides the one on today's list after a fresh pick: now it ticks.
   await jarvis.repickToday();

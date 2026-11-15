@@ -21,7 +21,7 @@ export function TodoPanel({ id = "todo", showDone = false }: { id?: string; show
 
   useEffect(() => { if (tab === "done") api<{ items: AttentionItem[] }>("/api/attention?all=1").then((r) => setDone(r.items.filter((i) => i.status === "done").sort((a, b) => ((a.doneAt ?? "") < (b.doneAt ?? "") ? 1 : -1)))).catch(() => undefined); }, [tab, attention.length]);
 
-  const act = async (i: AttentionItem, change: "done" | "snoozed" | "reopened") => { setBusy(i.id); try { await post(`/api/attention/${i.id}/${change}`, change === "snoozed" ? { days: 3 } : undefined); } finally { setBusy(null); } };
+  const act = async (i: AttentionItem, change: "done" | "snoozed" | "reopened") => { setBusy(i.id); setErr(undefined); try { await post(`/api/attention/${i.id}/${change}`, change === "snoozed" ? { days: 3 } : undefined); } catch (e) { setErr(`That didn't save: ${(e as Error).message}`); } finally { setBusy(null); } };
   const isDate = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
   const startEdit = (i: AttentionItem) => { setEditing(i.id); setErr(undefined); setDraft({ title: i.title, why: i.why, due: isDate(i.due) ? i.due! : "" }); };
   const saveEdit = async (i: AttentionItem) => {
@@ -48,6 +48,7 @@ export function TodoPanel({ id = "todo", showDone = false }: { id?: string; show
   return (
     <section id={id} aria-labelledby={`${id}-title`} className="flex flex-col gap-4 scroll-mt-20">
       <h2 id={`${id}-title`} className="sr-only">{tab === "open" ? "To do" : "Done"}</h2>
+      {err && !editing && <p role="alert" className="m-0 text-[12px]" style={{ color: "var(--red)" }}>{err}</p>}
       <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>{tab === "open" ? `Things only you can do, oldest first.${snoozed.length ? ` ${snoozed.length} snoozed.` : ""}` : "What you've ticked off."}</p>
 
       {tab === "open" && <form onSubmit={add} className="card flex flex-wrap gap-2 items-end">

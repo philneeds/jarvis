@@ -22,6 +22,10 @@ const REPLY_WINDOW_MS = 6_000;
 const APPROVAL_VOICE_WINDOW_MS = 20_000;
 
 export default function AmbientPage() {
+  // The orb's size depends on the screen, which the server can't know: start at the server's size and fit after
+  // mounting. Reading the window during render made the phone's first paint disagree with the server's HTML.
+  const [orbSize, setOrbSize] = useState(360);
+  useEffect(() => { const fit = () => setOrbSize(Math.min(360, window.innerWidth - 48)); fit(); window.addEventListener("resize", fit); return () => window.removeEventListener("resize", fit); }, []);
   const { state, onEvent, pending, send: submit } = useLive();
   const [phase, setPhase] = useState<Phase>("off");
   const [cfg, setCfg] = useState<{ wakeWordKey: string | null; tz: string; voice: boolean } | null>(null);
@@ -217,7 +221,7 @@ export default function AmbientPage() {
   const tz = cfg?.tz ?? "America/New_York";
 
   return (
-    <div className="grid-bg min-h-dvh flex flex-col items-center justify-between relative overflow-hidden select-none" style={{ padding: "max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom))" }}>
+    <div className="grid-bg ambient-pad min-h-dvh flex flex-col items-center justify-between relative overflow-hidden select-none">
       <Skyline dim />
       <div className="corner tl" /><div className="corner tr" /><div className="corner bl" /><div className="corner br" />
       <header className="relative w-full max-w-3xl flex items-start justify-between" style={{ zIndex: 1 }}>
@@ -233,7 +237,7 @@ export default function AmbientPage() {
       </header>
 
       <main className="relative flex flex-col items-center gap-5 w-full max-w-2xl" style={{ zIndex: 1 }}>
-        <Core state={coreState} level={voice.level} size={Math.min(360, typeof window !== "undefined" ? window.innerWidth - 48 : 360)} label={label} />
+        <Core state={coreState} level={voice.level} size={orbSize} label={label} />
         <p className="m-0 text-center text-[13px] tracking-[0.08em]" style={{ color: "var(--amber)", minHeight: 20 }}>{voice.interim || line}</p>
         {reply && <p className="m-0 text-center text-[15px] leading-relaxed max-h-48 overflow-y-auto px-2" style={{ color: "var(--ink-strong)" }}>{reply.slice(0, 900)}</p>}
         {note && <p className="m-0 text-center text-[11px]" style={{ color: "var(--red)" }}>{note}</p>}

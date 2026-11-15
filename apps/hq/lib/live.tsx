@@ -88,12 +88,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof window !== "undefined" && isPublicPath(location.pathname)) return;
-    let stop = false, retry = 1000, ws: WebSocket | null = null, timer: ReturnType<typeof setTimeout> | undefined;
+    let stop = false, retry = 1000, opened = 0, ws: WebSocket | null = null, timer: ReturnType<typeof setTimeout> | undefined;
     const connect = () => {
       if (stop) return;
       try { ws = new WebSocket(wsUrl()); } catch { timer = setTimeout(connect, retry); return; }
       wsRef.current = ws;
-      ws.onopen = () => { setConnected(true); retry = 1000; };
+      // After a drop (phone asleep, network gone) nothing that happened in the gap was delivered: fetch it again.
+      ws.onopen = () => { setConnected(true); retry = 1000; if (opened++ > 0) void refresh(); };
       ws.onclose = () => { setConnected(false); if (!stop) { timer = setTimeout(connect, retry); retry = Math.min(retry * 2, 15000); } };
       ws.onerror = () => ws?.close();
       ws.onmessage = (ev) => {
@@ -157,8 +158,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       };
     };
     connect();
+    // A tab left in the background can miss events without the socket ever closing (a phone asleep): catch up on return.
+    let hiddenAt = 0;
+    const seen = () => { if (document.hidden) hiddenAt = Date.now(); else if (hiddenAt && Date.now() - hiddenAt > 60_000) { hiddenAt = 0; void refresh(); } };
+    document.addEventListener("visibilitychange", seen);
     const ping = setInterval(() => { if (ws?.readyState === WebSocket.OPEN) ws.send("ping"); }, 25000);
-    return () => { stop = true; clearInterval(ping); if (timer) clearTimeout(timer); ws?.close(); };
+    return () => { stop = true; clearInterval(ping); document.removeEventListener("visibilitychange", seen); if (timer) clearTimeout(timer); ws?.close(); };
   }, [wsGen]);
 
   const value = useMemo<Live>(() => ({

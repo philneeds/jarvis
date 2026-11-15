@@ -18,8 +18,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     location.href = `/login?next=${encodeURIComponent(location.pathname)}`;
   }
   if (!res.ok) {
-    let msg = res.statusText;
-    try { msg = ((await res.json()) as { error?: string }).error ?? msg; } catch { /* ignore */ }
+    let msg = res.statusText || `The server said no (${res.status})`;
+    try { const j = (await res.json()) as { error?: string; result?: string; message?: string }; msg = j.error ?? j.result ?? j.message ?? msg; } catch { /* ignore */ }
     throw new ApiError(res.status, msg);
   }
   return (await res.json()) as T;
