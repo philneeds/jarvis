@@ -549,7 +549,7 @@ export class Jarvis {
     type Report = { agent: AgentDef; task: string; text: string; blocked?: string; late?: boolean };
     const runs = delegations.map((d) => this.runAgent(d.agent, d.task, { direct: true, parentRunId: planRun.runId, from: "Jarvis" }).then((r) => ({ agent: d.agent, task: d.task, text: r.text, blocked: r.blocked }) as Report));
     const reports: Report[] = await Promise.all(runs.map((pr, i) => Promise.race([pr, new Promise<Report>((res) => setTimeout(() => res({ agent: delegations[i]!.agent, task: delegations[i]!.task, text: "", blocked: "still working; their report will follow", late: true }), Jarvis.DELEGATE_TIMEOUT_MS))])));
-    reports.forEach((r, i) => { if (r.late) void runs[i]!.then(async (late) => { await this.say({ role: "agent", agentId: late.agent.id, text: late.blocked ? `(${late.agent.name} did not run: ${late.blocked})` : `Late report: ${late.text}`, kind: "progress", via: ["jarvis"] }); }); });
+    reports.forEach((r, i) => { if (r.late) void runs[i]!.then(async (late) => { await this.say({ role: "agent", agentId: late.agent.id, text: late.blocked ? `(${late.agent.name} did not run: ${late.blocked})` : `Late report: ${late.text}`, kind: "progress", via: ["jarvis"] }); }).catch((e) => void this.router.log(delegations[i]!.agent.id, "error", `${delegations[i]!.agent.name}'s late report failed: ${(e as Error).message}`).catch(() => undefined)); });
 
     const synth = await this.router.run(jarvis, { system, prompt: synthesisPrompt(userText, reports), direct: true, parentRunId: planRun.runId, maxTurns: 1, onDelta: this.streamer("jarvis") });
     const final = synth.blocked
@@ -667,7 +667,7 @@ export class Jarvis {
       await this.store.memory.set({ scope: m.scope, key: m.key, value: m.value, source: agent.id });
       await this.router.log(agent.id, "memory", memoryLine(agent.name, m.scope, m.key, agent.id), runId, { scope: m.scope, key: m.key, value: m.value });
     }
-    for (const m of metrics) await this.recordMetric(m.venture as VentureId, m.key, m.value, agent.id, m.at, runId);
+    for (const m of metrics) { try { await this.recordMetric(m.venture as VentureId, m.key, m.value, agent.id, m.at, runId); } catch (e) { await this.router.log(agent.id, "error", `${agent.name}: a metric wasn't saved (${(e as Error).message})`, runId); } }
     for (const r of records) {
       // A run's own summary ("Daily lead check: no new leads") isn't a lead, a job or a post: keep it off the board.
       if (!r.id && looksLikeRunReport(r.title)) { await this.router.log(agent.id, "system", `${agent.name}'s board entry "${r.title.slice(0, 80)}" read like a run summary, not an item; left off the board.`, runId); continue; }
@@ -1658,7 +1658,7 @@ export class Jarvis {
     if (!mine.length) return "";
     const line = (x: Approval) => {
       const action = (x.payload as { action?: unknown } | undefined)?.action;
-      return `- ${x.id.slice(0, 8)} · ${x.kind}${typeof action === "string" ? ` · ${action}` : ""} · "${x.title.slice(0, 140)}" · filed ${x.at.slice(0, 16).replace("T", " ")} UTC${philTouched(x) ? " · Phil edited or asked about this one, so it can't be replaced: answer him on it instead" : ""}${x.body ? `\n  ${x.body.replace(/\s+/g, " ").slice(0, 260)}` : ""}`;
+      return `- ${x.id.slice(0, 8)} · ${x.kind}${typeof action === "string" ? ` · ${action}` : ""} · "${x.title.replace(/\s+/g, " ").slice(0, 140)}" · filed ${x.at.slice(0, 16).replace("T", " ")} UTC${philTouched(x) ? " · Phil edited or asked about this one, so it can't be replaced: answer him on it instead" : ""}${x.body ? `\n  ${x.body.replace(/\s+/g, " ").slice(0, 260)}` : ""}`;
     };
     return `\n\nYour cards still waiting on Phil (HQ's live list, newest first). Check any new proposal against these before you file it; to replace one, put its id in "replaces":\n${mine.map(line).join("\n")}`;
   }

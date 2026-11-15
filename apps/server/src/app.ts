@@ -5,12 +5,21 @@ import { randomBytes } from "node:crypto";
 import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
-import { authEnabled, isAuthed, login, logout, requireAuth } from "./auth.js";
+import { authEnabled, clientIp, fromHq, isAuthed, login, loginFailed, loginWait, logout, requireAuth } from "./auth.js";
+
+/** A count from the query string: a whole number from 1 to max, else the default ("abc" and -5 used to reach the store). */
+const count = (raw: string | undefined, fallback: number, max: number) => { const n = Math.floor(Number(raw)); return Number.isFinite(n) && n >= 1 ? Math.min(n, max) : fallback; };
 
 export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; spotify?: SpotifyConnector; kubera?: KuberaConnector; ghl?: GoHighLevelConnector; discord?: DiscordConnector; github?: GithubConnector; robinhood?: RobinhoodConnector; guard?: TradingGuard; workshop?: Workshop } = {}) {
   const app = new Hono();
   const origins = (process.env.HQ_ORIGIN ?? "http://localhost:3000").split(",").map((s) => s.trim());
   app.use("/api/*", cors({ origin: origins, credentials: true }));
+  // A page on another site must not be able to act as Phil with his cookie. CORS only hides the answer; the request
+  // still runs. So anything that changes state is refused when the browser says it came from somewhere else.
+  app.use("/api/*", async (c, next) => {
+    if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method) && !fromHq(c.req.header("origin"), origins, c.req.header("x-forwarded-host") ?? c.req.header("host"))) return c.json({ error: "this request came from another site" }, 403);
+    await next();
+  });
 
   app.get("/api/health", (c) => c.json({ ok: true, auth: authEnabled, store: jarvis.store.kind }));
 
@@ -18,7 +27,10 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const body = await c.req.json().catch(() => ({}));
     const parsed = z.object({ password: z.string() }).safeParse(body);
     if (!parsed.success) return c.json({ error: "password required" }, 400);
-    if (!login(c, parsed.data.password)) return c.json({ error: "wrong password" }, 401);
+    const who = clientIp(c.req.header("x-forwarded-for"));
+    const wait = loginWait(who);
+    if (wait) return c.json({ error: `too many wrong passwords; try again in ${Math.ceil(wait / 60_000)} minutes (a passkey still works)` }, 429);
+    if (!login(c, parsed.data.password)) { loginFailed(who); return c.json({ error: "wrong password" }, 401); }
     return c.json({ ok: true });
   });
   app.post("/api/logout", (c) => { logout(c); return c.json({ ok: true }); });
@@ -36,7 +48,12 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
       return c.json({ ok: true, ...r });
     } catch (e) { return c.json({ error: (e as Error).message }, 400); }
   });
-  app.route("/api/tts", ttsRoutes().use("*", requireAuth));
+  // The guard is registered before the routes: Hono runs handlers in the order they were added, so adding it after
+  // (as this did) left text-to-speech and transcription open to anyone, on Phil's ElevenLabs key.
+  const tts = new Hono();
+  tts.use("*", requireAuth);
+  tts.route("/", ttsRoutes());
+  app.route("/api/tts", tts);
 
   const api = new Hono();
   api.use("*", requireAuth);
@@ -49,7 +66,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     return c.json({ agents, ventures: VENTURES, models: MODELS, status, pendingApprovals: pending.length, waiting, usage, providers, schedules: SCHEDULES });
   });
 
-  api.get("/chat", async (c) => c.json({ messages: await jarvis.store.chat.list(Number(c.req.query("limit") ?? 100)) }));
+  api.get("/chat", async (c) => c.json({ messages: await jarvis.store.chat.list(count(c.req.query("limit"), 100, 500)) }));
   api.post("/chat", async (c) => {
     const parsed = z.object({ text: z.string().max(8000), wait: z.boolean().optional(), channel: z.enum(["hq", "telegram", "voice", "schedule"]).optional(), images: z.array(z.string().max(80)).max(4).optional(), docs: z.array(z.string().max(80)).max(5).optional() })
       .refine((b) => b.text.trim().length > 0 || (b.images?.length ?? 0) > 0 || (b.docs?.length ?? 0) > 0)
@@ -174,7 +191,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.get("/activity", async (c) => {
     // ?exclude=run hides the per-run lines so the log shows what actually happened.
     const exclude = (c.req.query("exclude") ?? "").split(",").filter((k): k is ActivityEntry["kind"] => (ACTIVITY_KINDS as readonly string[]).includes(k));
-    return c.json({ entries: await jarvis.store.activity.list({ q: c.req.query("q") || undefined, agentId: c.req.query("agent") || undefined, limit: Number(c.req.query("limit") ?? 200), exclude: exclude.length ? exclude : undefined }) });
+    return c.json({ entries: await jarvis.store.activity.list({ q: c.req.query("q") || undefined, agentId: c.req.query("agent") || undefined, limit: count(c.req.query("limit"), 200, 1000), exclude: exclude.length ? exclude : undefined }) });
   });
   api.get("/runs/:id", async (c) => { const r = await jarvis.store.runs.get(c.req.param("id")); return r ? c.json({ run: r }) : c.json({ error: "not found" }, 404); });
 
@@ -519,7 +536,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
   }));
   // Done for you: reversible work agents did on their own, with Undo; and Phil's switch for it.
-  api.get("/autodone", async (c) => c.json({ on: await jarvis.reversibleOn(), items: await jarvis.autoDone(Number(c.req.query("limit") ?? 50)) }));
+  api.get("/autodone", async (c) => c.json({ on: await jarvis.reversibleOn(), items: await jarvis.autoDone(count(c.req.query("limit"), 50, 200)) }));
   api.post("/autodone/:id/undo", async (c) => { const r = await jarvis.undoAuto(c.req.param("id")); return c.json(r, r.ok ? 200 : r.result === "not found" ? 404 : 409); });
   api.post("/autonomy", async (c) => {
     const p = z.object({ reversible: z.boolean() }).strict().safeParse(await c.req.json().catch(() => ({})));
@@ -631,7 +648,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.get("/apple-health", async (c) => c.json({ ...(await healthStatus(jarvis.store)), summary: await healthSummary(jarvis.store, 3) }));
   // Make the key (or a new one, which stops the old one working) and show how to set up the app.
   api.post("/apple-health/key", async (c) => {
-    const rotate = (await c.req.json().catch(() => ({})) as { rotate?: boolean }).rotate === true;
+    const rotate = ((await c.req.json().catch(() => null)) as { rotate?: boolean } | null)?.rotate === true;
     const key = rotate ? await rotateHealthKey(jarvis.store) : (await healthKey(jarvis.store, true))!;
     if (rotate) await jarvis.router.log("jarvis", "system", "Phil made a new Apple Health key; the old one no longer works");
     return c.json({ key });

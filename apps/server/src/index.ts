@@ -3,7 +3,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import { DiscordConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, Watchers, XConnector, Workshop, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
 import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
-import { authEnabled, isAuthedRequest } from "./auth.js";
+import { authEnabled, fromHq, isAuthedRequest } from "./auth.js";
 import { notify } from "./notify.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -61,6 +61,8 @@ app.get(
   "/ws",
   async (c, next) => {
     if (!isAuthedRequest(c.req.raw)) return c.text("unauthorized", 401);
+    // The live feed carries chat and approvals; a page on another site must not be able to open it with Phil's cookie.
+    if (!fromHq(c.req.header("origin"), (process.env.HQ_ORIGIN ?? "http://localhost:3000").split(",").map((s) => s.trim()), c.req.header("x-forwarded-host") ?? c.req.header("host"))) return c.text("forbidden", 403);
     await next();
   },
   upgradeWebSocket(() => ({
@@ -80,6 +82,10 @@ bus.onEvent((e: JarvisEvent) => {
   const data = JSON.stringify(e);
   for (const ws of sockets) { try { ws.send(data); } catch { sockets.delete(ws); } }
 });
+
+// One background promise that rejects (a late agent report, a store hiccup) must not take HQ down: Node exits on an
+// unhandled rejection by default, which restarts the server and loses every run in flight.
+process.on("unhandledRejection", (e) => console.error("[unhandled]", e instanceof Error ? e.stack ?? e.message : e));
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`Jarvis server on http://localhost:${info.port} (store: ${store.kind}${authEnabled ? "" : ", auth OFF: set HQ_PASSWORD"}${process.env.JARVIS_MOCK === "1" ? ", MOCK providers" : ""})`);
