@@ -123,6 +123,8 @@ export function keepList(raw: unknown): { scope: string; key: string; value: str
 }
 /** How many messages a mail action may touch: the ids it names, else its max, else the 200 a query defaults to. */
 const bulkSize = (p: { ids?: unknown; max?: unknown }): number => (Array.isArray(p.ids) && p.ids.length ? p.ids.length : Number(p.max ?? 200));
+/** A card Phil decided himself: not one an agent's rule approved, HQ withdrew or refused. */
+const decidedByPhil = (a: Pick<Approval, "status" | "note">) => (a.status === "approved" || a.status === "edited" || a.status === "rejected") && !/^(auto|superseded|refused)/.test(a.note ?? "");
 /** Phil has edited this card or asked the agent about it: it is his now, and nothing replaces it behind his back. */
 const philTouched = (x: Pick<Approval, "original" | "editedBy" | "thread">) => x.original !== undefined || !!x.editedBy || (x.thread?.length ?? 0) > 0;
 const isShipCard = (x: Pick<Approval, "payload">) => /^(code\.ship|hq\.update)$/.test(String((x.payload as { action?: unknown } | undefined)?.action ?? ""));
@@ -957,8 +959,11 @@ export class Jarvis {
   /** Keeps exactly one primary (the first marked, else the first goal), stores the list, and tells agents and screens. */
   private async saveGoals(list: Goal[], announce = true): Promise<Goal[]> {
     let seen = false;
-    for (const g of list) { if (g.primary && !seen) seen = true; else g.primary = false; }
-    if (!seen && list[0]) list[0].primary = true;
+    // HQ's own setup goal is never the primary: that word goes into every agent's brief as what Phil is working toward.
+    const housekeeping = (g: Goal) => g.name === Jarvis.SETUP_GOAL_NAME;
+    for (const g of list) { if (g.primary && !seen && !housekeeping(g)) seen = true; else g.primary = false; }
+    const first = list.find((g) => !housekeeping(g));
+    if (!seen && first) first.primary = true;
     const sorted = [...list.filter((g) => g.primary), ...list.filter((g) => !g.primary)];
     await this.store.settings.set("goals", sorted);
     // Agents read memory, not settings: keep a plain-words copy of the goals there.
@@ -977,12 +982,15 @@ export class Jarvis {
     return [...list.filter((g) => g.primary), ...list.filter((g) => !g.primary)];
   }
 
-  async addGoal(g: { name: string; pct?: number; deadline?: string; primary?: boolean; horizon?: Horizon; venture?: string; parent?: string }): Promise<Goal> {
+  async addGoal(g: { name: string; pct?: number; deadline?: string; primary?: boolean; horizon?: Horizon; venture?: string; parent?: string }, opts: { housekeeping?: boolean } = {}): Promise<Goal> {
     const name = g.name.trim();
     if (!name) throw new Error("name can't be empty");
     const list = await this.goalList();
-    if (list.length >= Jarvis.MAX_GOALS) throw new Error(`at most ${Jarvis.MAX_GOALS} goals`);
-    const goal: Goal = { id: randomUUID(), name, pct: clampPct(g.pct ?? 0), deadline: g.deadline || undefined, primary: !!g.primary || list.length === 0, updatedAt: new Date().toISOString() };
+    // HQ's own setup goal is housekeeping: it doesn't use up one of Phil's twelve, and it is never "the primary goal".
+    const setupId = await this.store.settings.get<string | null>(Jarvis.SETUP_GOAL_KEY, null);
+    const own = list.filter((x) => x.id !== setupId && x.name !== Jarvis.SETUP_GOAL_NAME);
+    if (!opts.housekeeping && own.length >= Jarvis.MAX_GOALS) throw new Error(`at most ${Jarvis.MAX_GOALS} goals`);
+    const goal: Goal = { id: randomUUID(), name, pct: clampPct(g.pct ?? 0), deadline: g.deadline || undefined, primary: !opts.housekeeping && (!!g.primary || own.length === 0), updatedAt: new Date().toISOString() };
     if (g.horizon && HORIZONS.includes(g.horizon)) goal.horizon = g.horizon;
     if (g.venture && goalVenture(g.venture)) goal.venture = g.venture;
     if (g.parent && list.some((x) => x.id === g.parent)) goal.parent = g.parent;
@@ -1022,7 +1030,8 @@ export class Jarvis {
     if (patch.benchmarks) {
       // Replacing the list keeps what was already done (matched by text).
       const was = new Map((goal.benchmarks ?? []).map((b) => [b.text.trim().toLowerCase(), b]));
-      goal.benchmarks = patch.benchmarks.slice(0, 12).map((b) => {
+      const seen = new Set<string>();
+      goal.benchmarks = patch.benchmarks.filter((b) => { const k = b.text.trim().slice(0, 200).toLowerCase(); if (!k || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 12).map((b) => {
         const text = b.text.trim().slice(0, 200), old = was.get(text.toLowerCase());
         const done = b.done ?? old?.done ?? false;
         return { id: old?.id ?? randomUUID().slice(0, 8), text, weight: Math.max(1, Math.min(100, Math.round(Number.isFinite(b.weight) ? b.weight! : 1))), done, doneAt: done ? old?.doneAt ?? now : undefined };
@@ -1211,8 +1220,10 @@ export class Jarvis {
     return live.map((a) => {
       const lacking = connectionsFor(getAgent(a.id)!).filter((c) => !connected.has(c));
       const missing = lacking.filter((c) => !OPTIONAL_CONNECTIONS.includes(c)), extras = lacking.filter((c) => OPTIONAL_CONNECTIONS.includes(c));
+      // The last run's error stays on file until a run succeeds; the status alone is reset by a pause, a decision or
+      // the next run starting, which used to make a failed agent look ready.
       const tried = !!a.lastRunAt;
-      const error = a.status === "error" ? a.lastError ?? "error" : undefined;
+      const error = a.lastError ? a.lastError : a.status === "error" ? "error" : undefined;
       return { id: a.id, name: a.name, venture: a.venture === "root" ? "command" : a.venture, missing, extras, tried, error, ok: !missing.length && tried && !error };
     }).sort((x, y) => Number(x.ok) - Number(y.ok) || Number(x.tried) - Number(y.tried) || y.missing.length - x.missing.length);
   }
@@ -1230,7 +1241,7 @@ export class Jarvis {
     let id = await this.store.settings.get<string | null>(Jarvis.SETUP_GOAL_KEY, null);
     if (id && !goals.some((g) => g.id === id)) return "Phil removed the setup goal; leaving it removed";
     if (!id) {
-      id = (await this.addGoal({ name: Jarvis.SETUP_GOAL_NAME, venture: "command", horizon: "short" })).id;
+      id = (await this.addGoal({ name: Jarvis.SETUP_GOAL_NAME, venture: "command", horizon: "short" }, { housekeeping: true })).id;
       await this.store.settings.set(Jarvis.SETUP_GOAL_KEY, id);
     }
     const byVenture = new Map<string, AgentSetup[]>();
@@ -1279,16 +1290,28 @@ export class Jarvis {
   }
 
   private async todayContext() {
-    return { pending: await this.store.approvals.list("pending"), attention: await this.attention(true), goals: await this.goals() };
+    const all = await this.store.approvals.list();
+    return { pending: all.filter((a) => a.status === "pending"), decided: new Set(all.filter(decidedByPhil).map((a) => a.id)), attention: await this.attention(true), goals: await this.goals() };
   }
 
-  private async saveToday(t: Today): Promise<Today> {
-    await this.store.settings.set("today", t);
+  /**
+   * Write a day's count to the log. A day that was finished stays finished when its list is replaced afterwards (Pick
+   * again, David's second pick, an Undo): the work was done. Only Phil unticking an item himself takes it back.
+   */
+  private async logDay(t: Today, unticked = false): Promise<void> {
     const log = await this.store.settings.get<TodayLog>("today.log", {});
-    log[t.date] = { done: t.items.filter((x) => x.done).length, total: t.items.length };
-    // Three months is plenty for a streak; older days fall off.
-    const keep = Object.keys(log).sort().slice(-90);
-    await this.store.settings.set("today.log", Object.fromEntries(keep.map((d) => [d, log[d]!])));
+    const done = t.items.filter((x) => x.done).length, total = t.items.length;
+    const full = (total > 0 && done >= total) || (!unticked && !!log[t.date]?.full);
+    log[t.date] = { done, total, ...(full ? { full: true } : {}) };
+    // A year of days; the count of full days (Phil's XP) is kept apart so it never shrinks as old days fall off.
+    const days = Object.keys(log).sort();
+    const dropped = days.slice(0, Math.max(0, days.length - 370)).filter((d) => log[d]!.full || (log[d]!.total > 0 && log[d]!.done >= log[d]!.total)).length;
+    if (dropped) await this.store.settings.set("today.fullBefore", (await this.store.settings.get<number>("today.fullBefore", 0)) + dropped);
+    await this.store.settings.set("today.log", Object.fromEntries(days.slice(-370).map((d) => [d, log[d]!])));
+  }
+  private async saveToday(t: Today, unticked = false): Promise<Today> {
+    await this.store.settings.set("today", t);
+    await this.logDay(t, unticked);
     bus.emitEvent({ type: "base" });
     return t;
   }
@@ -1302,6 +1325,9 @@ export class Jarvis {
     const ctx = await this.todayContext();
     const saved = await this.store.settings.get<Today | null>("today", null);
     const fresh = !saved || saved.date !== date;
+    // A last look at the day that just ended: something finished late (a card approved from Telegram at night) still
+    // counts for it, where it used to be thrown away with the list.
+    if (saved && saved.date !== date) { const y = reconcileToday(saved, ctx); if (y.changed) { await this.store.settings.set("today", y.today); await this.logDay(y.today); } }
     const r = reconcileToday(fresh ? pickToday(date, ctx) : saved, ctx);
     if (fresh || r.changed) await this.saveToday(r.today);
     return { today: r.today, streak: streakOf(await this.store.settings.get<TodayLog>("today.log", {}), date) };
@@ -1315,7 +1341,7 @@ export class Jarvis {
       const goal = x.goalId ? ctx.goals.find((g) => g.id === x.goalId) : undefined;
       const bench = goal && x.benchmarkId ? goal.benchmarks?.find((b) => b.id === x.benchmarkId) : undefined;
       const venture = x.venture && goalVenture(x.venture) ? x.venture : goal?.venture;
-      return { id: `${date}:${i}`, text: x.text.replace(/\s+/g, " ").trim().slice(0, 160), done: false, ...(goal ? { goalId: goal.id } : {}), ...(venture ? { venture } : {}), ...(goal && bench ? { ref: { kind: "benchmark" as const, id: bench.id, goalId: goal.id } } : {}) };
+      return { id: `${date}:${i}`, text: x.text.replace(/\s+/g, " ").trim().slice(0, 160), done: false, ...(goal ? { goalId: goal.id } : {}), ...(venture ? { venture } : {}), ...(goal && bench && !bench.done ? { ref: { kind: "benchmark" as const, id: bench.id, goalId: goal.id } } : {}) };
     }).filter((x) => x.text);
     if (!list.length) throw new Error("nothing to set");
     const r = reconcileToday({ date, by, pickedAt: new Date().toISOString(), items: list }, ctx);
@@ -1333,7 +1359,8 @@ export class Jarvis {
     const { today } = await this.today();
     if (!today.items.some((x) => x.id === id)) return undefined;
     const now = new Date().toISOString();
-    return this.saveToday({ ...today, items: today.items.map((x) => (x.id === id ? { ...x, done: !x.done, doneAt: x.done ? undefined : now } : x)) });
+    const wasDone = !!today.items.find((x) => x.id === id)?.done;
+    return this.saveToday({ ...today, items: today.items.map((x) => (x.id === id ? { ...x, done: !x.done, doneAt: x.done ? undefined : now } : x)) }, wasDone);
   }
 
   /** Everything the base and the Goals screen show beside the goals. Never put in front of agents. */
@@ -1341,8 +1368,8 @@ export class Jarvis {
     const trophies = await this.trophies();
     const { today, streak } = await this.today();
     const log = await this.store.settings.get<TodayLog>("today.log", {});
-    const decisions = (await this.store.approvals.list()).filter((a) => (a.status === "approved" || a.status === "edited" || a.status === "rejected") && !/^(auto|superseded|refused)/.test(a.note ?? "")).length;
-    const player = playerLevel({ trophies: trophies.length, fullDays: Object.values(log).filter((d) => d.total > 0 && d.done >= d.total).length, todosDone: (await this.attentionList()).filter((i) => i.status === "done").length, decisions });
+    const decisions = (await this.store.approvals.list()).filter(decidedByPhil).length;
+    const player = playerLevel({ trophies: trophies.length, fullDays: (await this.store.settings.get<number>("today.fullBefore", 0)) + Object.values(log).filter((d) => d.full || (d.total > 0 && d.done >= d.total)).length, todosDone: (await this.attentionList()).filter((i) => i.status === "done").length, decisions });
     return { trophies: trophies.slice(-100), levels: ventureLevels(trophies), today, streak, player };
   }
 

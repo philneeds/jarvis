@@ -56,13 +56,16 @@ export function syncTrophies(trophies: Trophy[], goal: Goal, now: string = new D
     if (b.done && !has(id)) add({ id, at: b.doneAt ?? now, title: b.text, goalId: goal.id, goalName: goal.name, venture: goal.venture, kind: "benchmark" });
     else if (!b.done && has(id)) drop(id);
   }
+  // A trophy follows its goal: give the goal a venture later (or move it) and the level moves with it.
+  if (list.some((t) => t.goalId === goal.id && (t.venture !== goal.venture || t.goalName !== goal.name))) { list = list.map((t) => (t.goalId === goal.id ? { ...t, venture: goal.venture, goalName: goal.name } : t)); changed = true; }
   const gid = `g:${goal.id}`;
   if (goal.pct >= 100 && !has(gid)) add({ id: gid, at: now, title: goal.name, goalId: goal.id, goalName: goal.name, venture: goal.venture, kind: "goal" });
   else if (goal.pct < 100 && has(gid)) drop(gid);
   return { trophies: changed ? list.slice(-500) : trophies, changed };
 }
 
-export interface TodayContext { pending: Approval[]; attention: AttentionItem[]; goals: Goal[] }
+/** `decided`: ids of cards Phil decided himself. Without it, a card that is no longer pending counts as decided. */
+export interface TodayContext { pending: Approval[]; decided?: Set<string>; attention: AttentionItem[]; goals: Goal[] }
 const clip = (s: string, n = 120) => { const t = s.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 const ventureOfAgent = (agentId: string) => { const v = getAgent(agentId)?.venture; return !v || v === "root" ? "command" : v; };
 
@@ -93,7 +96,9 @@ export function reconcileToday(today: Today, ctx: TodayContext, now: string = ne
   const pending = new Set(ctx.pending.map((a) => a.id));
   const items = today.items.map((it) => {
     if (it.done || !it.ref) return it;
-    const done = it.ref.kind === "approval" ? !pending.has(it.ref.id)
+    // "Decide: …" is done when Phil decided it, not when the card went away: one that was replaced or withdrawn
+    // would otherwise hand him a finished day (and its XP) for a decision he never made.
+    const done = it.ref.kind === "approval" ? (ctx.decided ? ctx.decided.has(it.ref.id) : !pending.has(it.ref.id))
       : it.ref.kind === "attention" ? (ctx.attention.find((x) => x.id === it.ref!.id)?.status ?? "done") === "done"
       : !!ctx.goals.find((g) => g.id === it.ref!.goalId)?.benchmarks?.find((b) => b.id === it.ref!.id)?.done;
     if (!done) return it;
@@ -116,10 +121,11 @@ export function playerLevel(from: PlayerLevel["from"]): PlayerLevel {
   return { level, total, xp: left, next: need, from };
 }
 
-export type TodayLog = Record<string, { done: number; total: number }>;
+/** `full` latches once the day's list was finished, so replacing the list afterwards doesn't take the day back. */
+export type TodayLog = Record<string, { done: number; total: number; full?: boolean }>;
 /** Days in a row with all of the day's three done. Today counts once it's complete; an unfinished today doesn't break the run. */
 export function streakOf(log: TodayLog, date: string): number {
-  const full = (d: string) => { const e = log[d]; return !!e && e.total > 0 && e.done >= e.total; };
+  const full = (d: string) => { const e = log[d]; return !!e && (!!e.full || (e.total > 0 && e.done >= e.total)); };
   const prev = (d: string) => { const t = new Date(`${d}T12:00:00Z`); t.setUTCDate(t.getUTCDate() - 1); return t.toISOString().slice(0, 10); };
   let n = 0, d = full(date) ? date : prev(date);
   while (full(d)) { n++; d = prev(d); }

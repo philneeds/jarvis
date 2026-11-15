@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { GoogleConnector, Jarvis, ModelRouter, memoryStore, mockProvider, setAgentConfig, getAgentConfig } from "../src/index.js";
+import { GoogleConnector, Jarvis, ModelRouter, memoryStore, mockProvider, setAgentConfig, getAgentConfig, philDay, type Today } from "../src/index.js";
 import { keepList } from "../src/jarvis/orchestrator.js";
 
 /** Regressions from the Nov 15 audit: ways a card could run without Phil, and Undo that restored the wrong thing. */
@@ -185,4 +185,90 @@ test("Gmail's own folders can't be used as a label, so 'label it Trash' can't tr
   const arch = await jarvis.requestApproval({ agentId: "oscar", kind: "record", title: "archive promos", body: "p", payload: { action: "gmail.archive", query: "category:promotions older_than:30d", max: 50 } });
   assert.match(arch.note ?? "", /Archived 2 message/);
   assert.ok(calls.some((c) => decodeURIComponent(c.url).replace(/\+/g, " ").includes("in:inbox (category:promotions older_than:30d)")));
+});
+
+test("a 'Decide' item ticks when Phil decides, not when the card is replaced or withdrawn", async () => {
+  const { jarvis, store } = make();
+  const first = await jarvis.requestApproval({ agentId: "stella", kind: "send", title: "Email Tracy", body: "v1", payload: { action: "gmail.send", to: "t@example.com", subject: "Roof", body: "v1" }, runId: "r1" });
+  await jarvis.repickToday();
+  let { today } = await jarvis.today();
+  assert.equal(today.items.find((i) => i.ref?.id === first.id)?.done, false);
+  // Stella revises: the old card is superseded, the new one waits. Nothing was decided.
+  const second = await jarvis.requestApproval({ agentId: "stella", kind: "send", title: "Email Tracy (revised)", body: "v2", payload: { action: "gmail.send", to: "t@example.com", subject: "Roof", body: "v2" }, runId: "r2" });
+  assert.match((await store.approvals.get(first.id))?.note ?? "", /^superseded/);
+  ({ today } = await jarvis.today());
+  assert.equal(today.items.find((i) => i.ref?.id === first.id)?.done, false, "a withdrawn card isn't a decision");
+  assert.equal((await jarvis.baseSummary()).player.from.fullDays, 0);
+  // Phil decides the one on today's list after a fresh pick: now it ticks.
+  await jarvis.repickToday();
+  await jarvis.decide(second.id, "rejected");
+  ({ today } = await jarvis.today());
+  assert.equal(today.items.find((i) => i.ref?.id === second.id)?.done, true);
+});
+
+test("a finished day stays finished when the list is picked again; unticking takes it back", async () => {
+  const { jarvis } = make();
+  await jarvis.setToday([{ text: "Call Tracy" }, { text: "Send quote" }], "david");
+  let { today } = await jarvis.today();
+  for (const i of today.items) await jarvis.toggleToday(i.id);
+  assert.equal((await jarvis.today()).streak, 1);
+  await jarvis.repickToday();
+  await jarvis.setToday([{ text: "Something else" }], "david");
+  const after = await jarvis.baseSummary();
+  assert.equal(after.streak, 1, "the day was done; a new list doesn't undo that");
+  assert.equal(after.player.from.fullDays, 1);
+  // Phil ticks and then unticks on the new list: that is him saying it isn't done.
+  ({ today } = await jarvis.today());
+  await jarvis.toggleToday(today.items[0]!.id);
+  await jarvis.toggleToday(today.items[0]!.id);
+  assert.equal((await jarvis.baseSummary()).streak, 0);
+});
+
+test("something finished late still counts for the day that just ended", async () => {
+  const { jarvis, store } = make();
+  const g = await jarvis.addGoal({ name: "Close 5 roofs" });
+  await jarvis.updateGoal(g.id, { benchmarks: [{ text: "Quote sent", weight: 1 }] });
+  const bench = (await jarvis.goals())[0]!.benchmarks![0]!;
+  const d = new Date(`${philDay()}T12:00:00Z`); d.setUTCDate(d.getUTCDate() - 1);
+  const yesterday = d.toISOString().slice(0, 10);
+  const list: Today = { date: yesterday, by: "auto", pickedAt: new Date().toISOString(), items: [{ id: `${yesterday}:0`, text: "Quote sent", done: false, goalId: g.id, ref: { kind: "benchmark", id: bench.id, goalId: g.id } }] };
+  await store.settings.set("today", list);
+  await store.settings.set("today.log", { [yesterday]: { done: 0, total: 1 } });
+  // Met in the evening with no HQ tab open; the next look is the following morning.
+  await jarvis.updateGoal(g.id, { benchmarksDone: { done: [bench.id], undone: [] } });
+  const { streak } = await jarvis.today();
+  assert.equal(streak, 1, "yesterday is a full day");
+});
+
+test("setup: an agent whose only run failed isn't 'ready' after a pause and resume", async () => {
+  const { jarvis, store } = make();
+  await store.settings.set("phase", 1);
+  jarvis.connectionProbe = async () => new Set(["Google", "X", "Spotify", "Kubera", "Robinhood", "GoHighLevel", "Discord", "GitHub", "Apple Health"] as never);
+  await store.agentState.set("karol", { status: "error", lastError: "GoHighLevel 401", lastRunAt: new Date().toISOString() });
+  await store.agentState.set("karol", { status: "idle" }); // what a pause and resume, or a decision, leaves behind
+  const karol = (await jarvis.setupStatus()).find((s) => s.id === "karol")!;
+  assert.equal(karol.ok, false);
+  assert.match(karol.error ?? "", /401/);
+  await store.agentState.set("karol", { status: "idle", lastError: "", lastRunAt: new Date().toISOString() });
+  assert.equal((await jarvis.setupStatus()).find((s) => s.id === "karol")!.ok, true, "a run that worked clears it");
+});
+
+test("HQ's setup goal is housekeeping: not one of Phil's twelve, never the primary; trophies follow a goal's venture", async () => {
+  const { jarvis, store } = make();
+  await store.settings.set("phase", 1);
+  jarvis.connectionProbe = async () => new Set();
+  await jarvis.syncSetupGoal();
+  const setup = (await jarvis.goals())[0]!;
+  assert.equal(setup.primary, false);
+  const mine = await jarvis.addGoal({ name: "JD PM to $1M" });
+  assert.equal(mine.primary, true, "Phil's first goal is the primary one");
+  for (let i = 0; i < 11; i++) await jarvis.addGoal({ name: `Goal ${i}` });
+  await assert.rejects(jarvis.addGoal({ name: "A thirteenth" }), /at most 12/);
+  assert.match(await jarvis.syncSetupGoal(), /live agents ready/, "the hourly check still works with twelve goals");
+  // A benchmark met before the goal had a venture counts for the venture once it has one.
+  await jarvis.updateGoal(mine.id, { benchmarks: [{ text: "First $100k", weight: 1, done: true }, { text: "First $100k", weight: 1 }, { text: "Second crew", weight: 1 }] });
+  assert.equal((await jarvis.goals()).find((g) => g.id === mine.id)!.benchmarks!.length, 2, "the same text twice is one benchmark");
+  assert.equal((await jarvis.baseSummary()).levels.jdpm, undefined);
+  await jarvis.updateGoal(mine.id, { venture: "jdpm" });
+  assert.equal((await jarvis.baseSummary()).levels.jdpm?.level, 2);
 });
