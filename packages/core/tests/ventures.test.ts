@@ -101,6 +101,19 @@ test("run summaries already on the boards are taken off on start; Phil's own ent
   assert.equal(await jarvis.pruneRunReports(), 0, "a second start finds nothing");
 });
 
+test("state rows of agents no longer in the registry are dropped on start; registered agents keep theirs", async () => {
+  const { store, jarvis } = make();
+  await store.agentState.set("doc", { status: "idle", detail: "folded into Metro on Nov 15" });
+  await store.agentState.set("jarvis", { status: "error", lastError: "limit" });
+  await store.agentState.set("karol", { status: "working" });
+  assert.deepEqual(await jarvis.pruneRetiredAgents(), ["doc"]);
+  assert.deepEqual((await store.agentState.all()).map((s) => s.id).sort(), ["jarvis", "karol"]);
+  assert.equal((await store.agentState.get("jarvis"))!.lastError, "limit", "the row itself is untouched");
+  assert.deepEqual(await jarvis.pruneRetiredAgents(), [], "a second start finds nothing");
+  const logged = (await store.activity.list({ limit: 10 })).find((e) => /Dropped the state row of doc/.test(e.summary));
+  assert.ok(logged, "the activity log says what went");
+});
+
 test("duplicates: an agent re-logging someone updates them, a DUPLICATE mark takes the copy off, and old marks are cleared on start", async () => {
   const { Jarvis, ModelRouter, memoryStore, mockProvider, isDuplicateMark } = await import("../src/index.js");
   assert.equal(isDuplicateMark("DUPLICATE – Mick Kuberka (see a223ae20)"), true);

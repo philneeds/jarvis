@@ -112,6 +112,9 @@ const scheduler = new Scheduler(jarvis);
 const stale = await jarvis.clearStaleWork();
 const pruned = await jarvis.pruneRunReports().catch(() => 0);
 if (pruned) console.log(`Took ${pruned} run summaries off the venture boards`);
+// Agents folded into skills or retired leave a state row behind that still shows on the Agent Web.
+const retired = await jarvis.pruneRetiredAgents().catch(() => [] as string[]);
+if (retired.length) console.log(`Dropped state rows of retired agents: ${retired.join(", ")}`);
 // A ship that was in flight when HQ restarted: say how it went.
 // The deploy script writes its verdict only after it has seen HQ answer, which is after this line runs: look now, and
 // keep looking for four minutes before giving the last word. (Looking once called every rollback "didn't report

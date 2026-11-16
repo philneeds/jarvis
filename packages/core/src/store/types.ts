@@ -94,6 +94,8 @@ export interface Store {
     get(id: string): Promise<AgentStateRow | undefined>;
     set(id: string, patch: Partial<AgentStateRow>): Promise<AgentStateRow>;
     all(): Promise<AgentStateRow[]>;
+    /** Drop an agent's row; for agents that have left the registry. Runs and usage stay as history. */
+    remove(id: string): Promise<void>;
   };
   settings: {
     get<T>(key: string, fallback: T): Promise<T>;

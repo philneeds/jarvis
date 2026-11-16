@@ -113,6 +113,7 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
         return toState(rows[0]!);
       },
       async all() { return (await db.select().from(t.agentState)).map(toState); },
+      async remove(id) { await db.delete(t.agentState).where(eq(t.agentState.id, id)); },
     },
     settings: {
       async get(key, fallback) {

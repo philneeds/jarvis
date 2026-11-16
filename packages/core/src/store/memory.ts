@@ -97,6 +97,7 @@ export function memoryStore(file?: string): Store {
         return a;
       },
       async all() { return s.agentState; },
+      async remove(id) { const i = s.agentState.findIndex((a) => a.id === id); if (i >= 0) { s.agentState.splice(i, 1); save(); } },
     },
     settings: {
       async get(key, fallback) { return (key in s.settings ? s.settings[key] : fallback) as typeof fallback; },

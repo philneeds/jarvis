@@ -167,6 +167,18 @@ export class Jarvis {
     return gone.length;
   }
 
+  /**
+   * Drop the state rows of agents that are no longer in the registry (folded into a skill, retired). Without this an
+   * old row keeps showing on the Agent Web as idle, and its "last detail" lingers. Runs and usage rows are history and
+   * stay. Returns the ids removed; safe to run on every start.
+   */
+  async pruneRetiredAgents(): Promise<string[]> {
+    const gone = (await this.store.agentState.all()).filter((s) => !getAgent(s.id)).map((s) => s.id);
+    for (const id of gone) await this.store.agentState.remove(id);
+    if (gone.length) await this.router.log("jarvis", "system", `Dropped the state row${gone.length === 1 ? "" : "s"} of ${gone.join(", ")}: no longer in the registry (runs and usage kept as history)`);
+    return gone;
+  }
+
   /** Take items off their boards, keeping a copy under settings "records.pruned" (nothing is lost) and saying so in the log. */
   private async archiveRecords(items: RecordItem[], why: string): Promise<void> {
     // The copy is saved before anything is removed.
