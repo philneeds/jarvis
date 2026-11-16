@@ -358,3 +358,15 @@ test("the Report Generator is found behind a hover-only menu, at a usual address
     assert.match(await call("lp_report", { start: "11/01/2026", end: "11/15/2026" }), /Close 33%/);
   } finally { delete process.env.LP_REPORT_URL; set.close(); }
 });
+
+test("an agent clicking around by hand is stopped after a limit, and told to report back", async () => {
+  const site = await fakeLeadPerfection();
+  process.env.LP_MAX_STEPS = "3";
+  try {
+    const { call } = await connect(site);
+    for (let i = 0; i < 3; i++) assert.match(await call("lp_open", { screen: "Present.aspx" }), /Sales Presentation/);
+    assert.match(await call("lp_open", { screen: "Present.aspx" }), /^Stopped: that's 3 LeadPerfection screens and clicks in the last 20 minutes/);
+    // The one-step report isn't counted.
+    assert.match(await call("lp_report", { start: "11/01/2026", end: "11/15/2026" }), /Close 33%/);
+  } finally { delete process.env.LP_MAX_STEPS; site.close(); }
+});
