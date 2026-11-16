@@ -305,13 +305,15 @@ export class Jarvis {
   onApproved(action: string, fn: Executor) { this.executors.set(action, fn); }
 
   /** Plug in a connector: its tools become available in agent settings, its actions run on approval. */
-  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer>; normalize?: Normalizer; undoers?(): Record<string, (a: Approval) => Promise<string>>; pulses?(): Record<string, (agentId: string) => Promise<string>> }, hint?: string) {
+  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer>; normalize?: Normalizer; preflight?(a: Omit<Approval, "id" | "at" | "status">): Promise<string | undefined>; undoers?(): Record<string, (a: Approval) => Promise<string>>; pulses?(): Record<string, (agentId: string) => Promise<string>> }, hint?: string) {
     for (const [k, fn] of Object.entries(c.undoers?.() ?? {})) this.undoers.set(k, fn);
     for (const [k, fn] of Object.entries(c.pulses?.() ?? {})) this.pulses.set(k, fn);
     for (const t of c.tools()) this.connectorTools.set(t.name, t);
     for (const [k, fn] of Object.entries(c.executors())) this.executors.set(k, fn);
     for (const [k, fn] of Object.entries(c.describe?.() ?? {})) this.describers.set(k, fn);
     if (c.normalize) this.normalizers.push(c.normalize.bind(c));
+    // A connector that knows its actions' required fields refuses a card that would fail the moment Phil approves.
+    if (c.preflight) this.preflights.push(c.preflight.bind(c));
     if (hint) this.promptHints.push(hint);
   }
 

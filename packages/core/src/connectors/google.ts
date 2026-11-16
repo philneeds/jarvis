@@ -532,6 +532,36 @@ export class GoogleConnector {
     return out === payload ? undefined : out;
   }
 
+  /** What each action's executor insists on; "ids|query" means either one. */
+  static readonly REQUIRED: Record<string, string[]> = {
+    "gmail.send": ["to", "subject", "body"],
+    "gmail.archive": ["ids|query"],
+    "gmail.label": ["ids|query", "label"],
+    "gmail.trash": ["ids|query"],
+    "calendar.create": ["title", "start", "end"],
+    "calendar.update": ["id"],
+    "calendar.delete": ["id"],
+  };
+
+  /**
+   * A card that would fail the moment Phil approves is refused now, with the reason, so the agent fixes it in the
+   * same run instead of Phil approving something that then does nothing (Monica's 3-event and 9-id cards, Nov 13).
+   */
+  async preflight(a: { payload?: Record<string, unknown> }): Promise<string | undefined> {
+    const p = a.payload;
+    const action = String(p?.action ?? "");
+    const need = GoogleConnector.REQUIRED[action];
+    if (!p || !need) return;
+    const has = (k: string) => { const v = p[k]; return Array.isArray(v) ? v.length > 0 : typeof v === "string" ? v.trim() !== "" : v != null; };
+    const missing = need.filter((k) => !k.split("|").some(has));
+    if (missing.length) {
+      const list = action.startsWith("calendar.") ? ["events", "ids", "items"].find((k) => Array.isArray(p[k])) : undefined;
+      return `${action} needs ${missing.map((m) => m.replace("|", " or ")).join(", ")} in the payload${list ? `; it takes one event per card, not a "${list}" list, so file one card for each` : ""}`;
+    }
+    if (action === "gmail.send" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(p.to).trim())) return `"${String(p.to)}" isn't an email address`;
+    return;
+  }
+
   /** Other people on an event (not the calendar's owner). */
   async eventGuests(id: string, account?: string, calendarId = "primary"): Promise<string[]> {
     const j = await this.api<{ attendees?: { email?: string; self?: boolean; resource?: boolean }[] }>(account, `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}`);

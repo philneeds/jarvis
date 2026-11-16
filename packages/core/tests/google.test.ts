@@ -99,6 +99,29 @@ test("several Google accounts: pick by email, move and remove events", async () 
   assert.equal((await g.status()).accounts.length, 1);
 });
 
+test("a Google card missing what its action needs is refused when filed, not after Phil approves it", async () => {
+  const store = memoryStore(); await store.init();
+  const { f, calls } = fakeGoogle();
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: f });
+  await g.exchangeCode("c1");
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("m")], grok: [mockProvider("g")] } }) });
+  jarvis.addConnector(g, GoogleConnector.promptHint());
+  // Monica's Nov 13 shapes: three events in one card, nine ids in one card. Both would have thrown on approval.
+  const batch = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Create 3 events", body: "", payload: { action: "calendar.create", events: [{ title: "Morning leads", start: "a", end: "b" }] } });
+  assert.equal(batch.status, "rejected");
+  assert.match(batch.note ?? "", /^refused: calendar\.create needs title, start, end in the payload; it takes one event per card, not a "events" list/);
+  const many = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Delete 9 series", body: "", payload: { action: "calendar.delete", ids: ["e1", "e2"] } });
+  assert.match(many.note ?? "", /^refused: calendar\.delete needs id in the payload; it takes one event per card, not a "ids" list/);
+  const noAddress = await jarvis.requestApproval({ agentId: "stella", kind: "send", title: "Email Mike", body: "Hi", payload: { action: "gmail.send", to: "Mike Tracy", subject: "Roof", body: "Hi" } });
+  assert.match(noAddress.note ?? "", /^refused: "Mike Tracy" isn't an email address/);
+  const blank = await jarvis.requestApproval({ agentId: "oscar", kind: "record", title: "Archive", body: "", payload: { action: "gmail.archive", max: 50 } });
+  assert.match(blank.note ?? "", /^refused: gmail\.archive needs ids or query in the payload/);
+  assert.ok(!calls.some((c) => c.init?.method && c.init.method !== "GET" && c.init.method !== "POST"), "nothing was changed on Google");
+  // A complete card still goes through as before.
+  const ok = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Remove the Zoom", body: "", payload: { action: "calendar.delete", id: "e1" } });
+  assert.notEqual(ok.status, "rejected");
+});
+
 test("Monica changes Phil's own events directly; events with guests go to Phil", async () => {
   const store = memoryStore(); await store.init();
   const { f, calls } = fakeGoogle();

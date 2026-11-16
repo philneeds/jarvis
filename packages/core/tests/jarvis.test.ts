@@ -435,12 +435,24 @@ test("web_health summarises the week for Einstein: runs, errors, blocked runs, a
   await jarvis.router.log("lucas", "system", "Lucas did not run: grok CLI missing");
   const a = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Email Dana", body: "x" });
   await jarvis.decide(a.id, "rejected");
+  // HQ's own closures are not Phil saying no: a card replaced by a newer one, and a rule-approved card whose action failed.
+  const old = await jarvis.requestApproval({ agentId: "einstein", kind: "config", title: "Update HQ: 1 new change", body: "x" });
+  await jarvis.decide(old.id, "rejected", "superseded: a newer update card");
+  const auto = await jarvis.requestApproval({ agentId: "monica", kind: "record", title: "Create 3 events", body: "x" });
+  // Approving writes the action's own outcome into the note; this is what the orchestrator leaves when the action throws.
+  await store.approvals.update(auto.id, { status: "approved", decidedAt: new Date().toISOString(), note: "auto: Phil's rule · Failed to execute calendar.create: calendar.create needs title, start and end in the payload" });
+  await store.usage.add({ id: "u1", at: new Date().toISOString(), plan: "claude", provider: "claude:agent-sdk", agentId: "einstein", inputTokens: 3_000_000, outputTokens: 40_000, costUsd: 12.5 });
+  await store.usage.add({ id: "u2", at: new Date().toISOString(), plan: "claude", provider: "claude:agent-sdk", agentId: "stella", inputTokens: 400_000, outputTokens: 2_000, costUsd: 2.5 });
+  await jarvis.router.log("oscar", "system", "Claude plan limit reached; routines wait until 4:40 AM. Phil's own asks still run.");
   const { TOOLS } = await import("../src/tools/index.js");
   const out = await TOOLS.find((t) => t.name === "web_health")!.handler({}, { store, agentId: "einstein" });
   assert.match(out, /Runs by agent: .*Stella 1/);
   assert.match(out, /Stella \(1\): Stella failed: timeout/);
   assert.match(out, /Lucas \(1\): grok CLI missing/);
-  assert.match(out, /rejected 1 \(Stephanie\)/);
+  assert.match(out, /Approvals decided: 3; Phil rejected 1 \(Stephanie\); 1 superseded by a newer card/);
+  assert.match(out, /Approved but failed to run \(1\): Monica: "Create 3 events"/);
+  assert.match(out, /Spend at list price: \$15 total; Einstein \$13 \(1 runs, 3040k tokens each\), Stella \$3/);
+  assert.match(out, /Plan limit hit 1 time\(s\)/);
 });
 
 test("when the web is paused, the reply is still marked final so the chat never waits forever", async () => {

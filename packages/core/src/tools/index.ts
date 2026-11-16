@@ -102,11 +102,29 @@ export function buildTools(): ToolDef[] {
         if (blocked.length) lines.push(`Didn't run:\n${blocked.map(([id, v]) => `- ${name(id)} (${v.blocked.length}): ${v.blocked[v.blocked.length - 1]}`).join("\n")}`);
         const appr = await store.approvals.list();
         const decided = appr.filter((a) => a.decidedAt && Date.parse(a.decidedAt) >= since);
+        // HQ closes cards itself too (a newer card replaced it, a preflight refused it, a rule approved it): those are
+        // not Phil's choices, so they are counted apart; otherwise a busy build day looks like a week of "no".
         const rejected = decided.filter((a) => a.status === "rejected");
+        const byPhil = rejected.filter((a) => !/^(auto|superseded|refused)/.test(a.note ?? ""));
+        const superseded = rejected.filter((a) => /^superseded/.test(a.note ?? "")).length;
+        const refused = rejected.filter((a) => /^refused/.test(a.note ?? "")).length;
+        const failed = decided.filter((a) => a.status !== "rejected" && /Failed to execute/.test(a.note ?? ""));
         const stale = appr.filter((a) => a.status === "pending" && Date.now() - Date.parse(a.at) > 3 * 86_400_000);
-        lines.push(`Approvals decided: ${decided.length}, rejected ${rejected.length}${rejected.length ? ` (${[...new Set(rejected.map((a) => name(a.agentId)))].join(", ")})` : ""}; waiting over 3 days: ${stale.length}${stale.length ? ` (${stale.map((a) => a.title).slice(0, 5).join("; ")})` : ""}.`);
+        const who = (xs: typeof appr) => [...new Set(xs.map((a) => name(a.agentId)))].join(", ");
+        lines.push(`Approvals decided: ${decided.length}; Phil rejected ${byPhil.length}${byPhil.length ? ` (${who(byPhil)})` : ""}${superseded ? `; ${superseded} superseded by a newer card` : ""}${refused ? `; ${refused} refused before Phil saw them` : ""}; waiting over 3 days: ${stale.length}${stale.length ? ` (${stale.map((a) => a.title).slice(0, 5).join("; ")})` : ""}.`);
+        if (failed.length) lines.push(`Approved but failed to run (${failed.length}): ${failed.slice(0, 5).map((a) => `${name(a.agentId)}: "${a.title}"`).join("; ")}.`);
         const usage = await usageSummary(store);
         lines.push(`Plan usage this window: ${usage.plans.filter((p) => p.runs).map((p) => `${p.label} ${(p.used * 100).toFixed(0)}% (${p.runs} runs)`).join(", ") || "nothing used"}.`);
+        // Where the tokens went: list-price dollars per agent, so the review can name who to make cheaper.
+        const spent = new Map<string, { usd: number; runs: number; tokens: number }>();
+        for (const u of await store.usage.since(new Date(since))) { const s = spent.get(u.agentId) ?? { usd: 0, runs: 0, tokens: 0 }; s.usd += u.costUsd; s.runs++; s.tokens += u.inputTokens + u.outputTokens; spent.set(u.agentId, s); }
+        const total = [...spent.values()].reduce((a, s) => a + s.usd, 0);
+        if (total > 0) {
+          const top = [...spent.entries()].sort((x, y) => y[1].usd - x[1].usd).slice(0, 5);
+          lines.push(`Spend at list price: $${total.toFixed(0)} total; ${top.map(([id, s]) => `${name(id)} $${s.usd.toFixed(0)} (${s.runs} runs, ${(s.tokens / s.runs / 1000).toFixed(0)}k tokens each)`).join(", ")}.`);
+        }
+        const limitHits = rows.filter((r) => r.kind === "system" && /plan limit reached/i.test(r.summary));
+        if (limitHits.length) lines.push(`Plan limit hit ${limitHits.length} time(s), last ${limitHits[0]!.at.slice(0, 16).replace("T", " ")} UTC.`);
         return lines.join("\n");
       },
     }),
