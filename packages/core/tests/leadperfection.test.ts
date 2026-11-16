@@ -14,7 +14,7 @@ const { LeadPerfectionConnector, changesData, isFilterField, postChangesData, sa
  */
 interface Appt { id: string; customer: string; time: string; town: string; rep: string; issued?: boolean }
 const REPS = ["Dilibeto, Dominic", "Furia, Michael", "Golinitz, Jason", "Irwin, Steven", "Marino, Phillip", "Robak, Ronald", "Singleton, Evan"];
-function fakeLeadPerfection(opts: { askCode?: boolean } = {}) {
+function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean } = {}) {
   const sessions = new Set<string>();
   const days: Record<string, Appt[]> = {
     "11/17/2026": [
@@ -28,10 +28,10 @@ function fakeLeadPerfection(opts: { askCode?: boolean } = {}) {
   const page = (body: string) => `<!doctype html><html><head><title>LeadPerfection</title><script>function __doPostBack(t,a){var f=document.forms[0];f.__EVENTTARGET.value=t;f.__EVENTARGUMENT.value=a||'';f.submit();}</script></head><body>${body}</body></html>`;
   const login = (msg = "") => page(`<form method="post" action="/login.aspx"><h2>LeadPerfection Login</h2>${msg ? `<p>${msg}</p>` : ""}User <input type="text" name="txtUser"> Password <input type="password" name="txtPass">${opts.askCode ? 'Verification code <input type="text" name="code">' : ""}<input type="submit" name="btnLogin" value="Log In"></form>`);
   const present = (date: string, market: string) => {
-    const rows = (days[date] ?? []).map((a) => `<tr><td><select name="rep_${a.id}" ${a.issued ? "disabled" : ""}><option value=""></option>${REPS.map((r, i) => `<option value="${i + 1}" ${r === a.rep ? "selected" : ""}>${r}</option>`).join("")}</select></td><td><a href="javascript:__doPostBack('lnkCust_${a.id}','')">${a.customer}</a> ${a.town}, NY</td><td>${a.time}</td><td>Windows</td><td>${a.issued ? "Issued" : "Set"}</td></tr>`).join("");
+    const rows = (days[date] ?? []).map((a) => `${opts.nested ? "<tr><td colspan=5><table><tr><td>" : ""}<tr><td><select name="rep_${a.id}" ${a.issued ? "disabled" : ""}><option value=""></option>${REPS.map((r, i) => `<option value="${i + 1}" ${r === a.rep ? "selected" : ""}>${r}</option>`).join("")}</select></td><td><a href="javascript:__doPostBack('lnkCust_${a.id}','')">${a.customer}</a> ${a.town}, NY</td><td>${a.time}</td><td>Windows</td><td>${a.issued ? "Issued" : "Set"}</td></tr>${opts.nested ? "</td></tr></table></td></tr>" : ""}`).join("");
     return page(`<form method="post" action="/Present.aspx"><input type="hidden" name="__EVENTTARGET" value=""><input type="hidden" name="__EVENTARGUMENT" value="">
-      <h3>Sales Presentation</h3>Market: <select name="ddlMarket" onchange="__doPostBack('ddlMarket','')"><option ${market === "NYRO" ? "selected" : ""}>NYRO - NYRO</option><option ${market === "NYBU" ? "selected" : ""}>NYBU - NYBU</option></select>
-      Date: <input type="text" name="txtDate" value="${date}" onchange="__doPostBack('txtDate','')">
+      <h3>Sales Presentation</h3>${opts.nested ? "<table><tr><td>" : ""}Market: <select name="ddlMarket" onchange="__doPostBack('ddlMarket','')"><option ${market === "NYRO" ? "selected" : ""}>NYRO - NYRO</option><option ${market === "NYBU" ? "selected" : ""}>NYBU - NYBU</option></select>
+      Date: <input type="text" name="txtDate" value="${date}" onchange="__doPostBack('txtDate','')">${opts.nested ? "</td></tr></table>" : ""}
       <input type="image" name="btnSave" title="Save" alt="Save" src="/img/save.gif">
       <table><tr><th>Sales Rep</th><th>Customer</th><th>Time</th><th>Product</th><th>Status</th></tr>${rows}</table></form>`);
   };
@@ -206,4 +206,17 @@ test("a missing browser says what to run on the server", async () => {
   const lp = new LeadPerfectionConnector(store, { url: "http://127.0.0.1:9", user: "hq", password: "x", launch: async () => { throw new Error("browserType.launch: Executable doesn't exist at /home/jarvis/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell"); } });
   await assert.rejects(lp.check(), /isn't installed on the server yet\. On the droplet run: cd \/opt\/jarvis && sudo node packages\/core\/node_modules\/playwright-core\/cli\.js install-deps chromium && sudo -u jarvis -H node .* install --only-shell chromium/);
   assert.equal((await lp.status()).lastFetch?.error, "the browser isn't installed on the server yet");
+});
+
+test("appointments in nested tables (old page layouts) are found once each, and counted right", async () => {
+  const site = await fakeLeadPerfection({ nested: true });
+  try {
+    const { jarvis, lp } = await connect(site);
+    assert.match(await lp.check(), /Sales › Presentation \(NYRO - NYRO\) shows 0 appointments for today\./, "today has none; the market and date filters aren't counted");
+    const card = await jarvis.requestApproval({ agentId: "stevon", kind: "other", title: "Schedule", body: "x", payload: { action: "lp.assign", date: "11/17/2026", market: "NYRO", assignments: [{ customer: "Slott, Susan", rep: "Marino, Phillip" }, { customer: "Ross, Karen", time: "6:00 PM", rep: "Robak, Ronald" }] } });
+    const done = await jarvis.decide(card.id, "approved");
+    assert.match(done?.note ?? "", /2 of 2 set in LeadPerfection/);
+    assert.equal(site.days["11/17/2026"]![0]!.rep, "Marino, Phillip");
+    assert.equal(site.days["11/17/2026"]![2]!.rep, "Robak, Ronald");
+  } finally { site.close(); }
 });

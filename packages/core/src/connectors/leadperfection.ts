@@ -369,7 +369,8 @@ export class LeadPerfectionConnector {
 
   /** One row on Present.aspx per appointment: the row that names the customer (and the time, when given). */
   private async rowFor(page: Page, a: Assignment) {
-    const rows = page.locator("tr").filter({ has: page.locator("select") });
+    // The innermost rows only: old pages nest tables in table cells, and the outer row would match the same customer.
+    const rows = page.locator("tr").filter({ has: page.locator("select"), hasNot: page.locator("tr select") });
     const matches: number[] = [];
     const n = await rows.count();
     for (let i = 0; i < n; i++) {
@@ -481,9 +482,18 @@ export class LeadPerfectionConnector {
     return this.serial(async () => {
       const page = await this.open();
       await this.go(page, "Present.aspx");
-      const rows = await page.locator("tr").filter({ has: page.locator("select") }).count();
+      // Appointment rows: the innermost rows with a rep-sized dropdown (not the market or sort filters, not layout rows).
+      const seen = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll("tr")).filter((tr: HTMLElement) => !tr.querySelector("tr select") && Array.from(tr.querySelectorAll("select")).some((s: HTMLSelectElement) => s.options.length >= 6));
+        const market = Array.from(document.querySelectorAll("select")).find((s: HTMLSelectElement) => /market/i.test(`${s.name} ${s.id}`)) as HTMLSelectElement | undefined;
+        // Each row's customer: its first link (customer names are links on Sales › Presentation), else its first words.
+        const names = rows.map((tr: HTMLElement) => ((tr.querySelector("a")?.textContent ?? "").trim() || (tr.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 30)));
+        return { names, market: market?.selectedOptions[0]?.textContent?.trim() ?? "" };
+      });
       await this.mark(true);
-      return `Signed in to LeadPerfection as ${this.opts.user}; Sales › Presentation shows ${rows} appointment row${rows === 1 ? "" : "s"} for today.`;
+      const n = seen.names.length;
+      // The names, so Phil can see which rows were counted when the number isn't what he expects.
+      return `Signed in to LeadPerfection as ${this.opts.user}. Sales › Presentation${seen.market ? ` (${seen.market})` : ""} shows ${n} appointment${n === 1 ? "" : "s"} for today${n ? `: ${seen.names.slice(0, 50).join("; ")}${n > 50 ? `; and ${n - 50} more` : ""}` : ""}.`;
     });
   }
 }
