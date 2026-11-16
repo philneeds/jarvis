@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { VideoAnalyzer, GeminiVideo, videoRefs, withoutInstagramLinks, videoText, videoTools, videoCaps, videoDay, VIDEO_SPEND_KEY, INSTAGRAM_LINE, GEMINI_NOT_CONFIGURED, CHARTERS, Jarvis, ModelRouter, memoryStore, type Provider } from "../src/index.js";
+import { VideoAnalyzer, GeminiVideo, videoRefs, withoutInstagramLinks, videoText, videoTools, videoCaps, videoDay, VIDEO_SPEND_KEY, INSTAGRAM_LINE, GEMINI_NOT_CONFIGURED, CHARTERS, Jarvis, ModelRouter, Secrets, memoryStore, type Provider } from "../src/index.js";
 
+// The tests run with HQ's real environment on the server; the reader's key must come from each test, never from it.
+delete process.env.GEMINI_API_KEY;
 const YT = "dQw4w9WgXcQ";
 const YT_URL = `https://www.youtube.com/watch?v=${YT}`;
 const KEY = "AIzaTestKey123";
@@ -10,7 +12,7 @@ const WRITEUP = "SUMMARY: A plumber explains heat pumps.\nSAID: [0:04] \"they re
 
 type Call = { method: string; url: string; headers: Record<string, string>; body?: unknown; bytes?: number };
 /** Google's API and YouTube's public card, played: every call is recorded so a test can say what was and wasn't sent. */
-function fakeGemini(o: { tokens?: number; countFails?: boolean; readStatus?: number; readThrows?: boolean; readBody?: object; uploadTo?: string; processingPolls?: number; fileState?: string; deleteFails?: boolean } = {}) {
+function fakeGemini(o: { tokens?: number; countFails?: boolean; readStatus?: number; readThrows?: boolean; readBody?: object; uploadTo?: string; processingPolls?: number; fileState?: string; deleteFails?: boolean; /** Google rejects the key on every call. */ badKey?: boolean } = {}) {
   const calls: Call[] = [];
   let polls = 0;
   const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
@@ -22,6 +24,8 @@ function fakeGemini(o: { tokens?: number; countFails?: boolean; readStatus?: num
     const call: Call = { method, url, headers, ...(typeof raw === "string" ? { body: JSON.parse(raw) } : raw ? { bytes: (raw as Uint8Array).length } : {}) };
     calls.push(call);
     if (url.startsWith("https://www.youtube.com/oembed")) return json({ title: "How heat pumps work", author_name: "Tech Channel" });
+    if (o.badKey && url.startsWith(API)) return json({ error: { code: 400, message: "API key not valid. Please pass a valid API key.", status: "INVALID_ARGUMENT" } }, 400);
+    if (method === "GET" && /\/v1beta\/models\/[a-z0-9.-]+$/.test(url)) return json({ name: `models/${url.split("/").pop()}`, displayName: "Gemini 3.8 Flash" });
     if (url === `${API}/upload/v1beta/files`) return json({}, 200, { "x-goog-upload-url": o.uploadTo ?? `${API}/upload/v1beta/files?upload_id=u1&upload_protocol=resumable` });
     if (url.includes("upload_id=")) return json({ file: { name: "files/abc123", uri: `${API}/v1beta/files/abc123`, state: o.processingPolls ? "PROCESSING" : o.fileState ?? "ACTIVE" } });
     if (url === `${API}/v1beta/files/abc123` && method === "GET") return json({ name: "files/abc123", uri: `${API}/v1beta/files/abc123`, state: ++polls >= (o.processingPolls ?? 0) ? o.fileState ?? "ACTIVE" : "PROCESSING" });
@@ -98,11 +102,53 @@ test("no key: a clear 'not configured', and nothing is sent anywhere", async () 
   const g = fakeGemini();
   const v = new VideoAnalyzer({ fetch: g.f, env: {} });
   assert.equal(v.missing(), GEMINI_NOT_CONFIGURED);
-  assert.match(GEMINI_NOT_CONFIGURED, /^Video reading is not configured: GEMINI_API_KEY is missing from \/opt\/jarvis\/\.env/);
+  assert.match(GEMINI_NOT_CONFIGURED, /^Video reading is not configured: GEMINI_API_KEY is missing\. .*Settings → Video/);
   await assert.rejects(v.link(YT_URL), /Video reading is not configured/);
   await assert.rejects(v.file(Buffer.alloc(4000, 1), { name: "reel.mp4" }), /Video reading is not configured/);
+  await assert.rejects(v.check(), /Video reading is not configured/);
   assert.equal(g.calls.length, 0);
   assert.equal(analyzer(g).missing(), undefined);
+  assert.deepEqual(v.status(), { configured: false, backend: "Gemini", model: "gemini-3.8-flash", missing: GEMINI_NOT_CONFIGURED, key: { set: false, source: "none", canSave: false } });
+});
+
+test("the key Phil pastes in Settings reaches Gemini like one from .env, is checked with one free call, and never shows in the status", async () => {
+  const store = memoryStore(); await store.init();
+  const secrets = new Secrets(store, { HQ_PASSWORD: "open-sesame" }, () => new Date("2026-11-16T03:30:00Z"));
+  const g = fakeGemini();
+  const v = new VideoAnalyzer({ fetch: g.f, env: {}, secrets, pollMs: 1 });
+  assert.equal(v.missing(), GEMINI_NOT_CONFIGURED, "nothing saved yet");
+  assert.deepEqual(v.status().key, { set: false, source: "none", canSave: true }, "Settings may offer the field");
+
+  await secrets.set("GEMINI_API_KEY", KEY);
+  assert.equal(v.missing(), undefined, "on at once, no restart and no new analyzer");
+  assert.equal(await v.check(), "Gemini accepted the key. Video model: Gemini 3.8 Flash ($0.75/M in, $3.75/M out). Every agent can watch YouTube links now.");
+  const probe = g.calls.at(-1)!;
+  assert.deepEqual([probe.method, probe.url, probe.headers["x-goog-api-key"]], ["GET", `${API}/v1beta/models/gemini-3.8-flash`, KEY], "a GET of the model card, with the key in the header");
+  const a = await v.link(YT_URL, { store });
+  assert.equal(g.to(":generateContent")[0]!.headers["x-goog-api-key"], KEY);
+  assert.equal(a.model, "gemini-3.8-flash");
+  const st = v.status();
+  assert.deepEqual(st, { configured: true, backend: "Gemini", model: "gemini-3.8-flash", key: { set: true, source: "settings", savedAt: "2026-11-16T03:30:00.000Z", canSave: true } });
+  assert.ok(!JSON.stringify(st).includes(KEY));
+
+  // .env wins over the saved one, and the status says where the key is from.
+  const both = new VideoAnalyzer({ fetch: g.f, env: { GEMINI_API_KEY: "env-key" }, secrets });
+  await both.check();
+  assert.equal(g.calls.at(-1)!.headers["x-goog-api-key"], "env-key");
+  assert.deepEqual(both.status().key, { set: true, source: "env", canSave: true });
+
+  // Removed: off again, and the check says why without calling Google.
+  await secrets.clear("GEMINI_API_KEY");
+  const before = g.calls.length;
+  assert.equal(v.missing(), GEMINI_NOT_CONFIGURED);
+  await assert.rejects(v.check(), /not configured/);
+  assert.equal(g.calls.length, before);
+
+  // A key Google turns down is named as such, with where to fix it, and the key itself is cut out of the text.
+  const bad = fakeGemini({ badKey: true });
+  await secrets.set("GEMINI_API_KEY", KEY);
+  const err = await new VideoAnalyzer({ fetch: bad.f, env: {}, secrets }).check().catch((e: Error) => e.message);
+  assert.equal(err, "Gemini refused the key: the GEMINI_API_KEY HQ has (Settings → Video, or /opt/jarvis/.env) is wrong or was revoked");
 });
 
 test("a file Phil sent: uploaded, priced, read, and the uploaded copy is deleted, also when the read fails", async () => {
@@ -242,7 +288,7 @@ test("video_analyze: every agent with tools has it; it answers in words, logs th
     assert.ok((await logged()).some((l) => l.startsWith(`error: Couldn't watch ${YT_URL}: Gemini 403`)));
     // Not configured: said, and not logged as an error every time an agent tries.
     const off = videoTools(new VideoAnalyzer({ fetch: g.f, env: {} }))[0]!;
-    assert.match(await off.handler({ url: YT_URL }, ctx), /^Couldn't watch it: Video reading is not configured: GEMINI_API_KEY is missing/);
+    assert.match(await off.handler({ url: YT_URL }, ctx), /^Couldn't watch it: Video reading is not configured: GEMINI_API_KEY is missing\./);
     assert.equal((await logged()).filter((l) => l.startsWith("error:")).length, 1);
   } finally { if (was !== undefined) process.env.JARVIS_MOCK = was; }
 });
@@ -257,6 +303,8 @@ test("Phil pastes a link: a YouTube video is watched first; an Instagram link ge
   // Before the key is there: nothing is sent, and whoever answers knows why.
   jarvis.useVideo({ fetch: g.f, env: {} });
   assert.match(jarvis.videoMissing()!, /GEMINI_API_KEY is missing/);
+  // Settings sees the same: off, which reader, the line for Phil, and whether it can take a key (not without a server secret).
+  assert.deepEqual(jarvis.videoStatus(), { configured: false, backend: "Gemini", model: "gemini-3.8-flash", missing: GEMINI_NOT_CONFIGURED, key: { set: false, source: "none", canSave: !!(process.env.HQ_SECRETS_KEY || process.env.HQ_SESSION_SECRET || process.env.HQ_PASSWORD) } });
   await jarvis.handle(`@stella worth copying? https://youtu.be/${YT}`);
   assert.equal(g.calls.length, 0);
   assert.match(prompts.at(-1)!, /links to a YouTube video, which HQ can't watch yet\. Video reading is not configured: GEMINI_API_KEY is missing/);
@@ -264,6 +312,9 @@ test("Phil pastes a link: a YouTube video is watched first; an Instagram link ge
 
   jarvis.useVideo({ fetch: g.f, env: env(), pollMs: 1 });
   assert.equal(jarvis.videoMissing(), undefined);
+  const on = jarvis.videoStatus();
+  assert.deepEqual([on.configured, on.key.source], [true, "env"]);
+  assert.ok(!JSON.stringify(on).includes(KEY), "the status never carries the key");
   await jarvis.handle(`@stella worth copying? https://youtu.be/${YT}`);
   assert.ok((await store.chat.list()).some((m) => m.role === "jarvis" && m.kind === "ack" && /^Watching that YouTube video first/.test(m.text)), "Phil hears at once that it's being watched");
   const seen = prompts.at(-1)!;

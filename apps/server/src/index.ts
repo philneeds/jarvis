@@ -14,6 +14,9 @@ const BUILD = (() => { try { return execFileSync("git", ["rev-parse", "HEAD"], {
 const store = storeFromEnv();
 await store.init();
 const jarvis = new Jarvis({ store, notify });
+// Keys Phil pasted into Settings (sealed in the store) come into memory once; a problem is said, never fatal.
+await jarvis.secrets.load().catch((e) => console.warn("[secrets] load:", (e as Error).message));
+{ const k = jarvis.secrets.status("GEMINI_API_KEY"); if (k.problem) console.warn(`[secrets] GEMINI_API_KEY: ${k.problem}`); else if (k.source === "settings") console.log(`[secrets] GEMINI_API_KEY from Settings (saved ${k.savedAt})`); }
 const google = GoogleConnector.fromEnv(store);
 if (google) jarvis.addConnector(google, GoogleConnector.promptHint());
 const x = XConnector.fromEnv(store);

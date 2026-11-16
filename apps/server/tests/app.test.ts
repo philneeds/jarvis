@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 process.env.JARVIS_MOCK = "1";
 process.env.HQ_PASSWORD = "open-sesame";
 // The tests run with HQ's real environment on the server; the passkey domain must not come from it.
-process.env.HQ_ORIGIN = "http://localhost:3000"; delete process.env.HQ_RP_ID;
+process.env.HQ_ORIGIN = "http://localhost:3000"; delete process.env.HQ_RP_ID; delete process.env.GEMINI_API_KEY;
 { const os = await import("node:os"); const fs = await import("node:fs"); const path = await import("node:path"); process.env.JARVIS_UPLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-app-up-")); }
 const { Jarvis, memoryStore } = await import("@jarvis/core");
 const { createApp } = await import("../src/app.js");
@@ -53,6 +53,56 @@ test("login gates the API", async () => {
   assert.ok(((await act.json()) as { entries: unknown[] }).entries.length > 0);
   const quiet = (await (await call("/api/activity?exclude=run,bogus", { cookie })).json()) as { entries: { kind: string }[] };
   assert.ok(quiet.entries.length > 0 && quiet.entries.every((e) => e.kind !== "run"));
+});
+
+test("Settings takes the Gemini key: saved sealed, checked with Google, shown as on without the key, removable; a refused key isn't kept", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  type Video = { configured: boolean; backend: string; model: string; missing?: string; key: { set: boolean; source: string; savedAt?: string; canSave: boolean } };
+  const read = async () => ((await (await call("/api/connectors", { cookie })).json()) as { video: Video }).video;
+  const KEY = "AIzaSyTestKey_0123456789abcdefghijklmn";
+  // Google, played: the model card for a good key, a refusal for a bad one. Everything sent is recorded.
+  const seen: { url: string; key?: string }[] = [];
+  let refuse = false;
+  const google = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    seen.push({ url, key: ((init?.headers ?? {}) as Record<string, string>)["x-goog-api-key"] });
+    if (refuse) return new Response(JSON.stringify({ error: { code: 400, message: "API key not valid. Please pass a valid API key.", status: "INVALID_ARGUMENT" } }), { status: 400, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ name: "models/gemini-3.8-flash", displayName: "Gemini 3.8 Flash" }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  jarvisInst.useVideo({ fetch: google, env: {} });
+  try {
+    const off = await read();
+    assert.equal(off.configured, false);
+    assert.match(off.missing!, /GEMINI_API_KEY is missing\. .*Settings → Video/);
+    assert.deepEqual(off.key, { set: false, source: "none", canSave: true }, "HQ_PASSWORD is set, so Settings can seal a key");
+
+    assert.equal((await call("/api/video/key", { method: "POST", cookie, body: JSON.stringify({ key: "" }) })).status, 400);
+    const saved = await call("/api/video/key", { method: "POST", cookie, body: JSON.stringify({ key: KEY }) });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(await saved.json(), { ok: true, summary: "Gemini accepted the key. Video model: Gemini 3.8 Flash ($0.75/M in, $3.75/M out). Every agent can watch YouTube links now." });
+    assert.deepEqual(seen.map((s) => [s.url, s.key]), [["https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash", KEY]], "one free call to prove it, with the key in the header");
+    const on = await read();
+    assert.deepEqual([on.configured, on.key.set, on.key.source, typeof on.key.savedAt], [true, true, "settings", "string"]);
+    assert.ok(!JSON.stringify(on).includes(KEY), "the key never comes back out");
+    const stored = JSON.stringify(await store.settings.get("secrets.GEMINI_API_KEY", null));
+    assert.ok(stored.includes("aes-256-gcm") && !stored.includes(KEY), "sealed in the store");
+    assert.ok((await store.activity.list({ agentId: "jarvis" })).some((e) => /Phil saved a Gemini key in Settings/.test(e.summary) && !e.summary.includes(KEY)));
+    assert.equal((await call("/api/video/test", { method: "POST", cookie })).status, 200);
+
+    // Removing turns it off again.
+    assert.equal((await call("/api/video/key", { method: "DELETE", cookie })).status, 200);
+    assert.equal((await read()).configured, false);
+    assert.equal(await store.settings.get("secrets.GEMINI_API_KEY", "gone"), null);
+
+    // A key Google refuses isn't kept, and Phil is told where to look.
+    refuse = true;
+    const bad = await call("/api/video/key", { method: "POST", cookie, body: JSON.stringify({ key: "AIzaWrongKey_0123456789abcdefghij" }) });
+    assert.equal(bad.status, 400);
+    assert.match(((await bad.json()) as { error: string }).error, /^Gemini refused the key: .*Nothing was saved; check the key in aistudio\.google\.com\/apikey/);
+    assert.equal((await read()).key.set, false);
+    assert.equal(await store.settings.get("secrets.GEMINI_API_KEY", "gone"), null);
+  } finally { jarvisInst.useVideo({ env: {} }); }
 });
 
 test("the last-deploy line answers even without a workshop: no record, no live commit, but when HQ came up", async () => {

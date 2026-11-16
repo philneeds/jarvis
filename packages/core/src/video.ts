@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { defineTool, type ToolDef } from "./tools/index.js";
 import type { Store } from "./store/types.js";
+import type { SecretReader, SecretStatus } from "./secrets.js";
 
 /**
  * Watching a video for an agent. A video model does the watching (Gemini today) and writes up what is said, what is
@@ -52,6 +53,11 @@ export interface VideoHandle { part: unknown; release(): Promise<void> }
 export interface VideoPrice { inUsdPerM: number; outUsdPerM: number }
 export interface VideoRead { text: string; inputTokens: number; outputTokens: number; /** The answer stopped at the length limit. */ cut?: boolean }
 export interface VideoAsk { system: string; prompt: string; maxOutputTokens: number }
+/**
+ * What Settings shows about the video reader. `missing` is the line for Phil when it's off; `key` says whether the
+ * reader has a key, where from (.env or Settings) and since when. The key itself never travels.
+ */
+export interface VideoStatus { configured: boolean; backend: string; model: string; missing?: string; key: SecretStatus & { /** Whether Settings can keep one (the server has something to seal it with). */ canSave: boolean } }
 
 export interface VideoBackend {
   /** "gemini" */
@@ -60,6 +66,10 @@ export interface VideoBackend {
   readonly label: string;
   /** What is missing before it can run (a key), in words for Phil; undefined when it's ready. */
   missing(): string | undefined;
+  /** Where the key came from, for Settings; the key itself stays inside. */
+  keyStatus(): SecretStatus;
+  /** One cheap call with the key to prove it works: a line for Settings, or a throw saying what Google said. */
+  check(): Promise<string>;
   model(): string;
   /** Dollars per million tokens for the model on that day; undefined when HQ has no price for it. */
   price(at: Date): VideoPrice | undefined;
@@ -82,12 +92,13 @@ const GEMINI_PRICES: Record<string, { from: string; inUsdPerM: number; outUsdPer
 };
 /** The video types Gemini lists, and what Telegram calls a .mov. */
 const GEMINI_MIME: Record<string, string> = { "video/mp4": "video/mp4", "video/quicktime": "video/mov", "video/mov": "video/mov", "video/webm": "video/webm", "video/mpeg": "video/mpeg", "video/mpg": "video/mpg", "video/avi": "video/avi", "video/x-msvideo": "video/avi", "video/x-flv": "video/x-flv", "video/wmv": "video/wmv", "video/x-ms-wmv": "video/wmv", "video/3gpp": "video/3gpp" };
-export const GEMINI_NOT_CONFIGURED = "Video reading is not configured: GEMINI_API_KEY is missing from /opt/jarvis/.env. Phil gets a key at aistudio.google.com (with billing on, so nothing he sends is used for training), adds it to that file and restarts HQ.";
+export const GEMINI_NOT_CONFIGURED = "Video reading is not configured: GEMINI_API_KEY is missing. Phil gets a key at aistudio.google.com/apikey (on a Google Cloud project with billing on, so nothing he sends is used for training) and pastes it under Settings → Video in HQ; it is kept sealed on the server and works at once, no restart.";
+const GEMINI_KEY_REFUSED = "Gemini refused the key: the GEMINI_API_KEY HQ has (Settings → Video, or /opt/jarvis/.env) is wrong or was revoked";
 
 const positive = (v: string | undefined) => { const n = Number(v); return v && Number.isFinite(n) && n > 0 ? n : undefined; };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export interface VideoBackendOptions { fetch?: typeof fetch; env?: NodeJS.ProcessEnv; /** Between checks while an uploaded file is processed (tests shorten it). */ pollMs?: number; readTimeoutMs?: number }
+export interface VideoBackendOptions { fetch?: typeof fetch; env?: NodeJS.ProcessEnv; /** Keys Phil saved in Settings; .env still wins when both have one. */ secrets?: SecretReader; /** Between checks while an uploaded file is processed (tests shorten it). */ pollMs?: number; readTimeoutMs?: number }
 
 /** Google's Gemini API: a YouTube link as file_data.file_uri, a file through the Files API (deleted after the read). */
 export class GeminiVideo implements VideoBackend {
@@ -95,8 +106,22 @@ export class GeminiVideo implements VideoBackend {
   readonly label = "Gemini";
   constructor(private o: VideoBackendOptions = {}) {}
   private get env() { return this.o.env ?? process.env; }
-  private key() { return (this.env.GEMINI_API_KEY ?? "").trim(); }
+  private key() { return (this.env.GEMINI_API_KEY ?? "").trim() || (this.o.secrets?.get("GEMINI_API_KEY") ?? "").trim(); }
   missing() { return this.key() ? undefined : GEMINI_NOT_CONFIGURED; }
+  keyStatus(): SecretStatus {
+    if ((this.env.GEMINI_API_KEY ?? "").trim()) return { set: true, source: "env" };
+    return this.o.secrets?.status("GEMINI_API_KEY") ?? { set: false, source: "none" };
+  }
+  /** Asks Google for the model's card with the key: proves the key and that the model exists, and costs nothing. */
+  async check(): Promise<string> {
+    const missing = this.missing();
+    if (missing) throw new Error(missing);
+    const res = await this.call(`${GEMINI_HOST}/v1beta/models/${this.model()}`, { method: "GET", timeoutMs: 20_000 });
+    const j = (await res.json().catch(() => ({}))) as { displayName?: unknown; name?: unknown };
+    const shown = typeof j.displayName === "string" && j.displayName.trim() ? j.displayName.trim().slice(0, 60) : this.model();
+    const p = this.price(new Date());
+    return `Gemini accepted the key. Video model: ${shown}${p ? ` ($${p.inUsdPerM}/M in, $${p.outUsdPerM}/M out)` : ""}. Every agent can watch YouTube links now.`;
+  }
   model() {
     const m = (this.env.GEMINI_VIDEO_MODEL ?? "").trim();
     return /^[a-z0-9][a-z0-9.-]{2,60}$/.test(m) ? m : "gemini-3.8-flash";
@@ -127,7 +152,7 @@ export class GeminiVideo implements VideoBackend {
     try { const j = JSON.parse(raw) as { error?: { message?: string; status?: string } }; message = j.error?.message ?? raw; status = j.error?.status ?? ""; } catch { /* not JSON: the text is the message */ }
     message = this.clean(message).replace(/\s+/g, " ").slice(0, 220);
     if (res.status === 429) throw new Error(`Gemini's rate limit or quota is used up for now (${message || "429"}). Try again later`);
-    if (/API key not valid|API_KEY_INVALID/i.test(`${message} ${raw}`) || res.status === 401) throw new Error("Gemini refused the key: GEMINI_API_KEY in /opt/jarvis/.env is wrong or was revoked");
+    if (/API key not valid|API_KEY_INVALID/i.test(`${message} ${raw}`) || res.status === 401) throw new Error(GEMINI_KEY_REFUSED);
     throw new Error(`Gemini ${res.status}${status ? ` ${status}` : ""}: ${message || "no reason given"}`);
   }
   private clean(s: string) { const k = this.key(); return k ? s.split(k).join("[key]") : s; }
@@ -242,6 +267,8 @@ export interface VideoDeps {
   backend?: VideoBackend;
   fetch?: typeof fetch;
   env?: NodeJS.ProcessEnv;
+  /** Keys Phil saved in Settings (the server's Secrets); .env still wins. */
+  secrets?: SecretReader;
   now?: () => number;
   pollMs?: number;
 }
@@ -259,7 +286,7 @@ export class VideoAnalyzer {
   constructor(private deps: VideoDeps = {}) {
     const env = deps.env ?? process.env;
     const make = VIDEO_BACKENDS[(env.VIDEO_BACKEND ?? "").trim().toLowerCase()] ?? VIDEO_BACKENDS.gemini!;
-    this.backend = deps.backend ?? make({ fetch: deps.fetch, env, pollMs: deps.pollMs });
+    this.backend = deps.backend ?? make({ fetch: deps.fetch, env, secrets: deps.secrets, pollMs: deps.pollMs });
   }
   private now() { return new Date((this.deps.now ?? Date.now)()); }
   private one<T>(job: () => Promise<T>): Promise<T> {
@@ -269,6 +296,13 @@ export class VideoAnalyzer {
   }
   /** What's missing before any video can be read (the key), or undefined. */
   missing() { return this.backend.missing(); }
+  /** For Settings: which reader, which model, where its key is from, and what Phil must add if it's off. Never carries the key. */
+  status(): VideoStatus {
+    const missing = this.missing();
+    return { configured: !missing, backend: this.backend.label, model: this.backend.model(), ...(missing ? { missing } : {}), key: { ...this.backend.keyStatus(), canSave: this.deps.secrets?.canSave() ?? false } };
+  }
+  /** Prove the key works with one free call; a line for Settings or a throw in Google's words. */
+  check(): Promise<string> { return this.backend.check(); }
 
   async spentToday(store?: Pick<Store, "settings">): Promise<VideoSpend> {
     const day = videoDay(this.now());

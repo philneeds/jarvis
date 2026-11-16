@@ -9,7 +9,7 @@ import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 
 interface Passkey { id: string; label: string; createdAt: string }
-interface Connectors { workshop?: { configured: boolean; dir?: string; canShip: boolean; autoShip?: boolean; last?: { at: string; sha: string; title: string; status: string; note?: string } | null }; xsearch?: { configured: boolean; model: string; grokMode: string }; google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; eagleview?: { configured: boolean; sandbox?: boolean; orders?: number; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; robinhood?: { configured: boolean; connected: boolean; connectedAt?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
+interface Connectors { workshop?: { configured: boolean; dir?: string; canShip: boolean; autoShip?: boolean; last?: { at: string; sha: string; title: string; status: string; note?: string } | null }; xsearch?: { configured: boolean; model: string; grokMode: string }; video?: { configured: boolean; backend: string; model: string; missing?: string; key: { set: boolean; source: "env" | "settings" | "none"; savedAt?: string; problem?: string; canSave: boolean } }; google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; eagleview?: { configured: boolean; sandbox?: boolean; orders?: number; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; robinhood?: { configured: boolean; connected: boolean; connectedAt?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
 
 export default function SettingsPage() {
   const { state, refresh } = useLive();
@@ -49,6 +49,17 @@ export default function SettingsPage() {
   const [ghMsg, setGhMsg] = useState<string>();
   const testSimple = async (path: string, set: (s: string) => void) => { set("Checking…"); try { const r = await post<{ summary: string }>(path, {}); set(r.summary); await load(); } catch (e) { set((e as Error).message); } };
   const testKubera = async () => { setKbMsg("Checking…"); try { const r = await post<{ summary: string }>("/api/connectors/kubera/test", {}); setKbMsg(r.summary); await load(); } catch (e) { setKbMsg((e as Error).message); } };
+  // The video reader's key: pasted here, sealed on the server, never shown again.
+  const [geminiKey, setGeminiKey] = useState("");
+  const [vidMsg, setVidMsg] = useState<string>();
+  const [vidBusy, setVidBusy] = useState(false);
+  const saveGeminiKey = async () => {
+    if (!geminiKey.trim()) return;
+    setVidBusy(true); setVidMsg("Saving and checking with Google…");
+    try { const r = await post<{ ok: boolean; summary: string }>("/api/video/key", { key: geminiKey.trim() }); setVidMsg(r.summary); setGeminiKey(""); await load(); }
+    catch (e) { setVidMsg((e as Error).message); } finally { setVidBusy(false); }
+  };
+  const removeGeminiKey = async () => { if (!confirm("Remove the Gemini key? Nobody can watch videos until a new one is saved.")) return; await api("/api/video/key", { method: "DELETE" }); setVidMsg(undefined); await load(); };
   const [health, setHealth] = useState<{ keySet: boolean; lastIngest: { at: string; samples: number; workouts: number } | null; days: number; summary: string } | null>(null);
   const [healthKey, setHealthKey] = useState<string>();
   const [copied, setCopied] = useState<string>();
@@ -280,6 +291,29 @@ export default function SettingsPage() {
                 ? <span className="ml-auto" style={{ color: "var(--dim)" }}>on · {conn.xsearch.model}</span>
                 : <span className="ml-auto" style={{ color: "var(--amber)" }}>off: nobody can read X. Add XAI_API_KEY (console.x.ai, prepaid credits) to .env and restart.</span>}
             </div>
+          </div>
+          <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Video">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`dot ${conn?.video?.configured ? "dot-working" : "dot-idle"}`} />
+              <span><b>Video</b> · how every agent watches a YouTube link or a video you send on Telegram: read by {conn?.video?.backend ?? "Gemini"}, priced before it is sent, costed under Usage.</span>
+              {conn?.video?.configured
+                ? <span className="ml-auto" style={{ color: "var(--dim)" }}>on · {conn.video.model} · key {conn.video.key.source === "env" ? "from the server's .env" : `saved here${conn.video.key.savedAt ? ` ${fmtTime(conn.video.key.savedAt)}` : ""}`}</span>
+                : <span className="ml-auto" style={{ color: "var(--amber)" }}>off: nobody can watch videos.</span>}
+            </div>
+            {conn?.video && conn.video.key.source !== "env" && (
+              <div className="pl-6 flex flex-col gap-2">
+                {conn.video.key.problem && <p className="m-0" style={{ color: "var(--red)" }}>{conn.video.key.problem}</p>}
+                {!conn.video.key.set && !conn.video.key.problem && <span style={{ color: "var(--muted)" }}>Get a key at aistudio.google.com/apikey (Create API key, on a Google Cloud project with billing on so nothing you send is used for training). Paste it below: it is sealed on HQ&apos;s server, never shown again, and works at once.</span>}
+                {conn.video.key.canSave ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input className="input flex-1 min-w-[12rem]" type="password" autoComplete="off" placeholder={conn.video.key.set ? "Paste a new key to replace the saved one" : "Paste the Gemini API key"} value={geminiKey} onChange={(e) => setGeminiKey(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void saveGeminiKey(); }} />
+                    <button className="btn btn-sm btn-primary" disabled={vidBusy || !geminiKey.trim()} onClick={() => void saveGeminiKey()}>{vidBusy ? "Checking…" : "Save"}</button>
+                    {conn.video.key.set && <><button className="btn btn-sm" onClick={() => void testSimple("/api/video/test", (s) => setVidMsg(s))}>Check now</button><button className="btn btn-sm btn-danger" onClick={() => void removeGeminiKey()}>Remove</button></>}
+                  </div>
+                ) : <span style={{ color: "var(--amber)" }}>Keys can&apos;t be kept here until HQ_PASSWORD (or HQ_SECRETS_KEY) is set in /opt/jarvis/.env on the server; until then add GEMINI_API_KEY to that file and restart.</span>}
+                {vidMsg && <p className="m-0" style={{ color: "var(--ink)" }}>{vidMsg}</p>}
+              </div>
+            )}
           </div>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Apple Health">
             <div className="flex flex-wrap items-center gap-3">

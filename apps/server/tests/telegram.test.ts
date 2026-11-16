@@ -1,7 +1,7 @@
 import { test } from "node:test";
 { const os = await import("node:os"); const fs = await import("node:fs"); const path = await import("node:path"); process.env.JARVIS_UPLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-tg-up-")); }
 import assert from "node:assert/strict";
-process.env.JARVIS_MOCK = "1";
+process.env.JARVIS_MOCK = "1"; delete process.env.GEMINI_API_KEY;
 const { Jarvis, memoryStore, ModelRouter, mockProvider } = await import("@jarvis/core");
 const { TelegramBot } = await import("../src/telegram.js");
 
@@ -264,7 +264,7 @@ test("a video sent on Telegram is uploaded to Gemini, read and deleted there, an
     // Before the key is on the server: said plainly, and the video isn't even downloaded.
     jarvis.useVideo({ fetch: g, env: {} });
     await bot.handle({ update_id: 1, message: { message_id: 1, chat: { id: 42 }, video: { file_id: "vid0", mime_type: "video/mp4", file_size: 6000 } } });
-    assert.match(sent.at(-1)!, /^I can't watch videos yet\. Video reading is not configured: GEMINI_API_KEY is missing from \/opt\/jarvis\/\.env/);
+    assert.match(sent.at(-1)!, /^I can't watch videos yet\. Video reading is not configured: GEMINI_API_KEY is missing\. .*Settings → Video/);
     assert.deepEqual([asked, gemini], [[], []]);
 
     jarvis.useVideo({ fetch: g, env: { GEMINI_API_KEY: "k" }, pollMs: 1 });

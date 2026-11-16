@@ -419,6 +419,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     github: connectors.github ? await connectors.github.status() : { configured: false },
     robinhood: connectors.robinhood ? await connectors.robinhood.status() : { configured: false, connected: false },
     xsearch: { configured: !!process.env.XAI_API_KEY, model: process.env.XAI_SEARCH_MODEL || "grok-4.7", grokMode: process.env.GROK_MODE || "cli" },
+    video: jarvis.videoStatus(),
     workshop: { configured: !!connectors.workshop, dir: connectors.workshop?.dir, canShip: !!process.env.GITHUB_PUSH_TOKEN, last: await jarvis.store.settings.get("workshop.ship", null), autoShip: await jarvis.store.settings.get(AUTO_SHIP_KEY, false) },
     telegram: { configured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) },
     ntfy: { configured: !!process.env.NOTIFY_WEBHOOK_URL },
@@ -526,6 +527,31 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.post("/connectors/eagleview/test", async (c) => {
     if (!connectors.eagleview) return c.json({ error: "EAGLEVIEW_CLIENT_ID and EAGLEVIEW_CLIENT_SECRET aren't set" }, 400);
     try { return c.json({ ok: true, summary: `${await connectors.eagleview.check()}\n${await connectors.eagleview.reportsText(await connectors.eagleview.reports(5))}` }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
+  });
+  // The video reader's key, from Settings. Write-only: the key goes in, is sealed in the store, and is never read back
+  // out through the API. A key Google refuses outright isn't kept; one that can't be checked (Google unreachable) is,
+  // with a warning, so a network blip doesn't make Phil paste it again.
+  api.post("/video/key", async (c) => {
+    const p = z.object({ key: z.string().min(1).max(400) }).safeParse(await c.req.json().catch(() => ({})));
+    if (!p.success) return c.json({ error: "paste the key" }, 400);
+    try { await jarvis.secrets.set("GEMINI_API_KEY", p.data.key); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+    try {
+      const summary = await jarvis.videoCheck();
+      await jarvis.router.log("jarvis", "system", "Phil saved a Gemini key in Settings; Google accepted it and every agent can watch videos now");
+      return c.json({ ok: true, summary });
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (/refused the key/.test(msg)) { await jarvis.secrets.clear("GEMINI_API_KEY"); return c.json({ error: `${msg}. Nothing was saved; check the key in aistudio.google.com/apikey and paste it again.` }, 400); }
+      return c.json({ ok: false, summary: `Saved, but HQ couldn't confirm it with Google just now (${msg}). Use Check now in a minute.` });
+    }
+  });
+  api.delete("/video/key", async (c) => {
+    await jarvis.secrets.clear("GEMINI_API_KEY");
+    await jarvis.router.log("jarvis", "system", "Phil removed the Gemini key from Settings; video reading is off until a new one is saved");
+    return c.json({ ok: true });
+  });
+  api.post("/video/test", async (c) => {
+    try { return c.json({ ok: true, summary: await jarvis.videoCheck() }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
   });
   // Check the Kubera key works (one call, cached for 20 minutes) and show the net worth line.
   api.post("/connectors/kubera/test", async (c) => {

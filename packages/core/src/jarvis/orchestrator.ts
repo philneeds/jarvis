@@ -22,6 +22,7 @@ import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { LOOKUP_TOOLS } from "../lookup.js";
 import { INSTAGRAM_LINE, VideoAnalyzer, videoCaps, videoLogLine, videoRefs, videoText, videoTools, withoutInstagramLinks, type VideoDeps, type VideoRef } from "../video.js";
+import { Secrets } from "../secrets.js";
 import { DECK_HINT, makeDeck, normalizeDeck, type Deck } from "../decks.js";
 import { GUARDRAIL_FILES, WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
 /** Settings keys for Phil's auto-ship switch and the day's auto-ships. */
@@ -213,6 +214,9 @@ export class Jarvis {
     this.store = opts.store;
     this.router = opts.router ?? new ModelRouter({ store: opts.store });
     this.notify = opts.notify;
+    // Keys Phil pastes into Settings (sealed in the store); the server reads them in with secrets.load() at boot.
+    this.secrets = new Secrets(this.store);
+    this.useVideo();
     this.pulses.set("health", async () => healthSummary(this.store, 3));
     this.pulses.set("memory", async () => (await this.store.memory.list()).filter((m) => !/^(watch|handoff):/.test(m.key)).map((m) => `${m.scope}|${m.key}|${m.value}`).sort().join("\n"));
     this.executors.set("memory.replace", async (a) => {
@@ -388,13 +392,19 @@ export class Jarvis {
   allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...this.videoToolList, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...LOOKUP_TOOLS, ...this.workshopToolList, ...this.connectorTools.values()]; }
 
   // ---- Video --------------------------------------------------------------
-  private video = new VideoAnalyzer();
-  private videoToolList = videoTools(this.video);
-  /** Swap the video reader (tests hand it a fake model). */
+  /** Keys Phil saved in Settings rather than .env (GEMINI_API_KEY). Write-only from the outside. */
+  readonly secrets: Secrets;
+  private video!: VideoAnalyzer;
+  private videoToolList!: import("../tools/index.js").ToolDef[];
+  /** Swap the video reader (tests hand it a fake model). Keys saved in Settings stay in reach unless the test brings its own. */
   useVideo(deps: VideoDeps = {}) {
-    this.video = new VideoAnalyzer(deps);
+    this.video = new VideoAnalyzer({ secrets: this.secrets, ...deps });
     this.videoToolList = videoTools(this.video);
   }
+  /** For Settings: reader, model, where the key is from, and the line for Phil when it's off (the key itself is never returned). */
+  videoStatus() { return this.video.status(); }
+  /** One free call to the video model with the key: a line for Settings, or a throw in Google's words. */
+  videoCheck() { return this.video.check(); }
   /** How long Phil's message waits for a linked video before it goes on without it (the read carries on and is kept). */
   static VIDEO_WAIT_MS = Number(process.env.JARVIS_VIDEO_WAIT_MS ?? 150_000);
   /** The YouTube video in Phil's message, watched, as context for whoever answers. */
