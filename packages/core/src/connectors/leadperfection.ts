@@ -241,6 +241,7 @@ export class LeadPerfectionConnector {
           return clean(el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("alt") || forLabel || ((el.tagName === "INPUT" && /submit|button|image/.test((el as HTMLInputElement).type)) ? (el as HTMLInputElement).value : "") || (el.tagName === "A" || el.tagName === "BUTTON" ? el.textContent : "") || clean(head) || cell || el.getAttribute("placeholder") || el.getAttribute("name") || id || "");
         };
         const out: string[] = [];
+        const lists = new Map<string, string>();
         let i = start;
         const els = Array.from(document.querySelectorAll("input, select, textarea, button, a[href], img[onclick], [onclick]")) as HTMLElement[];
         for (const el of els) {
@@ -258,7 +259,12 @@ export class LeadPerfectionConnector {
           if (el.tagName === "SELECT") {
             const s = el as HTMLSelectElement;
             const opts = Array.from(s.options as ArrayLike<HTMLOptionElement>).map((o: HTMLOptionElement) => clean(o.text, 40)).filter(Boolean);
-            line = `[${ref}] dropdown "${labelOf(el)}"${name ? ` (${name})` : ""} = "${clean(s.selectedOptions[0]?.text ?? "")}"${dis}; options: ${opts.slice(0, 60).join(" | ")}${opts.length > 60 ? ` | …${opts.length - 60} more` : ""}`;
+            // The same list on every row (48 reps on each appointment) is written once: an agent re-reads the whole
+            // screen on every step, so repeating it was most of what a schedule cost.
+            const list = `${opts.slice(0, 60).join(" | ")}${opts.length > 60 ? ` | …${opts.length - 60} more` : ""}`;
+            const seen = lists.get(list);
+            if (!seen) lists.set(list, ref);
+            line = `[${ref}] dropdown "${labelOf(el)}"${name ? ` (${name})` : ""} = "${clean(s.selectedOptions[0]?.text ?? "")}"${dis}; options: ${seen ? `same as [${seen}]` : list}`;
           } else if (el.tagName === "INPUT" && /checkbox|radio/.test((el as HTMLInputElement).type)) {
             line = `[${ref}] ${(el as HTMLInputElement).type} "${labelOf(el)}" ${(el as HTMLInputElement).checked ? "checked" : "unchecked"}${dis}`;
           } else if ((el.tagName === "INPUT" && !/submit|button|image|reset/.test((el as HTMLInputElement).type)) || el.tagName === "TEXTAREA") {

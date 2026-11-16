@@ -112,7 +112,8 @@ test("an agent signs in and reads the day's appointments; filters work, changes 
     screen = await call("lp_fill", { ref: ref(screen, /field "Date:?"|txtDate/), value: "11/17/2026" });
     assert.match(screen, /Slott, Susan/);
     assert.match(screen, /dropdown "Sales Rep" \(rep_1\) = ""; options: Dilibeto, Dominic \| Furia, Michael[^\n]*· row: Slott, Susan Rochester, NY 10:00 AM Windows Set/);
-    assert.match(screen, /\(rep_4\) = "Furia, Michael" \(locked\)/);
+    assert.match(screen, /\(rep_4\) = "Furia, Michael" \(locked\); options: same as \[e\d+\]/, "the rep list is written once, not on every row");
+    assert.equal(screen.split("Dilibeto, Dominic |").length - 1, 1);
     // The market dropdown is a filter.
     screen = await call("lp_select", { ref: ref(screen, /\(ddlMarket\)/), option: "NYBU" });
     assert.match(screen, /\(ddlMarket\) = "NYBU - NYBU"/);
