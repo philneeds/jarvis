@@ -5,7 +5,7 @@ import type { Store } from "./store/types.js";
 import { defineTool, type ToolDef } from "./tools/index.js";
 import { getAgent } from "./registry/index.js";
 import { saveFile, saveImage, removeFile, imageMimeOk } from "./uploads.js";
-import { getTemplate, templateText, listDecks, DECK_HINT } from "./decks.js";
+import { getTemplate, setTemplate, templateText, listDecks, DECK_HINT } from "./decks.js";
 
 /**
  * The sales data Phil uploads each week for Stevon's Tuesday meeting deck: spreadsheets (CSV or Excel) read into
@@ -121,6 +121,22 @@ export const DATA_TOOLS: ToolDef[] = [
     description: "The sales data Phil uploaded for your venture (spreadsheets as CSV text, screenshots attached as images), newest first. days=8 for this week; days=15 to compare with last week.",
     schema: { days: z.number().int().min(1).max(60).optional() },
     async handler({ days }, { store, agentId }) { const d = days ?? 8; return dataText(await listDataFiles(store, getAgent(agentId)?.venture ?? "proedge", d), d); },
+  }),
+  defineTool({
+    name: "deck_template_from_chat",
+    description: "Make a PowerPoint Phil attached in chat (or on Telegram) your venture's presentation template, when he says it's the template or asks you to use it. Picks the newest .pptx he attached, or the one whose name you give. Replaces the template that's there.",
+    schema: { name: z.string().max(160).optional().describe("part of the file's name, when there's more than one") },
+    async handler({ name }, { store, agentId }) {
+      const v = getAgent(agentId)?.venture ?? "proedge";
+      const { loadFile } = await import("./uploads.js");
+      const docs = (await store.settings.get<{ name: string; at: string; type: string; fileId?: string }[]>("uploads.docs", [])).filter((d) => d.fileId && (d.type === "PowerPoint" || /\.pptx$/i.test(d.name))).reverse();
+      const pick = name ? docs.find((d) => d.name.toLowerCase().includes(name.toLowerCase())) : docs[0];
+      if (!pick) return docs.length ? `No attached PowerPoint matches "${name}"; attached: ${docs.slice(0, 5).map((d) => d.name).join(", ")}.` : "Phil hasn't attached a PowerPoint in chat recently. He can attach the .pptx to a message, or upload it with Upload .pptx on your page.";
+      const file = await loadFile(pick.fileId!);
+      if (!file) return `The file "${pick.name}" isn't on the server any more; ask Phil to attach it again.`;
+      const t = await setTemplate(store, v, pick.name, file.data);
+      return `${pick.name} is now the template (${t.outline.length} slides). ${templateText(t)}`;
+    },
   }),
   defineTool({
     name: "deck_template",

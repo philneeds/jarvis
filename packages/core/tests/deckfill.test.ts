@@ -110,3 +110,16 @@ test("Drive gets a Google Slides conversion in a 'Jarvis decks' folder HQ made",
   assert.match(calls.find((c) => c.url.includes("fields=id") && !c.url.includes("upload"))!.body, /"name":"Jarvis decks"/);
   assert.match(calls.find((c) => c.url.includes("/upload/"))!.body, /"parents":\["folder1"\],"mimeType":"application\/vnd\.google-apps\.presentation"/);
 });
+
+test("a .pptx Phil attached in chat can be made the template by the agent", async () => {
+  const { readDocument, saveDoc } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("m")], grok: [mockProvider("m")] } }) });
+  const tool = jarvis.allTools().find((t) => t.name === "deck_template_from_chat")!;
+  assert.match(await tool.handler({}, { store, agentId: "stevon" }), /hasn't attached a PowerPoint/);
+  await saveDoc(store, await readDocument({ name: "ProEdge_Sales_Meeting.pptx", data: await template() }));
+  const out = await tool.handler({}, { store, agentId: "stevon" });
+  assert.match(out, /^ProEdge_Sales_Meeting\.pptx is now the template \(2 slides\)/);
+  assert.equal((await getTemplate(store, "proedge"))?.name, "ProEdge_Sales_Meeting.pptx");
+  assert.match(await tool.handler({ name: "budget" }, { store, agentId: "stevon" }), /No attached PowerPoint matches "budget"/);
+});

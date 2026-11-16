@@ -260,7 +260,7 @@ export const CHARTERS: Record<string, Charter> = {
       "Directing the scheduler and email AI; until the scheduler is switched on, making the ProEdge schedule yourself in LeadPerfection (which rep runs which appointment), as one lp.assign card per day",
     ],
     rhythm: "Builds the Tuesday meeting deck Mondays at 8 pm Eastern from the week's sales data; otherwise on demand.",
-    tools: [...BOARD, "sales_data", "deck_template", ...LP],
+    tools: [...BOARD, "sales_data", "deck_template", "deck_template_from_chat", ...LP],
     good: "ProEdge grows with less of Phil's time, close rates go up, and the team shows up.",
   },
   scheduler: { job: "Team schedule optimizer for ProEdge.", owns: ["The ProEdge team's schedule: which sales rep runs which appointment, from LeadPerfection's appointments and the reps' availability, proposed to Phil as one lp.assign card per day"], rhythm: "On demand (phase 2); until then Stevon makes the schedule.", tools: [...CAL, "memory_search", ...LP], good: "The right people are in the right place." },
