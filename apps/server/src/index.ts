@@ -137,7 +137,7 @@ if (stale.length) console.log(`[boot] cleared stale work: ${stale.join(", ")}`);
 void jarvis.syncSetupGoal().catch((e) => console.warn("[setup]", (e as Error).message));
 if (process.env.SCHEDULER !== "0") scheduler.start();
 // Watchers: cheap looks at GoHighLevel and the markets every few minutes; a lead wakes only when something new happened.
-const watchers = new Watchers(jarvis, { ghl });
+const watchers = new Watchers(jarvis, { ghl, google });
 if (process.env.SCHEDULER !== "0") watchers.start();
 
 const shutdown = async () => { scheduler.stop(); watchers.stop(); telegram?.stop(); await store.close(); process.exit(0); };

@@ -15,7 +15,7 @@ import { hyperliquidPerps, perpsText, type PerpRow } from "./hyperliquid.js";
  *   WATCH_MOVE_PCT         a 24h move that counts as big (default 10)
  *   WATCH_OI_MIN_USD       only markets with at least this much open interest (default 20,000,000)
  */
-export interface WatchDeps { ghl?: GoHighLevelConnector; fetch?: typeof fetch }
+export interface WatchDeps { ghl?: GoHighLevelConnector; google?: import("./connectors/google.js").GoogleConnector; fetch?: typeof fetch }
 export interface WatchResult { event?: string; cursor: unknown }
 export interface Watcher {
   id: string;
@@ -47,6 +47,19 @@ export function ghlInbound(convs: Conv[], cursor: unknown, now: number): WatchRe
   return { cursor: Math.max(cursor, newest), fresh };
 }
 
+type Mail = { id: string; account: string; from?: string; subject?: string; date?: string };
+/**
+ * EagleView emails not seen before that are about a report (not a newsletter or a receipt for something else). The
+ * cursor is the ids already seen; the first look takes everything in the inbox as seen, so old reports wake nobody.
+ */
+export function eagleviewMail(found: Mail[], cursor: unknown): WatchResult & { fresh: Mail[] } {
+  const ids = found.map((m) => m.id);
+  if (!Array.isArray(cursor)) return { cursor: ids.slice(-300), fresh: [] };
+  const seen = new Set(cursor as string[]);
+  const fresh = found.filter((m) => !seen.has(m.id) && /report|measurement|order|complete|ready|deliver/i.test(m.subject ?? ""));
+  return { cursor: [...(cursor as string[]), ...ids.filter((id) => !seen.has(id))].slice(-300), fresh };
+}
+
 /** Markets that just became extreme: funding past the threshold or a big 24h move, on markets with real open interest. */
 export function fundingExtremes(rows: PerpRow[], cursor: unknown, th = thresholds()): WatchResult & { coins: string[] } {
   const flagged = rows.filter((r) => r.oiUsd >= th.oiMinUsd && (Math.abs(r.fundingHr) >= th.fundingHr || Math.abs(r.change24h) >= th.movePct)).map((r) => r.coin).sort();
@@ -70,6 +83,17 @@ export const WATCHERS: Watcher[] = [
       if (!r.fresh.length) return { cursor: r.cursor };
       const since = typeof cursor === "number" ? ` since ${et(cursor)} ET` : "";
       return { cursor: r.cursor, event: `${r.fresh.length} new customer message${r.fresh.length === 1 ? "" : "s"} in GoHighLevel${since}:\n${deps.ghl.conversationsText(r.fresh, true)}\n\nRead each thread (ghl_messages) before deciding. A reply to a customer is Stephanie's (hand it off; she drafts it as an approval for Phil), a new lead is Karol's, a quote question is Jake's.` };
+    },
+  },
+  {
+    // The free way to get EagleView reports into HQ: no paid API account, just the email EagleView already sends.
+    id: "eagleview-mail", agentId: "stella", every: 15, phase: 1, maxPerDay: 8,
+    summary: "An EagleView roof report arrives by email: Stella wakes, reads the PDF and files the measurements on the job for Jake and Bill.",
+    async check(cursor, deps) {
+      if (!deps.google) return { cursor };
+      const r = eagleviewMail(await deps.google.mailFor("stella", process.env.WATCH_EAGLEVIEW_QUERY ?? "from:eagleview.com newer_than:4d", 15), cursor);
+      if (!r.fresh.length) return { cursor: r.cursor };
+      return { cursor: r.cursor, event: `${r.fresh.length} EagleView email${r.fresh.length === 1 ? "" : "s"} arrived in JD PM's mail:\n${r.fresh.map((m) => `- [${m.id}] in ${m.account} · ${m.date ?? ""} · ${m.subject ?? "(no subject)"}`).join("\n")}\n\nFor each one: gmail_read it (pass that account), then gmail_attachment for the PDF report. From the report take the property address, total squares, the predominant pitch, and the ridge, hip, valley, eave and rake lengths (and the waste table if it has one); use only numbers that are in the report. Find the matching lead or job on the JD PM board (venture_board; match the address or the customer's name) and update that same item with the measurements; if nothing matches, add a lead titled with the address. Then hand off to Jake for the estimate and to Bill for the material list, with the numbers. If an email has no PDF attached (only a link to EagleView's site), don't guess: raise one to-do for Phil to attach that report's PDF in chat, naming the address. An email that isn't about a finished report needs nothing.` };
     },
   },
   {
