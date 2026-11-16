@@ -53,6 +53,18 @@ function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean } = {}) 
       }
       if (!authed) return send(login());
       if (url.pathname === "/LeadPerfection.aspx") return send(page("<p>You are logged in as: hq</p>"));
+      if (url.pathname === "/LeadDetail.aspx") {
+        const f = req.method === "POST" ? Object.fromEntries(new URLSearchParams(body)) : {};
+        if (req.method === "POST") posts.push(f);
+        const tab = (f.__EVENTTARGET ?? "").replace(/^tab/, "") || "General";
+        const content: Record<string, string> = {
+          General: `<table><tr><td><a href="javascript:__doPostBack('gvLeads$ctl02$lnkSelect','')">Select</a></td><td>Windows</td><td>11/14/26</td><td>Issue</td></tr></table>`,
+          Notes: `<p>Notes printed on appointment sheet</p><textarea name="txtNotes">11 wrs 30 years old drafty windows; wife works nights, call after 4</textarea><input type="image" name="btnSaveNote" title="Save" src="/s.gif">`,
+          Results: `<p>Result: Sold, $14,900, 11/14/26</p><select name="ddlResult"><option>Sold</option><option>No Sale</option></select>`,
+        };
+        return send(page(`<form method="post" action="/LeadDetail.aspx?CustID=${url.searchParams.get("CustID")}"><input type="hidden" name="__EVENTTARGET" value=""><input type="hidden" name="__EVENTARGUMENT" value="">
+          <h3>Contact Detail</h3><p>527800 - Slott, Susan</p>${["General", "Appointment", "Notes", "Results"].map((t) => `<a href="javascript:__doPostBack('tab${t}','')">${t}</a>`).join(" ")}<div>${content[tab] ?? `<p>${tab} tab</p>`}</div></form>`));
+      }
       if (url.pathname === "/Present.aspx") {
         let date = "11/16/2026", market = "NYRO";
         if (req.method === "POST") {
@@ -97,6 +109,10 @@ test("the guards: what counts as a change", () => {
   assert.equal(postChangesData("__EVENTTARGET=&btnSave.x=4&btnSave.y=6"), "btnSave");
   assert.equal(postChangesData("__EVENTTARGET=ddlSalesRep1"), "ddlSalesRep1");
   assert.equal(postChangesData("__EVENTTARGET=lnkIssue"), "lnkIssue");
+  assert.equal(postChangesData("__EVENTTARGET=ctl00%24ddlStatus1"), "ctl00$ddlStatus1", "a status dropdown posting back is a change");
+  assert.equal(postChangesData("__EVENTTARGET=tabResults"), undefined, "the Results tab is reading");
+  assert.equal(postChangesData("__EVENTTARGET=lnkNotes"), undefined);
+  assert.equal(postChangesData("__EVENTTARGET=gvLeads%24ctl02%24lnkSelect"), undefined, "Select on a lead loads it");
   assert.equal(sameName("Phillip Marino", "Marino, Phillip"), true);
   assert.equal(sameName("Phil Marino", "Marino, Phillip"), false);
 });
@@ -218,5 +234,24 @@ test("appointments in nested tables (old page layouts) are found once each, and 
     assert.match(done?.note ?? "", /2 of 2 set in LeadPerfection/);
     assert.equal(site.days["11/17/2026"]![0]!.rep, "Marino, Phillip");
     assert.equal(site.days["11/17/2026"]![2]!.rep, "Robak, Ronald");
+  } finally { site.close(); }
+});
+
+test("an agent opens a customer, reads the tabs and the notes, and can't change them", async () => {
+  const site = await fakeLeadPerfection();
+  try {
+    const { call } = await connect(site);
+    let screen = await call("lp_open", { screen: "LeadDetail.aspx?CustID=527800" });
+    assert.match(screen, /Contact Detail/);
+    screen = await call("lp_click", { ref: ref(screen, /link "Notes"/) });
+    assert.match(screen, /field "[^"]*" \(txtNotes\) = "11 wrs 30 years old drafty windows; wife works nights, call after 4"/);
+    assert.match(await call("lp_fill", { ref: ref(screen, /\(txtNotes\)/), value: "changed" }), /^Refused: .*isn't one of the screen's filters/);
+    assert.match(await call("lp_click", { ref: ref(screen, /icon "Save"/) }), /^Refused/);
+    screen = await call("lp_click", { ref: ref(screen, /link "Results"/) });
+    assert.match(screen, /Result: Sold, \$14,900, 11\/14\/26/, "the Results tab opens: it's reading");
+    screen = await call("lp_click", { ref: ref(screen, /link "General"/) });
+    screen = await call("lp_click", { ref: ref(screen, /link "Select"/) });
+    assert.match(screen, /Contact Detail/);
+    assert.ok(!site.posts.some((p) => "btnSaveNote.x" in p), "no save reached the site");
   } finally { site.close(); }
 });
