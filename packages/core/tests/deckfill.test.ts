@@ -67,3 +67,46 @@ test("a deckfill block in an agent's reply becomes the filled-in deck in chat", 
   assert.deepEqual(extractBlocks("```deckfill\n{\"edits\":[]}\n```").fills.length, 1);
   assert.equal(normalizeFill({ edits: [] }), undefined);
 });
+
+test("with Google connected, the filled-in deck also comes back as a Google Slides link", async () => {
+  const store = memoryStore(); await store.init();
+  await setTemplate(store, "proedge", "Weekly Sales.pptx", await template());
+  const provider = mockProvider("m");
+  provider.run = async () => ({ text: '```deckfill\n{"title":"ProEdge weekly sales","edits":[{"slide":2,"find":"NSLI $1,900","replace":"NSLI $2,358"}]}\n```', provider: "m", modelId: "m", inputTokens: 1, outputTokens: 1, costUsd: 0, durationMs: 1 });
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [provider], grok: [provider] } }) });
+  const sent: { title: string; size: number; agent: string }[] = [];
+  jarvis.slidesExport = async (title, pptx, agentId) => { sent.push({ title, size: pptx.length, agent: agentId }); return "https://docs.google.com/presentation/d/abc123/edit"; };
+  const { getAgent } = await import("../src/index.js");
+  await jarvis.runAgent(getAgent("stevon")!, "Fill in the deck", { direct: true });
+  assert.equal(sent[0]?.title, "ProEdge weekly sales");
+  assert.ok(sent[0]!.size > 100);
+  assert.ok((await store.chat.list(10)).some((m) => /Deck ready: ProEdge weekly sales · your template with 1 change\. Google Slides: https:\/\/docs\.google\.com\/presentation\/d\/abc123\/edit/.test(m.text)));
+  // Drive refusing still hands over the .pptx and says why.
+  jarvis.slidesExport = async () => { throw new Error("Google refused: reconnect Google"); };
+  await jarvis.runAgent(getAgent("stevon")!, "Fill in the deck", { direct: true });
+  assert.ok((await store.chat.list(10)).some((m) => /couldn't be put in Google Slides: Google refused: reconnect Google; the \.pptx is attached/.test(m.text) && m.files?.length));
+});
+
+test("Drive gets a Google Slides conversion in a 'Jarvis decks' folder HQ made", async () => {
+  const { GoogleConnector } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const calls: { url: string; body: string }[] = [];
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url); const body = init?.body instanceof Uint8Array ? Buffer.from(init.body).toString("latin1") : String(init?.body ?? "");
+    calls.push({ url: u, body });
+    const json = (o: unknown) => new Response(JSON.stringify(o), { status: 200, headers: { "content-type": "application/json" } });
+    if (u.startsWith("https://oauth2.googleapis.com/token")) return json({ access_token: "at", refresh_token: "rt", expires_in: 3600, scope: "x" });
+    if (u.includes("/userinfo")) return json({ email: "phil@example.com" });
+    if (u.includes("/drive/v3/files?q=")) return json({ files: [] });
+    if (u.includes("/drive/v3/files?fields=id")) return json({ id: "folder1" });
+    if (u.includes("/upload/drive/v3/files")) return json({ id: "slides9" });
+    return new Response("{}", { status: 500 });
+  }) as typeof fetch;
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "s", redirectUri: "http://hq/cb", fetch: f });
+  await g.exchangeCode("code");
+  const id = await g.driveUpload("ProEdge weekly sales", Buffer.from("pptx"), "application/vnd.openxmlformats-officedocument.presentationml.presentation", undefined, { folder: "Jarvis decks", convertTo: "application/vnd.google-apps.presentation" });
+  assert.equal(id, "slides9");
+  assert.match(decodeURIComponent(calls.find((c) => c.url.includes("/drive/v3/files?q="))!.url), /name = 'Jarvis decks'/);
+  assert.match(calls.find((c) => c.url.includes("fields=id") && !c.url.includes("upload"))!.body, /"name":"Jarvis decks"/);
+  assert.match(calls.find((c) => c.url.includes("/upload/"))!.body, /"parents":\["folder1"\],"mimeType":"application\/vnd\.google-apps\.presentation"/);
+});

@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { DiscordConnector, EagleViewConnector, LeadPerfectionConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, Watchers, XConnector, Workshop, SHIP_KEY, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
+import { getAgentConfig, DiscordConnector, EagleViewConnector, LeadPerfectionConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, Watchers, XConnector, Workshop, SHIP_KEY, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
 import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
 import { authEnabled, fromHq, isAuthedRequest } from "./auth.js";
@@ -18,7 +18,15 @@ const jarvis = new Jarvis({ store, notify });
 await jarvis.secrets.load().catch((e) => console.warn("[secrets] load:", (e as Error).message));
 { const k = jarvis.secrets.status("GEMINI_API_KEY"); if (k.problem) console.warn(`[secrets] GEMINI_API_KEY: ${k.problem}`); else if (k.source === "settings") console.log(`[secrets] GEMINI_API_KEY from Settings (saved ${k.savedAt})`); }
 const google = GoogleConnector.fromEnv(store);
-if (google) jarvis.addConnector(google, GoogleConnector.promptHint());
+if (google) {
+  jarvis.addConnector(google, GoogleConnector.promptHint());
+  // Filled-in meeting decks go to Drive as Google Slides, in the agent's own Google account when it has one set.
+  jarvis.slidesExport = async (title, pptx, agentId) => {
+    const account = (await getAgentConfig(store, agentId)).accounts?.[0];
+    const id = await google.driveUpload(title, pptx, "application/vnd.openxmlformats-officedocument.presentationml.presentation", account, { folder: "Jarvis decks", convertTo: "application/vnd.google-apps.presentation" });
+    return `https://docs.google.com/presentation/d/${id}/edit`;
+  };
+}
 const x = XConnector.fromEnv(store);
 if (x) jarvis.addConnector(x, XConnector.promptHint());
 const spotify = SpotifyConnector.fromEnv(store);

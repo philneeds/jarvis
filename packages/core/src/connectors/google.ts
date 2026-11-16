@@ -165,18 +165,22 @@ export class GoogleConnector {
   }
 
   /** Drive, for the nightly backup copy: the "Jarvis backups" folder in the first connected account, created if missing. */
-  async driveFolder(account?: string): Promise<string> {
-    const q = encodeURIComponent("name = 'Jarvis backups' and mimeType = 'application/vnd.google-apps.folder' and trashed = false");
+  async driveFolder(account?: string, folderName = "Jarvis backups"): Promise<string> {
+    const q = encodeURIComponent(`name = '${folderName.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`);
     const found = await this.api<{ files?: { id: string }[] }>(account, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&spaces=drive`);
     if (found.files?.[0]) return found.files[0].id;
-    const made = await this.api<{ id: string }>(account, "https://www.googleapis.com/drive/v3/files?fields=id", { method: "POST", body: JSON.stringify({ name: "Jarvis backups", mimeType: "application/vnd.google-apps.folder" }) });
+    const made = await this.api<{ id: string }>(account, "https://www.googleapis.com/drive/v3/files?fields=id", { method: "POST", body: JSON.stringify({ name: folderName, mimeType: "application/vnd.google-apps.folder" }) });
     return made.id;
   }
-  async driveUpload(name: string, data: Buffer, mime: string, account?: string): Promise<string> {
-    const folder = await this.driveFolder(account);
+  /**
+   * Put a file in Phil's Drive, in a folder HQ made. `convertTo` turns it into a Google file on the way in (a .pptx into
+   * Google Slides). HQ's Drive access only reaches files it creates, so nothing of Phil's is read or changed.
+   */
+  async driveUpload(name: string, data: Buffer, mime: string, account?: string, opts: { folder?: string; convertTo?: string } = {}): Promise<string> {
+    const folder = await this.driveFolder(account, opts.folder);
     const token = await this.accessToken(account);
     const boundary = `jarvis${Date.now()}`;
-    const meta = JSON.stringify({ name, parents: [folder] });
+    const meta = JSON.stringify({ name, parents: [folder], ...(opts.convertTo ? { mimeType: opts.convertTo } : {}) });
     const body = Buffer.concat([
       Buffer.from(`--${boundary}\r\ncontent-type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\ncontent-type: ${mime}\r\n\r\n`),
       data,

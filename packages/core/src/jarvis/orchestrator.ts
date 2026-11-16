@@ -749,7 +749,16 @@ export class Jarvis {
         decks.push(f.deck);
         const miss = f.missed.length ? ` ${f.missed.length} change${f.missed.length === 1 ? "" : "s"} didn't match the template's text and weren't made: ${f.missed.slice(0, 8).map((m) => `slide ${m.slide} "${m.find.slice(0, 40)}"`).join("; ")}.` : "";
         await this.router.log(agent.id, "system", `${agent.name} filled in the template: ${f.deck.title} (${f.done} changes)${miss}`, r.runId);
-        await this.say({ role: "agent", agentId: agent.id, text: `Deck ready: ${f.deck.title} · your template with ${f.done} change${f.done === 1 ? "" : "s"}.${miss}`, runId: r.runId, files: [{ id: f.deck.id, name: f.deck.name }], kind: "progress" });
+        // A Google Slides copy in Phil's Drive, when Google is connected: the template came from Google Slides.
+        let slidesLink = "";
+        if (this.slidesExport) {
+          try {
+            const { deckFile } = await import("../decks.js");
+            const file = await deckFile(this.store, f.deck.id);
+            if (file) slidesLink = ` Google Slides: ${await this.slidesExport(f.deck.title, file.data, agent.id)}`;
+          } catch (e) { slidesLink = ` (It couldn't be put in Google Slides: ${(e as Error).message.slice(0, 160)}; the .pptx is attached.)`; }
+        }
+        await this.say({ role: "agent", agentId: agent.id, text: `Deck ready: ${f.deck.title} · your template with ${f.done} change${f.done === 1 ? "" : "s"}.${miss}${slidesLink}`, runId: r.runId, files: [{ id: f.deck.id, name: f.deck.name }], kind: "progress" });
       } catch (e) { text += `\n\n(The template couldn't be filled in: ${(e as Error).message})`; }
     }
     if (decks.length) text = `${text}\n\n[Deck ready: ${decks.map((d) => d.title).join("; ")}]`.trim();
@@ -1302,6 +1311,8 @@ export class Jarvis {
 
   /** Which connections are working right now. The server sets this from its connectors; without it nothing counts as connected. */
   connectionProbe?: () => Promise<Set<Connection>>;
+  /** Turn a filled-in deck into a Google Slides file in Phil's Drive and return its link (set when Google is connected). */
+  slidesExport?: (title: string, pptx: Buffer, agentId: string) => Promise<string>;
   private connectionsCache?: { at: number; text: string };
   /**
    * What is connected this minute, for every agent's prompt. Memory and old reports go stale the moment Phil adds a key
