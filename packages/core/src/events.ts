@@ -87,6 +87,8 @@ export interface AttentionItem {
   snoozedUntil?: string;
   doneAt?: string;
   source?: { runId?: string; approvalId?: string };
+  /** HQ ticked this off because a card that went through did it: which card, and the outcome in a line. */
+  doneBy?: { approvalId: string; title: string; why?: string };
   /** Phil talking the task over with the agents on it. */
   thread?: TaskMessage[];
   /** The agent writing a reply right now, so the screen can say so. */

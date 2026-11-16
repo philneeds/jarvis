@@ -85,6 +85,7 @@ export function TodoPanel({ id = "todo", showDone = false }: { id?: string; show
               <>
                 <h3 className="display font-bold text-xl leading-tight m-0" style={{ color: "var(--ink-bright)" }}>{i.title}</h3>
                 {i.why && <p className="m-0 text-[13px] whitespace-pre-wrap leading-relaxed">{i.why}</p>}
+                {i.status === "done" && i.doneBy && <p className="m-0 text-[12px]" style={{ color: "var(--green)" }}>Ticked off by HQ: done by &ldquo;{i.doneBy.title}&rdquo;{i.doneBy.why ? ` (${i.doneBy.why})` : ""}. Reopen if that&apos;s wrong.</p>}
               </>
             )}
             {editing !== i.id && <div className="flex flex-wrap gap-2 justify-end">
