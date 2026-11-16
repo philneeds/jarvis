@@ -99,8 +99,10 @@ test("the check never loses a card: no answer, a wrong id, different decisions, 
   assert.notEqual(pay2.id, pay.id);
   assert.equal((await m.store.approvals.list("pending")).length, 2, "both money cards stay in front of Phil");
   const plan = await m.jarvis.requestApproval(fold("david", "New coaching plan", "plan.propose", "r3"));
+  // Whichever of the two money cards the model named, it stays in front of Phil.
   assert.equal((await m.store.approvals.get(pay.id))?.status, "pending");
-  assert.match(plan.effect ?? "", /Overlaps "Pay the coach \$400"/);
+  assert.equal((await m.store.approvals.get(pay2.id))?.status, "pending");
+  assert.match(plan.effect ?? "", /Overlaps "Pay the coach \$400( again)?" \(still waiting: a money or strategy card is only replaced by another one\)/);
   // Turned off, nothing is asked.
   process.env.DESK_CHECK = "off";
   try { const off = make(() => { throw new Error("should not be asked"); }); await off.jarvis.requestApproval(fold("oscar", "A", "x.a", "r1")); await off.jarvis.requestApproval(fold("oscar", "B", "x.b", "r2")); assert.equal(off.checks.length, 0); }

@@ -45,6 +45,8 @@ const BOARD = ["venture_board", "memory_search"];
 const GHL = ["ghl_contacts", "ghl_contact", "ghl_conversations", "ghl_messages", "ghl_pipeline", "ghl_invoices", "ghl_appointments"];
 /** JD PM's roof measurement reports (EagleView, read-only). Ordering one costs money: eagleview.order always waits for Phil. */
 const EAGLEVIEW = ["eagleview_reports", "eagleview_report", "eagleview_products"];
+/** ProEdge's LeadPerfection, read through a browser; a change to the schedule is one approval card (lp.assign). */
+const LP = ["lp_open", "lp_click", "lp_fill", "lp_select"];
 
 export const CHARTERS: Record<string, Charter> = {
   // ---- Main layer ------------------------------------------------------------
@@ -255,13 +257,13 @@ export const CHARTERS: Record<string, Charter> = {
       "Sales coaching for the ProEdge team (the former Sales Coach, folded in here Nov 14 2026): call reviews, training and scripts from the sales data Phil uploads; your memory note skill:sales_coaching is the playbook, keep it current",
       // Phil, Nov 15 2026: the Mindset Coach agent was retired too; same pattern, playbook in memory.
       "Mindset coaching for the ProEdge team (the former Mindset Coach, folded in here Nov 15 2026): motivation, mindset and a team that shows up; your memory note skill:mindset_coaching is the playbook, keep it current",
-      "Directing the scheduler and email AI",
+      "Directing the scheduler and email AI; until the scheduler is switched on, making the ProEdge schedule yourself in LeadPerfection (which rep runs which appointment), as one lp.assign card per day",
     ],
     rhythm: "Builds the Tuesday meeting deck Mondays at 8 pm Eastern from the week's sales data; otherwise on demand.",
-    tools: [...BOARD, "sales_data", "deck_template"],
+    tools: [...BOARD, "sales_data", "deck_template", ...LP],
     good: "ProEdge grows with less of Phil's time, close rates go up, and the team shows up.",
   },
-  scheduler: { job: "Team schedule optimizer for ProEdge.", owns: ["The ProEdge team's schedule"], rhythm: "On demand (phase 2).", tools: [...CAL, "memory_search"], good: "The right people are in the right place." },
+  scheduler: { job: "Team schedule optimizer for ProEdge.", owns: ["The ProEdge team's schedule: which sales rep runs which appointment, from LeadPerfection's appointments and the reps' availability, proposed to Phil as one lp.assign card per day"], rhythm: "On demand (phase 2); until then Stevon makes the schedule.", tools: [...CAL, "memory_search", ...LP], good: "The right people are in the right place." },
   emailai: { job: "Email automation and information for ProEdge.", owns: ["ProEdge email follow-ups and sequences, drafted for approval"], rhythm: "On demand (phase 2).", tools: [...GMAIL_READ, "gmail_create_draft", "memory_search"], good: "Follow-ups happen without anyone remembering to." },
 };
 

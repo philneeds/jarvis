@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { DiscordConnector, EagleViewConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, Watchers, XConnector, Workshop, SHIP_KEY, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
+import { DiscordConnector, EagleViewConnector, LeadPerfectionConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, Watchers, XConnector, Workshop, SHIP_KEY, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
 import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
 import { authEnabled, fromHq, isAuthedRequest } from "./auth.js";
@@ -35,6 +35,9 @@ if (ghl) jarvis.addConnector(ghl, GoHighLevelConnector.promptHint());
 // JD PM's EagleView: roof measurement reports (read); ordering one costs money and waits for Phil.
 const eagleview = EagleViewConnector.fromEnv(store);
 if (eagleview) jarvis.addConnector(eagleview, EagleViewConnector.promptHint());
+// ProEdge's LeadPerfection, through a browser (it has no API): read freely; the schedule is entered only after Phil approves.
+const leadperfection = LeadPerfectionConnector.fromEnv(store);
+if (leadperfection) { jarvis.addConnector(leadperfection, LeadPerfectionConnector.promptHint()); for (const sig of ["SIGTERM", "SIGINT"] as const) process.once(sig, () => void leadperfection.close().finally(() => process.exit(0))); }
 // House's biotech Discord (read-only) and the repos Phil shares with Jason, Paul and Ansem (read-only).
 const discord = DiscordConnector.fromEnv(store);
 if (discord) jarvis.addConnector(discord, DiscordConnector.promptHint());
@@ -58,7 +61,7 @@ jarvis.onApprovalRequested(async (a) => {
   if ((a.payload as { action?: string } | undefined)?.action !== "trade.execute") return undefined;
   try { const c = await guard.check(parseTrade(a.payload)); return c.ok ? undefined : `Mayne's hard limits: ${c.reason}`; } catch (e) { return (e as Error).message; }
 });
-const app = createApp(jarvis, { google, x, guard, spotify, kubera, ghl, eagleview, discord, github, robinhood, workshop });
+const app = createApp(jarvis, { google, x, guard, spotify, kubera, ghl, eagleview, leadperfection, discord, github, robinhood, workshop });
 
 // Live feed for HQ: agent status, chat, approvals, activity, usage, system status.
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });

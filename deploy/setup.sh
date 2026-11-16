@@ -141,6 +141,16 @@ wait_for_runs() {
 log "Build"
 sudo -u "$APP_USER" -H bash -lc "cd $APP_DIR && pnpm install --frozen-lockfile --prod=false >/dev/null && pnpm --filter @jarvis/core build >/dev/null && set -a && . ./.env && set +a && pnpm --filter @jarvis/core db:migrate && pnpm --filter @jarvis/server build >/dev/null && pnpm --filter @jarvis/hq build >/dev/null"
 
+# A headless browser for LeadPerfection (ProEdge's CRM has no API, so HQ reads it through a browser). The system
+# libraries need root; the browser itself goes in the app user's cache. A failure here never stops the deploy: only
+# LeadPerfection would be unavailable.
+PWCLI="$APP_DIR/packages/core/node_modules/playwright-core/cli.js"
+if [[ -f "$PWCLI" ]]; then
+  log "Browser for LeadPerfection"
+  node "$PWCLI" install-deps chromium >/dev/null 2>&1 || log "  couldn't install the browser's system libraries; LeadPerfection may not work"
+  sudo -u "$APP_USER" -H bash -lc "node $PWCLI install --only-shell chromium >/dev/null 2>&1 || node $PWCLI install chromium >/dev/null 2>&1" || log "  couldn't download the browser; LeadPerfection may not work"
+fi
+
 # Nightly backups land here; the app user must be able to write it.
 mkdir -p /var/backups/jarvis && chown "$APP_USER:$APP_USER" /var/backups/jarvis && chmod 750 /var/backups/jarvis
 grep -q '^BACKUP_DIR=' "$APP_DIR/.env" || echo 'BACKUP_DIR=/var/backups/jarvis' >> "$APP_DIR/.env"

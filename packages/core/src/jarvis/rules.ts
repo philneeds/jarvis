@@ -8,7 +8,7 @@ const OUTBOUND_ACTIONS = new Set(["gmail.send", "x.post", "x.reply", "x.dm", "gh
  * Actions that move money, trade, change a strategy, ship code or update HQ: no rule ever approves them on Phil's
  * behalf, whatever "kind" the agent wrote on the card (the agent chooses the kind; the action is what runs).
  */
-const NEVER_AUTO = /^(trade\.|strategy\.|robinhood\.|payment\.|invoice\.|transfer\.|wallet\.|order\.|eagleview\.order$|code\.ship$|hq\.update$)/;
+const NEVER_AUTO = /^(trade\.|strategy\.|robinhood\.|payment\.|invoice\.|transfer\.|wallet\.|order\.|eagleview\.order$|lp\.|code\.ship$|hq\.update$)/;
 export function alwaysWaits(a: Pick<Approval, "kind" | "payload">): boolean {
   const action = (a.payload as { action?: unknown } | undefined)?.action;
   return a.kind === "money" || a.kind === "strategy" || (typeof action === "string" && NEVER_AUTO.test(action));

@@ -6,4 +6,5 @@ export { GithubConnector, type GithubOptions } from "./github.js";
 export { RobinhoodConnector, sseResult, type RobinhoodOptions, type McpTool } from "./robinhood.js";
 export { GoHighLevelConnector, type GhlOptions } from "./gohighlevel.js";
 export { EagleViewConnector, takeoff, takeoffText, EV_PRODUCTS, EV_DELIVERY, EV_STRUCTURES, type EagleViewOptions, type Takeoff } from "./eagleview.js";
+export { LeadPerfectionConnector, changesData, isFilterField, postChangesData, sameName, WRITE_WORDS, type LeadPerfectionOptions, type Assignment } from "./leadperfection.js";
 export { SpotifyConnector, SPOTIFY_SCOPES, type SpotifyOptions, type SpotifyTokens } from "./spotify.js";

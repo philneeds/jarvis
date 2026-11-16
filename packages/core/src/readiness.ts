@@ -5,11 +5,11 @@ import { CHARTERS } from "./registry/charters.js";
  * What each agent of a phase still lacks before the switch is flipped: the connections its tools need. Shown on the
  * Build phase card, so Phil knows who starts thin.
  */
-export type Connection = "Google" | "X" | "X search" | "Spotify" | "Kubera" | "Robinhood" | "GoHighLevel" | "EagleView" | "Discord" | "GitHub" | "Apple Health";
-export const ALL_CONNECTIONS: Connection[] = ["Google", "GoHighLevel", "Kubera", "Robinhood", "Spotify", "Discord", "GitHub", "Apple Health", "EagleView", "X", "X search"];
+export type Connection = "Google" | "X" | "X search" | "Spotify" | "Kubera" | "Robinhood" | "GoHighLevel" | "EagleView" | "LeadPerfection" | "Discord" | "GitHub" | "Apple Health";
+export const ALL_CONNECTIONS: Connection[] = ["Google", "GoHighLevel", "Kubera", "Robinhood", "Spotify", "Discord", "GitHub", "Apple Health", "EagleView", "LeadPerfection", "X", "X search"];
 const NEEDS: [RegExp, Connection][] = [
   [/^(gmail_|calendar_|google_)/, "Google"], [/^(x_own_|x_mentions|x_dm_)/, "X"], [/^x_search$/, "X search"], [/^spotify_/, "Spotify"], [/^kubera_/, "Kubera"],
-  [/^robinhood_/, "Robinhood"], [/^ghl_/, "GoHighLevel"], [/^eagleview_/, "EagleView"], [/^discord_/, "Discord"], [/^github_/, "GitHub"], [/^health_/, "Apple Health"],
+  [/^robinhood_/, "Robinhood"], [/^ghl_/, "GoHighLevel"], [/^eagleview_/, "EagleView"], [/^lp_/, "LeadPerfection"], [/^discord_/, "Discord"], [/^github_/, "GitHub"], [/^health_/, "Apple Health"],
 ];
 /**
  * Connections an agent works without. X search is xAI's paid API: without it agents still read any post or account they

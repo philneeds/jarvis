@@ -25,6 +25,7 @@
     "drizzle-orm": "^0.45.4",
     "exceljs": "4.4.0",
     "jszip": "3.10.1",
+    "playwright-core": "1.63.0",
     "postgres": "^3.4.7",
     "pptxgenjs": "3.12.0",
     "unpdf": "2.1.0",

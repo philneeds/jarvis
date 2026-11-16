@@ -243,7 +243,7 @@ test("something finished late still counts for the day that just ended", async (
 test("setup: an agent whose only run failed isn't 'ready' after a pause and resume", async () => {
   const { jarvis, store } = make();
   await store.settings.set("phase", 1);
-  jarvis.connectionProbe = async () => new Set(["Google", "X", "Spotify", "Kubera", "Robinhood", "GoHighLevel", "Discord", "GitHub", "Apple Health"] as never);
+  jarvis.connectionProbe = async () => new Set(["Google", "X", "Spotify", "Kubera", "Robinhood", "GoHighLevel", "Discord", "GitHub", "Apple Health", "LeadPerfection"] as never);
   await store.agentState.set("karol", { status: "error", lastError: "GoHighLevel 401", lastRunAt: new Date().toISOString() });
   await store.agentState.set("karol", { status: "idle" }); // what a pause and resume, or a decision, leaves behind
   const karol = (await jarvis.setupStatus()).find((s) => s.id === "karol")!;

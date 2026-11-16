@@ -204,7 +204,7 @@ test("setup quests: the Command goal tracks which live teams are connected and t
   assert.equal(g.horizon, "short");
   assert.ok(g.benchmarks!.some((b) => /^JD PM team:/.test(b.text)));
   // Connect everything and give every live agent a run: each team's benchmark is met, so Command earns trophies.
-  jarvis.connectionProbe = async () => new Set(["Google", "X", "Spotify", "Kubera", "Robinhood", "GoHighLevel", "Discord", "GitHub", "Apple Health"] as never);
+  jarvis.connectionProbe = async () => new Set(["Google", "X", "Spotify", "Kubera", "Robinhood", "GoHighLevel", "Discord", "GitHub", "Apple Health", "LeadPerfection"] as never);
   for (const s of status) await store.agentState.set(s.id, { status: "idle", lastRunAt: new Date().toISOString() });
   await jarvis.syncSetupGoal();
   g = await goal();
