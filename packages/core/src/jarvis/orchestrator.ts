@@ -23,7 +23,7 @@ import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { LOOKUP_TOOLS } from "../lookup.js";
 import { INSTAGRAM_LINE, VideoAnalyzer, videoCaps, videoLogLine, videoRefs, videoText, videoTools, withoutInstagramLinks, type VideoDeps, type VideoRef } from "../video.js";
 import { Secrets } from "../secrets.js";
-import { DECK_HINT, makeDeck, normalizeDeck, type Deck } from "../decks.js";
+import { DECK_HINT, makeDeck, fillTemplate, normalizeFill, normalizeDeck, type Deck } from "../decks.js";
 import { GUARDRAIL_FILES, WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
 /** Settings keys for Phil's auto-ship switch and the day's auto-ships. */
 export const AUTO_SHIP_KEY = "workshop.autoShip";
@@ -725,7 +725,7 @@ export class Jarvis {
     // go, rather than nag (and be acted on again) in every later run.
     for (const m of memory) if (m.scope === `agent:${agent.id}` && /^(watch|handoff):/.test(m.key)) await this.store.memory.remove(m.scope, m.key).catch(() => undefined);
     if (opts.noBlocks) return r; // the caller reads the reply itself (approval Q&A)
-    const { text: said, approvals, remember, metrics, records, handoffs, attention, slides } = extractBlocks(r.text);
+    const { text: said, approvals, remember, metrics, records, handoffs, attention, slides, fills } = extractBlocks(r.text);
     let text = said;
     await this.absorb(agent, approvals, remember, r.runId, metrics, records);
     // Decks: build the .pptx and hand it over in chat (and on Telegram when that's where the conversation is).
@@ -739,6 +739,18 @@ export class Jarvis {
         await this.router.log(agent.id, "system", `${agent.name} made a deck: ${d.title} (${d.slides} slides)`, r.runId);
         await this.say({ role: "agent", agentId: agent.id, text: `Deck ready: ${d.title} · ${d.slides} slides`, runId: r.runId, files: [{ id: d.id, name: d.name }], kind: "progress" });
       } catch (e) { text += `\n\n(The deck couldn't be built: ${(e as Error).message})`; }
+    }
+    // Phil's own template, filled in: his slides with the words and numbers changed.
+    for (const raw of fills.slice(0, 2)) {
+      const spec = normalizeFill(raw);
+      if (!spec) { text += "\n\n(A template fill was written but had no usable edits, so no file was made.)"; continue; }
+      try {
+        const f = await fillTemplate(this.store, spec, { agentId: agent.id, venture: agent.venture });
+        decks.push(f.deck);
+        const miss = f.missed.length ? ` ${f.missed.length} change${f.missed.length === 1 ? "" : "s"} didn't match the template's text and weren't made: ${f.missed.slice(0, 8).map((m) => `slide ${m.slide} "${m.find.slice(0, 40)}"`).join("; ")}.` : "";
+        await this.router.log(agent.id, "system", `${agent.name} filled in the template: ${f.deck.title} (${f.done} changes)${miss}`, r.runId);
+        await this.say({ role: "agent", agentId: agent.id, text: `Deck ready: ${f.deck.title} · your template with ${f.done} change${f.done === 1 ? "" : "s"}.${miss}`, runId: r.runId, files: [{ id: f.deck.id, name: f.deck.name }], kind: "progress" });
+      } catch (e) { text += `\n\n(The template couldn't be filled in: ${(e as Error).message})`; }
     }
     if (decks.length) text = `${text}\n\n[Deck ready: ${decks.map((d) => d.title).join("; ")}]`.trim();
     for (const a of attention) await this.raiseAttention({ ...a, agentId: agent.id, source: { runId: r.runId } });

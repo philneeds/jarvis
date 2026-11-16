@@ -31,6 +31,7 @@ export const DECK_HINT = [
   '{"title":"...","subtitle":"...","slides":[{"title":"...","stats":[{"label":"Revenue","value":"$42,300","change":"+12% vs last week"}],"chart":{"type":"bar|line|pie","title":"...","labels":["Mon","Tue"],"series":[{"name":"Sales","values":[1200,900]}]},"table":{"columns":["Rep","Closed"],"rows":[["Ana",5]]},"bullets":["..."],"notes":"what to say on this slide"}]}',
   "Every slide needs a title; use at most one of chart or table per slide, up to 4 stats, up to 6 short bullets, up to 12 table rows. Numbers in charts are plain numbers. Use only figures from the data; never invent one. HQ builds the file and sends it to Phil; outside the block, reply with the three headlines in a few lines.",
   "If a template exists (deck_template), follow its slide order and section names.",
+  'When Phil wants HIS template filled in (his own slides, look and logos kept), write a fenced block tagged "deckfill" instead: {"title":"ProEdge weekly sales 11/09-11/15","edits":[{"slide":2,"find":"Close rate 15%","replace":"Close rate 17.5%"}]}. "find" is text exactly as it appears in one paragraph of that slide in the deck_template outline (paragraphs are separated by " · "); "replace" is the new text for that part. Change every number, date and name that the new data changes; leave the rest. Charts in the template aren\'t changed: say which ones need updating by hand. HQ reports any edit whose text wasn\'t found.',
 ].join("\n");
 
 const hex = (c: string | undefined, d: string) => (c && /^[0-9a-f]{6}$/i.test(c) ? c.toUpperCase() : d);
@@ -125,6 +126,68 @@ export async function renderDeck(spec: DeckSpec, tpl?: Pick<DeckTemplate, "color
   return (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
 }
 
+const decode = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, "&");
+const encode = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/** A slide's paragraphs: where each starts and ends in the XML, and its text (the runs joined). Tables count too. */
+function paragraphs(xml: string): { start: number; end: number; text: string }[] {
+  const out: { start: number; end: number; text: string }[] = [];
+  const re = /<a:p>[\s\S]*?<\/a:p>|<a:p [^>]*>[\s\S]*?<\/a:p>/g;
+  for (const m of xml.matchAll(re)) out.push({ start: m.index!, end: m.index! + m[0].length, text: decode([...m[0].matchAll(/<a:t(?: [^>]*)?>([^<]*)<\/a:t>/g)].map((t) => t[1]).join("")) });
+  return out;
+}
+
+export interface FillEdit { slide: number; find: string; replace: string }
+/**
+ * Phil's own template with its words and numbers changed, and nothing else: its backgrounds, logos, pictures, layout
+ * and fonts stay exactly as he made them. Each edit names a slide (as numbered in the template outline) and text
+ * that's in one paragraph on it; that paragraph's first run gets the new text, which keeps its formatting. An edit
+ * whose text isn't there is reported back, never guessed. Charts aren't changed (their numbers live in an embedded
+ * spreadsheet): the deck says so.
+ */
+export async function fillTemplate(store: Store, spec: { title?: string; edits: FillEdit[] }, by: { agentId: string; venture: string }): Promise<{ deck: Deck; missed: FillEdit[]; done: number }> {
+  const tpl = await getTemplate(store, by.venture);
+  if (!tpl) throw new Error("there's no template to fill; Phil uploads one on the agent's page");
+  const file = await loadFile(tpl.fileId);
+  if (!file) throw new Error("the template file is gone; Phil needs to upload it again");
+  const zip = await JSZip.loadAsync(file.data);
+  const slides = Object.keys(zip.files).filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f)).sort((a, b) => Number(a.match(/(\d+)\.xml$/)![1]) - Number(b.match(/(\d+)\.xml$/)![1]));
+  const xml = new Map<string, string>();
+  const missed: FillEdit[] = [];
+  let done = 0;
+  for (const e of spec.edits.slice(0, 400)) {
+    const path = slides[e.slide - 1];
+    if (!path || !e.find) { missed.push(e); continue; }
+    let s = xml.get(path) ?? (await zip.file(path)!.async("string"));
+    const p = paragraphs(s).find((x) => x.text.includes(e.find));
+    if (!p) { missed.push(e); continue; }
+    const para = s.slice(p.start, p.end);
+    let first = true;
+    const next = para.replace(/(<a:t(?: [^>]*)?>)([^<]*)(<\/a:t>)/g, (_m, open: string, _t: string, close: string) => {
+      if (first) { first = false; return `${open}${encode(p.text.replace(e.find, e.replace))}${close}`; }
+      return `${open}${close}`;
+    });
+    s = s.slice(0, p.start) + next + s.slice(p.end);
+    xml.set(path, s);
+    done++;
+  }
+  for (const [path, s] of xml) zip.file(path, s);
+  const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+  const fileId = await saveFile(out, "pptx");
+  const day = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const title = (spec.title || tpl.name.replace(/\.pptx$/i, "")).slice(0, 120);
+  const deck: Deck = { id: randomUUID(), fileId, name: `${title.replace(/[^\w\s.-]+/g, "").replace(/\s+/g, " ").trim().slice(0, 60) || "Deck"} ${day}.pptx`, title, agentId: by.agentId, venture: by.venture, at: new Date().toISOString(), slides: slides.length };
+  const all = await store.settings.get<Deck[]>(DECKS_KEY, []);
+  await store.settings.set(DECKS_KEY, [...all, deck].slice(-60));
+  return { deck, missed, done };
+}
+
+/** Tidy an agent's deckfill block. */
+export function normalizeFill(raw: unknown): { title?: string; edits: FillEdit[] } | undefined {
+  const o = (raw ?? {}) as { title?: unknown; edits?: unknown };
+  const edits = (Array.isArray(o.edits) ? o.edits : []).map((e) => e as { slide?: unknown; find?: unknown; replace?: unknown }).filter((e) => Number.isInteger(Number(e.slide)) && typeof e.find === "string" && e.find && typeof e.replace === "string").map((e) => ({ slide: Number(e.slide), find: String(e.find).slice(0, 500), replace: String(e.replace).slice(0, 1000) }));
+  return edits.length ? { title: typeof o.title === "string" ? o.title : undefined, edits } : undefined;
+}
+
 /** Read a .pptx template: theme colours and fonts, slide size, and each slide's text in order. */
 export async function parseTemplate(buf: Buffer): Promise<Pick<DeckTemplate, "colors" | "fonts" | "wide" | "outline">> {
   const zip = await JSZip.loadAsync(buf).catch(() => { throw new Error("that isn't a PowerPoint (.pptx) file"); });
@@ -140,9 +203,9 @@ export async function parseTemplate(buf: Buffer): Promise<Pick<DeckTemplate, "co
   const outline: string[] = [];
   for (const f of slides.slice(0, 40)) {
     const xml = await read(f);
-    const paras = xml.split("</a:p>").map((p) => [...p.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]).join("").trim()).filter(Boolean);
-    const text = paras.join(" · ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'");
-    outline.push(text.slice(0, 400) || "(no text: picture or chart only)");
+    // Each paragraph's text, so an agent filling the template can quote it exactly (deckfill).
+    const paras = paragraphs(xml).map((p) => p.text.trim()).filter(Boolean);
+    outline.push(paras.join(" · ").slice(0, 1500) || "(no text: picture or chart only)");
   }
   if (!outline.length && !Object.keys(colors).length) throw new Error("that PowerPoint has no slides or theme to follow");
   return { colors, fonts: { heading: font("majorFont"), body: font("minorFont") }, wide, outline };
@@ -163,7 +226,7 @@ export async function clearTemplate(store: Store, venture: string) { await store
 
 export function templateText(t: DeckTemplate | null): string {
   if (!t) return "No template uploaded yet. Use a clean layout: a cover, the headline numbers, then one slide per topic, and next steps last.";
-  return [`Phil's template "${t.name}" (uploaded ${t.at.slice(0, 10)}). Follow its slide order and section names; HQ applies its colours and fonts. Its slides, in order:`, ...t.outline.map((o, i) => `${i + 1}. ${o}`)].join("\n");
+  return [`Phil's template "${t.name}" (uploaded ${t.at.slice(0, 10)}). To fill it in as it is (his look kept), use a deckfill block quoting its text exactly; for a new deck in its style, a slides block following its order. Its slides, in order, paragraphs separated by " · ":`, ...t.outline.map((o, i) => `${i + 1}. ${o}`)].join("\n");
 }
 
 export async function listDecks(store: Store, venture?: string): Promise<Deck[]> {

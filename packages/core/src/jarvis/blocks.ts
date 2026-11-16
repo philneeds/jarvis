@@ -17,19 +17,21 @@ const idList = (v: unknown): string[] | undefined => {
 const KINDS: ApprovalKind[] = ["send", "post", "money", "strategy", "config", "record", "other"];
 
 /** Pull fenced ```approval and ```remember JSON blocks out of an agent's reply. */
-export function extractBlocks(text: string): { text: string; approvals: ApprovalBlock[]; remember: RememberBlock[]; metrics: MetricBlock[]; records: RecordBlock[]; handoffs: HandoffBlock[]; attention: AttentionBlock[]; slides: unknown[] } {
+export function extractBlocks(text: string): { text: string; approvals: ApprovalBlock[]; remember: RememberBlock[]; metrics: MetricBlock[]; records: RecordBlock[]; handoffs: HandoffBlock[]; attention: AttentionBlock[]; slides: unknown[]; fills: unknown[] } {
   const slides: unknown[] = [];
+  const fills: unknown[] = [];
   const approvals: ApprovalBlock[] = [];
   const remember: RememberBlock[] = [];
   const metrics: MetricBlock[] = [];
   const records: RecordBlock[] = [];
   const handoffs: HandoffBlock[] = [];
   const attention: AttentionBlock[] = [];
-  const re = /```(approval|remember|metric|record|handoff|attention|slides)\s*\n([\s\S]*?)```/g;
+  const re = /```(approval|remember|metric|record|handoff|attention|slides|deckfill)\s*\n([\s\S]*?)```/g;
   const cleaned = text.replace(re, (_m, tag: string, body: string) => {
     let parsed: unknown;
     try { parsed = JSON.parse(body.trim()); } catch { return _m; }
     if (tag === "slides") { slides.push(parsed); return ""; }
+    if (tag === "deckfill") { fills.push(parsed); return ""; }
     const items = Array.isArray(parsed) ? parsed : [parsed];
     if (tag === "approval") {
       for (const it of items) {
@@ -80,7 +82,7 @@ export function extractBlocks(text: string): { text: string; approvals: Approval
     }
     return "";
   });
-  return { text: cleaned.replace(/\n{3,}/g, "\n\n").trim(), approvals, remember, metrics, records, handoffs, attention, slides };
+  return { text: cleaned.replace(/\n{3,}/g, "\n\n").trim(), approvals, remember, metrics, records, handoffs, attention, slides, fills };
 }
 
 /** Parse Jarvis's plan JSON, tolerating fences and stray prose around it. */
