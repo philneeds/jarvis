@@ -46,7 +46,9 @@ const POST_WRITE = /save|submit|delete|remove|create|newappt|newlead|issue|assig
  */
 const POST_FIELD = /(^|[$_:])(ddl|cbo|drp|dd|sel|lst)[^$]*(rep(?!ort)|status|dispo|result)/i;
 /** A report screen: everything on it is a filter, and Submit / Go / OK run the report, which changes nothing. */
-export const isReportPage = (url: string) => { try { return /rpt|report/i.test(new URL(url).pathname); } catch { return false; } };
+/** Addresses known to be report screens though their names don't say so (the Report Generator, once found). */
+const REPORT_PATHS = new Set<string>();
+export const isReportPage = (url: string) => { try { const p = new URL(url).pathname; return /rpt|report/i.test(p) || REPORT_PATHS.has(p.toLowerCase()); } catch { return false; } };
 const REPORT_RUN = /\b(submit|apply|ok|update|go|run|view|generate|refresh|preview)\b/gi;
 
 /** Would clicking a control with these labels change data? Exported for tests. */
@@ -396,31 +398,71 @@ export class LeadPerfectionConnector {
   // ---- Reports ---------------------------------------------------------------------------------------------------------
 
   /** Reports › Report Generator's own address: from its menu link, found once and kept. */
+  /**
+   * Reports › Report Generator's own address, found once and kept. In order: LP_REPORT_URL when Phil set it; the menu
+   * link (its href, or the page its script names); the menu after hovering Reports, for menus that only build their
+   * items on hover, clicking the item and reading where the content frame went; then the addresses such a page
+   * usually has. A page counts as the Report Generator when it has a Group and a Report dropdown.
+   */
   private async reportUrl(page: Page): Promise<string> {
     const KEY = "leadperfection.reportUrl";
+    const set = process.env.LP_REPORT_URL?.trim();
+    if (set) { const u = this.abs(set); REPORT_PATHS.add(new URL(u).pathname.toLowerCase()); return u; }
     const kept = await this.store.settings.get<string | null>(KEY, null);
-    if (kept) return kept;
-    await this.go(page, "LeadPerfection.aspx");
-    for (const f of page.frames()) {
-      const href = await f.evaluate(() => {
-        const a = Array.from(document.querySelectorAll("a, [onclick]")).find((el: HTMLElement) => /^\s*report\s*generator\s*$/i.test(el.textContent ?? "")) as HTMLElement | undefined;
-        if (!a) return undefined;
-        const h = a.getAttribute("href") ?? "";
-        const js = `${a.getAttribute("onclick") ?? ""} ${h}`;
-        const quoted = /['"]([^'"]+\.aspx[^'"]*)['"]/i.exec(js)?.[1];
-        return h && !/^javascript:/i.test(h) ? new URL(h, location.href).toString() : quoted ? new URL(quoted, location.href).toString() : "click";
-      }).catch(() => undefined);
-      if (!href) continue;
-      let url = href;
-      if (href === "click") {
-        // A menu that only opens by script: hover Reports, click Report Generator, and see where the content frame went.
-        await f.getByText(/^\s*Reports\s*$/).first().hover().catch(() => undefined);
-        await this.act(page, () => f.getByText(/^\s*Report\s*Generator\s*$/i).first().click({ force: true }));
-        url = page.frames().map((x) => x.url()).find((u) => isReportPage(u)) ?? "";
+    if (kept) { REPORT_PATHS.add(new URL(kept).pathname.toLowerCase()); return kept; }
+    const origin = new URL(this.opts.url).origin;
+    const keep = async (url: string) => { REPORT_PATHS.add(new URL(url).pathname.toLowerCase()); await this.store.settings.set(KEY, url); return url; };
+    const isGenerator = async (p: Page | Frame) => p.evaluate(() => {
+      const text = (document.body?.innerText ?? "").toLowerCase();
+      const selects = document.querySelectorAll("select").length;
+      return selects >= 2 && /group/.test(text) && /report/.test(text);
+    }).catch(() => false);
+    const scan = async () => {
+      for (const f of page.frames()) {
+        const found = await f.evaluate(() => {
+          // The element whose own words are "Report Generator", and the nearest thing around it that navigates.
+          const all = Array.from(document.querySelectorAll("body *")) as HTMLElement[];
+          const el = all.find((e: HTMLElement) => /^\s*report\s*generator\s*$/i.test(e.textContent ?? "") && !Array.from(e.children).some((c: HTMLElement) => /report\s*generator/i.test(c.textContent ?? "")));
+          if (!el) return undefined;
+          let n: HTMLElement | null = el;
+          for (let i = 0; n && i < 6; i++, n = n.parentElement) {
+            const js = `${n.getAttribute("onclick") ?? ""} ${n.getAttribute("href") ?? ""} ${n.getAttribute("onmouseup") ?? ""} ${n.getAttribute("onmousedown") ?? ""}`;
+            const h = n.getAttribute("href") ?? "";
+            if (h && !/^javascript:|^#/i.test(h)) return new URL(h, location.href).toString();
+            const quoted = /['"]([^'"]+\.aspx[^'"]*)['"]/i.exec(js)?.[1];
+            if (quoted) return new URL(quoted, location.href).toString();
+          }
+          return "click";
+        }).catch(() => undefined);
+        if (found) return { f, found };
       }
-      if (url && new URL(url).origin === new URL(this.opts.url).origin) { await this.store.settings.set(KEY, url); return url; }
+      return undefined;
+    };
+    await this.go(page, "LeadPerfection.aspx");
+    let hit = await scan();
+    if (!hit) {
+      // Menus that only build their items on hover.
+      for (const f of page.frames()) await f.getByText(/^\s*Reports\s*$/).first().hover({ timeout: 3_000 }).catch(() => undefined);
+      await page.waitForTimeout(600);
+      hit = await scan();
     }
-    throw new Error("couldn't find Reports › Report Generator in the menu");
+    if (hit && hit.found !== "click" && new URL(hit.found).origin === origin) return keep(hit.found);
+    if (hit) {
+      const before = new Map(page.frames().map((x) => [x, x.url()]));
+      await hit.f.getByText(/^\s*Reports\s*$/).first().hover({ timeout: 3_000 }).catch(() => undefined);
+      await this.act(page, () => hit!.f.getByText(/^\s*Report\s*Generator\s*$/i).first().click({ force: true, timeout: 5_000 }).catch(() => undefined));
+      for (const fr of page.frames()) {
+        const u = fr.url();
+        if (u !== before.get(fr) && u.startsWith(origin) && (await isGenerator(fr))) return keep(u);
+      }
+      for (const fr of page.frames()) if (fr.url().startsWith(origin) && !/LeadPerfection\.aspx/i.test(fr.url()) && (await isGenerator(fr))) return keep(fr.url());
+    }
+    // The addresses a Report Generator page usually has.
+    for (const path of ["ReportGenerator.aspx", "ReportGen.aspx", "RptGen.aspx", "RptGenerator.aspx", "RepGen.aspx", "Reports/ReportGenerator.aspx", "rptMain.aspx", "ReportSelect.aspx"]) {
+      const res = await page.goto(this.abs(path), { waitUntil: "load" }).catch(() => null);
+      if (res && res.ok() && !(await this.needsLogin(page)) && (await isGenerator(page))) return keep(page.url());
+    }
+    throw new Error("couldn't find Reports › Report Generator: the menu didn't lead to it and none of the usual addresses is it. Ask a browser AI for the Report Generator's own address (from inside the frame, like the first screen map) and set LP_REPORT_URL to it on the server");
   }
 
   /** A dropdown on the report screen, found by the words beside it ("Group", "Report", "Market", "Format"…). */

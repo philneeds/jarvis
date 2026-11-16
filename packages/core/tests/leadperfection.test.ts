@@ -34,7 +34,7 @@ function reportPdf(pages: string[]): Buffer {
 }
 interface Appt { id: string; customer: string; time: string; town: string; rep: string; issued?: boolean }
 const REPS = ["Dilibeto, Dominic", "Furia, Michael", "Golinitz, Jason", "Irwin, Steven", "Marino, Phillip", "Robak, Ronald", "Singleton, Evan"];
-function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean } = {}) {
+function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: "link" | "hover" | "none" } = {}) {
   const sessions = new Set<string>();
   const days: Record<string, Appt[]> = {
     "11/17/2026": [
@@ -73,8 +73,14 @@ function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean } = {}) 
         res.writeHead(302, { location: "/LeadPerfection.aspx", "set-cookie": `sid=${id}; path=/` }); return res.end();
       }
       if (!authed) return send(login());
-      if (url.pathname === "/LeadPerfection.aspx") return send(page(`<div id="menu"><span>Reports</span><ul style="display:none"><li><a href="RptGen.aspx" target="main">Report Generator</a></li></ul></div><p>You are logged in as: hq</p>`));
-      if (url.pathname === "/RptGen.aspx") {
+      if (url.pathname === "/LeadPerfection.aspx") {
+        // "hover": the menu builds its items only on hover, and the item's script names no address (like old menu kits).
+        const menu = opts.menu === "hover"
+          ? `<div id="menu"><span onmouseover="if(!document.getElementById('m1')){var d=document.createElement('div');d.id='m1';d.innerHTML='<table><tr onclick=&quot;openItem(7)&quot;><td><img src=x.gif></td><td>Report Generator</td></tr></table>';document.getElementById('menu').appendChild(d);}">Reports</span></div><script>function openItem(n){document.getElementById('main').src='RG.aspx';}</script>`
+          : opts.menu === "none" ? "<div id=\"menu\"><span>Reports</span></div>" : `<div id="menu"><span>Reports</span><ul style="display:none"><li><a href="RptGen.aspx" target="main">Report Generator</a></li></ul></div>`;
+        return send(page(`${menu}<p>You are logged in as: hq</p><iframe id="main" name="main" src="about:blank" width="900" height="500"></iframe>`));
+      }
+      if (url.pathname === "/RptGen.aspx" || url.pathname === "/RG.aspx") {
         const f = req.method === "POST" ? Object.fromEntries(new URLSearchParams(body)) : {} as Record<string, string>;
         if (req.method === "POST") posts.push(f);
         const group = f.ddlGroup ?? "Call Center";
@@ -86,7 +92,7 @@ function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean } = {}) 
           res.writeHead(200, { "content-type": "application/pdf", "content-disposition": 'attachment; filename="SalesEff.pdf"' }); return res.end(pdfBody);
         }
         const sel = (name: string, opts: string[], cur: string, post = false) => `<select name="${name}" ${post ? `onchange="__doPostBack('${name}','')"` : ""}>${opts.map((o) => `<option ${o === cur ? "selected" : ""}>${o}</option>`).join("")}</select>`;
-        return send(page(`<form method="post" action="/RptGen.aspx"><input type="hidden" name="__EVENTTARGET" value=""><input type="hidden" name="__EVENTARGUMENT" value="">
+        return send(page(`<form method="post" action="${url.pathname}"><input type="hidden" name="__EVENTTARGET" value=""><input type="hidden" name="__EVENTARGUMENT" value="">
           <h3>Report Generator</h3><table><tr><td>Group</td><td>${sel("ddlGroup", Object.keys(reports), group, true)}</td></tr><tr><td>Report</td><td>${sel("ddlReport", reports[group]!, report, true)}</td></tr></table>
           <table><tr><td colspan="4">Report Criteria</td></tr>
           <tr><td>Start Date:</td><td><input type="text" name="txtStartDate" value="${f.txtStartDate ?? ""}"></td><td>End Date:</td><td><input type="text" name="txtEndDate" value="${f.txtEndDate ?? ""}"></td></tr>
@@ -323,4 +329,32 @@ test("one step runs Sales Efficiency by Sales Rep and reads the PDF it returns",
     screen = await call("lp_select", { ref: ref(screen, /\(ddlSalesRep\)/), option: "Irwin, Steven" });
     assert.match(screen, /\(ddlSalesRep\) = "Irwin, Steven"/);
   } finally { site.close(); }
+});
+
+test("the Report Generator is found behind a hover-only menu, at a usual address, or where Phil says", async () => {
+  // A menu that builds its items on hover, with an item whose script names no address, at a page called RG.aspx.
+  const hover = await fakeLeadPerfection({ menu: "hover" });
+  try {
+    const { call, store } = await connect(hover);
+    const out = await call("lp_report", { start: "11/01/2026", end: "11/15/2026" });
+    assert.match(out, /Marino, Phillip Issued 12 Sold 4 Close 33%/);
+    assert.match(String(await store.settings.get("leadperfection.reportUrl", "")), /\/RG\.aspx$/);
+    // RG.aspx doesn't say "report" in its name, but it's now known to be one: its dropdowns are filters.
+    let screen = await call("lp_open", { screen: "RG.aspx" });
+    screen = await call("lp_select", { ref: ref(screen, /\(ddlGroup\)/), option: "Management Hold" });
+    assert.match(screen, /\(ddlGroup\) = "Management Hold"/);
+  } finally { hover.close(); }
+  // No menu item at all: the usual addresses are tried.
+  const none = await fakeLeadPerfection({ menu: "none" });
+  try {
+    const { call } = await connect(none);
+    assert.match(await call("lp_report", { start: "11/01/2026", end: "11/15/2026" }), /Close 33%/);
+  } finally { none.close(); }
+  // Phil sets the address.
+  const set = await fakeLeadPerfection({ menu: "none" });
+  process.env.LP_REPORT_URL = "RG.aspx";
+  try {
+    const { call } = await connect(set);
+    assert.match(await call("lp_report", { start: "11/01/2026", end: "11/15/2026" }), /Close 33%/);
+  } finally { delete process.env.LP_REPORT_URL; set.close(); }
 });
