@@ -79,7 +79,11 @@ export async function readDocument(f: { name: string; mime?: string; data: Buffe
   if (imageMimeOk(mime)) return { ...base, kind: "image", type: "image", imageId: await saveImage(f.data, mime) };
   const keep = async (x: FileExt) => saveFile(f.data, x);
   if (e === "pdf" || mime === "application/pdf") {
-    const { text, pages } = await pdfToText(f.data);
+    const { text: plain, pages } = await pdfToText(f.data);
+    // A LeadPerfection report keeps its columns (plain text drops empty cells and the numbers slide over).
+    const { pdfTable, tableText, salesEfficiency } = await import("./reportpdf.js");
+    const table = await pdfTable(f.data).catch(() => undefined);
+    const text = table ? [salesEfficiency(table), tableText(table)].filter(Boolean).join("\n\n") : plain;
     return { ...base, kind: "text", type: "PDF", pages, fileId: await keep("pdf"), text: text.slice(0, MAX_TEXT) };
   }
   if (e === "docx" || mime.includes("wordprocessingml")) return { ...base, kind: "text", type: "Word document", fileId: await keep("docx"), text: (await docxToText(f.data)).slice(0, MAX_TEXT) };
