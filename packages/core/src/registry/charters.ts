@@ -46,7 +46,7 @@ const GHL = ["ghl_contacts", "ghl_contact", "ghl_conversations", "ghl_messages",
 /** JD PM's roof measurement reports (EagleView, read-only). Ordering one costs money: eagleview.order always waits for Phil. */
 const EAGLEVIEW = ["eagleview_reports", "eagleview_report", "eagleview_products"];
 /** ProEdge's LeadPerfection, read through a browser; a change to the schedule is one approval card (lp.assign). */
-const LP = ["lp_open", "lp_click", "lp_fill", "lp_select"];
+const LP = ["lp_report", "lp_open", "lp_click", "lp_fill", "lp_select"];
 
 export const CHARTERS: Record<string, Charter> = {
   // ---- Main layer ------------------------------------------------------------
