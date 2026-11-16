@@ -115,7 +115,22 @@ export class LeadPerfectionConnector {
     if (this.page && !this.page.isClosed()) return this.page;
     if (!this.browser?.isConnected()) {
       const { chromium } = await import("playwright-core");
-      this.browser = await (this.opts.launch?.() ?? chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] }));
+      try {
+        this.browser = await (this.opts.launch?.() ?? chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] }));
+      } catch (e) {
+        const msg = (e as Error).message;
+        // The browser comes with the deploy; the first deploy of this code ran the old setup script, which had no step
+        // for it. Say what to run, in place of Playwright's own advice (npx playwright install), which won't work here.
+        if (/Executable doesn't exist|browserType\.launch/i.test(msg) && /exist|install/i.test(msg)) {
+          await this.mark(false, "the browser isn't installed on the server yet");
+          throw new Error("the browser HQ uses for LeadPerfection isn't installed on the server yet. On the droplet run: cd /opt/jarvis && sudo node packages/core/node_modules/playwright-core/cli.js install-deps chromium && sudo -u jarvis -H node packages/core/node_modules/playwright-core/cli.js install --only-shell chromium (the next HQ update does this by itself).");
+        }
+        if (/shared librar|error while loading/i.test(msg)) {
+          await this.mark(false, "the browser is missing system libraries");
+          throw new Error("the browser HQ uses for LeadPerfection is missing system libraries. On the droplet run: cd /opt/jarvis && sudo node packages/core/node_modules/playwright-core/cli.js install-deps chromium");
+        }
+        throw e;
+      }
     }
     const ctx = await this.browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();

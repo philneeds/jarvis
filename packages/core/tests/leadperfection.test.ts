@@ -199,3 +199,10 @@ test("a login that asks for a code, or a wrong password, says so plainly", async
     assert.match(await call("lp_open", { screen: "Present.aspx" }), /refused the login: it said the user name or password is wrong/);
   } finally { site.close(); }
 });
+
+test("a missing browser says what to run on the server", async () => {
+  const store = memoryStore(); await store.init();
+  const lp = new LeadPerfectionConnector(store, { url: "http://127.0.0.1:9", user: "hq", password: "x", launch: async () => { throw new Error("browserType.launch: Executable doesn't exist at /home/jarvis/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell"); } });
+  await assert.rejects(lp.check(), /isn't installed on the server yet\. On the droplet run: cd \/opt\/jarvis && sudo node packages\/core\/node_modules\/playwright-core\/cli\.js install-deps chromium && sudo -u jarvis -H node .* install --only-shell chromium/);
+  assert.equal((await lp.status()).lastFetch?.error, "the browser isn't installed on the server yet");
+});
