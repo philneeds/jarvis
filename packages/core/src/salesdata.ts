@@ -5,7 +5,7 @@ import type { Store } from "./store/types.js";
 import { defineTool, type ToolDef } from "./tools/index.js";
 import { getAgent } from "./registry/index.js";
 import { saveFile, saveImage, removeFile, imageMimeOk } from "./uploads.js";
-import { getTemplate, setTemplate, templateText, listDecks, DECK_HINT } from "./decks.js";
+import { getTemplate, setTemplate, templateText, templateListing, listDecks, DECK_HINT } from "./decks.js";
 
 /**
  * The sales data Phil uploads each week for Stevon's Tuesday meeting deck: spreadsheets (CSV or Excel) read into
@@ -135,7 +135,7 @@ export const DATA_TOOLS: ToolDef[] = [
       const file = await loadFile(pick.fileId!);
       if (!file) return `The file "${pick.name}" isn't on the server any more; ask Phil to attach it again.`;
       const t = await setTemplate(store, v, pick.name, file.data);
-      return `${pick.name} is now the template (${t.outline.length} slides). ${templateText(t)}`;
+      return `${pick.name} is now the template (${t.outline.length} slides). ${await templateListing(store, v)}`;
     },
   }),
   defineTool({
@@ -145,7 +145,7 @@ export const DATA_TOOLS: ToolDef[] = [
     async handler(_a, { store, agentId }) {
       const v = getAgent(agentId)?.venture ?? "proedge";
       const decks = (await listDecks(store, v)).slice(0, 3);
-      return `${templateText(await getTemplate(store, v))}\n\nLast decks: ${decks.length ? decks.map((d) => `${d.title} (${d.at.slice(0, 10)}, ${d.slides} slides)`).join("; ") : "none yet"}.`;
+      return `${await templateListing(store, v)}\n\nLast decks: ${decks.length ? decks.map((d) => `${d.title} (${d.at.slice(0, 10)}, ${d.slides} slides)`).join("; ") : "none yet"}.`;
     },
   }),
 ];

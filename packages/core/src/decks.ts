@@ -31,7 +31,7 @@ export const DECK_HINT = [
   '{"title":"...","subtitle":"...","slides":[{"title":"...","stats":[{"label":"Revenue","value":"$42,300","change":"+12% vs last week"}],"chart":{"type":"bar|line|pie","title":"...","labels":["Mon","Tue"],"series":[{"name":"Sales","values":[1200,900]}]},"table":{"columns":["Rep","Closed"],"rows":[["Ana",5]]},"bullets":["..."],"notes":"what to say on this slide"}]}',
   "Every slide needs a title; use at most one of chart or table per slide, up to 4 stats, up to 6 short bullets, up to 12 table rows. Numbers in charts are plain numbers. Use only figures from the data; never invent one. HQ builds the file and sends it to Phil; outside the block, reply with the three headlines in a few lines.",
   "If a template exists (deck_template), follow its slide order and section names.",
-  'When Phil wants HIS template filled in (his own slides, look and logos kept), write a fenced block tagged "deckfill" instead: {"title":"ProEdge weekly sales 11/09-11/15","edits":[{"slide":2,"find":"Close rate 15%","replace":"Close rate 17.5%"}]}. "find" is text exactly as it appears in one paragraph of that slide in the deck_template outline (paragraphs are separated by " · "); "replace" is the new text for that part. Change every number, date and name that the new data changes; leave the rest. Charts in the template aren\'t changed: say which ones need updating by hand. HQ reports any edit whose text wasn\'t found, and when Google is connected also puts the result in Phil\'s Drive as Google Slides and sends him the link.',
+  'When Phil wants HIS template filled in (his own slides, look and logos kept), write a fenced block tagged "deckfill" instead: {"title":"ProEdge weekly sales 11/09-11/15","edits":[{"slide":2,"find":"Close rate 15%","replace":"Close rate 17.5%"},{"slide":10,"para":3,"text":"Shehadeh, Tarek"},{"slide":10,"para":4,"text":"~30%"}]}. deck_template numbers every paragraph on every slide. For tables, leaderboards and anything that repeats (names, percentages), point at the paragraph by its number with "para" and give its whole new "text"; rewrite a board row by row in order, and give "text":"" to blank a row that has no one now. Elsewhere you can quote text with "find" and give its "replace". Change every number, date and name that the new data changes; leave the rest. Charts in the template aren\'t changed: say which ones need updating by hand. HQ reports any edit whose text wasn\'t found, and when Google is connected also puts the result in Phil\'s Drive as Google Slides and sends him the link.',
 ].join("\n");
 
 const hex = (c: string | undefined, d: string) => (c && /^[0-9a-f]{6}$/i.test(c) ? c.toUpperCase() : d);
@@ -136,13 +136,41 @@ function paragraphs(xml: string): { start: number; end: number; text: string }[]
   return out;
 }
 
-export interface FillEdit { slide: number; find: string; replace: string }
+/**
+ * One change to Phil's template. Either by text: `find` quoted from one paragraph of the slide and its `replace`. Or by
+ * position: `para`, the paragraph's number on the slide as deck_template lists it (1 is the first paragraph with text),
+ * and `text`, its whole new text (a `find` with it must be in that paragraph, as a check). Position is what tables and
+ * leaderboards need, where the same name or percentage appears more than once.
+ */
+export interface FillEdit { slide: number; find?: string; replace?: string; para?: number; text?: string }
+const slideFiles = (zip: JSZip) => Object.keys(zip.files).filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f)).sort((a, b) => Number(a.match(/(\d+)\.xml$/)![1]) - Number(b.match(/(\d+)\.xml$/)![1]));
+
+/** Each slide's paragraphs with text, in order: what `para` numbers. */
+export async function slideParagraphs(buf: Buffer): Promise<string[][]> {
+  const zip = await JSZip.loadAsync(buf);
+  const out: string[][] = [];
+  for (const f of slideFiles(zip)) out.push(paragraphs(await zip.file(f)!.async("string")).map((p) => p.text).filter((t) => t.trim()));
+  return out;
+}
+
+/** The template for an agent: every slide's paragraphs, numbered, so an edit can quote them or point at one. */
+export async function templateListing(store: Store, venture: string): Promise<string> {
+  const t = await getTemplate(store, venture);
+  if (!t) return templateText(null);
+  const file = await loadFile(t.fileId);
+  if (!file) return templateText(t);
+  const slides = await slideParagraphs(file.data).catch(() => undefined);
+  if (!slides) return templateText(t);
+  return [`Phil's template "${t.name}" (uploaded ${t.at.slice(0, 10)}). To fill it in as it is (his look kept), use a deckfill block. Each slide's paragraphs are numbered: point at one with "para" (best for tables, leaderboards and anything repeated), or quote text with "find". Slides, in order:`,
+    ...slides.map((ps, i) => `Slide ${i + 1}: ${ps.length ? ps.map((p, n) => `[${n + 1}] ${p.slice(0, 160)}`).join("  ") : "(no text: picture only)"}`)].join("\n").slice(0, 40_000);
+}
+
 /**
  * Phil's own template with its words and numbers changed, and nothing else: its backgrounds, logos, pictures, layout
- * and fonts stay exactly as he made them. Each edit names a slide (as numbered in the template outline) and text
- * that's in one paragraph on it; that paragraph's first run gets the new text, which keeps its formatting. An edit
- * whose text isn't there is reported back, never guessed. Charts aren't changed (their numbers live in an embedded
- * spreadsheet): the deck says so.
+ * and fonts stay exactly as he made them. Each edit names a slide (numbered as in the template listing) and a paragraph,
+ * by quoted text or by its number; that paragraph's first run gets the new text, which keeps its formatting. An edit
+ * that doesn't match is reported back, never guessed. Charts aren't changed (their numbers live in an embedded
+ * spreadsheet), and neither are drawn shapes such as bar lengths.
  */
 export async function fillTemplate(store: Store, spec: { title?: string; edits: FillEdit[] }, by: { agentId: string; venture: string }): Promise<{ deck: Deck; missed: FillEdit[]; done: number }> {
   const tpl = await getTemplate(store, by.venture);
@@ -150,27 +178,47 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
   const file = await loadFile(tpl.fileId);
   if (!file) throw new Error("the template file is gone; Phil needs to upload it again");
   const zip = await JSZip.loadAsync(file.data);
-  const slides = Object.keys(zip.files).filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f)).sort((a, b) => Number(a.match(/(\d+)\.xml$/)![1]) - Number(b.match(/(\d+)\.xml$/)![1]));
-  const xml = new Map<string, string>();
+  const slides = slideFiles(zip);
   const missed: FillEdit[] = [];
   let done = 0;
-  for (const e of spec.edits.slice(0, 400)) {
-    const path = slides[e.slide - 1];
-    if (!path || !e.find) { missed.push(e); continue; }
-    let s = xml.get(path) ?? (await zip.file(path)!.async("string"));
-    const p = paragraphs(s).find((x) => x.text.includes(e.find));
-    if (!p) { missed.push(e); continue; }
-    const para = s.slice(p.start, p.end);
-    let first = true;
-    const next = para.replace(/(<a:t(?: [^>]*)?>)([^<]*)(<\/a:t>)/g, (_m, open: string, _t: string, close: string) => {
-      if (first) { first = false; return `${open}${encode(p.text.replace(e.find, e.replace))}${close}`; }
-      return `${open}${close}`;
-    });
-    s = s.slice(0, p.start) + next + s.slice(p.end);
-    xml.set(path, s);
-    done++;
+  // Edits are worked out against the template as it is (so numbering never shifts as earlier edits land), then
+  // written in, last paragraph first.
+  const bySlide = new Map<number, FillEdit[]>();
+  for (const e of spec.edits.slice(0, 600)) { if (!slides[e.slide - 1]) { missed.push(e); continue; } bySlide.set(e.slide, [...(bySlide.get(e.slide) ?? []), e]); }
+  for (const [n, edits] of bySlide) {
+    const path = slides[n - 1]!;
+    const xml = await zip.file(path)!.async("string");
+    const paras = paragraphs(xml);
+    const withText = paras.filter((p) => p.text.trim());
+    const next = new Map<number, string>(); // index in paras → new text
+    const textOf = (i: number) => next.get(i) ?? paras[i]!.text;
+    for (const e of edits) {
+      let i = -1;
+      if (e.para !== undefined) {
+        const target = withText[e.para - 1];
+        i = target ? paras.indexOf(target) : -1;
+        if (i < 0 || (e.find && !textOf(i).includes(e.find))) { missed.push(e); continue; }
+        next.set(i, e.text !== undefined ? e.text : e.find ? textOf(i).replace(e.find, e.replace ?? "") : textOf(i));
+      } else if (e.find) {
+        i = paras.findIndex((_p, k) => textOf(k).includes(e.find!));
+        if (i < 0) { missed.push(e); continue; }
+        next.set(i, textOf(i).replace(e.find, e.replace ?? ""));
+      } else { missed.push(e); continue; }
+      done++;
+    }
+    let s = xml;
+    for (const i of [...next.keys()].sort((a, b) => paras[b]!.start - paras[a]!.start)) {
+      const p = paras[i]!;
+      let first = true;
+      const para = s.slice(p.start, p.end).replace(/(<a:t(?: [^>]*)?>)([^<]*)(<\/a:t>)/g, (_m, open: string, _t: string, close: string) => {
+        if (first) { first = false; return `${open}${encode(next.get(i)!)}${close}`; }
+        return `${open}${close}`;
+      });
+      s = s.slice(0, p.start) + para + s.slice(p.end);
+    }
+    zip.file(path, s);
   }
-  for (const [path, s] of xml) zip.file(path, s);
+  missed.sort((a, b) => spec.edits.indexOf(a) - spec.edits.indexOf(b));
   const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
   const fileId = await saveFile(out, "pptx");
   const day = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -184,7 +232,17 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
 /** Tidy an agent's deckfill block. */
 export function normalizeFill(raw: unknown): { title?: string; edits: FillEdit[] } | undefined {
   const o = (raw ?? {}) as { title?: unknown; edits?: unknown };
-  const edits = (Array.isArray(o.edits) ? o.edits : []).map((e) => e as { slide?: unknown; find?: unknown; replace?: unknown }).filter((e) => Number.isInteger(Number(e.slide)) && typeof e.find === "string" && e.find && typeof e.replace === "string").map((e) => ({ slide: Number(e.slide), find: String(e.find).slice(0, 500), replace: String(e.replace).slice(0, 1000) }));
+  const edits: FillEdit[] = [];
+  for (const r of Array.isArray(o.edits) ? o.edits : []) {
+    const e = (r ?? {}) as { slide?: unknown; find?: unknown; replace?: unknown; para?: unknown; text?: unknown };
+    const slide = Number(e.slide), para = e.para === undefined ? undefined : Number(e.para);
+    if (!Number.isInteger(slide) || slide < 1 || (para !== undefined && (!Number.isInteger(para) || para < 1))) continue;
+    const find = typeof e.find === "string" && e.find ? e.find.slice(0, 500) : undefined;
+    const replace = typeof e.replace === "string" ? e.replace.slice(0, 1000) : undefined;
+    const text = typeof e.text === "string" ? e.text.slice(0, 1000) : typeof e.replace === "string" && para !== undefined && !find ? e.replace.slice(0, 1000) : undefined;
+    if (para !== undefined ? text === undefined && !(find && replace !== undefined) : !(find && replace !== undefined)) continue;
+    edits.push({ slide, ...(find ? { find } : {}), ...(replace !== undefined ? { replace } : {}), ...(para !== undefined ? { para } : {}), ...(text !== undefined ? { text } : {}) });
+  }
   return edits.length ? { title: typeof o.title === "string" ? o.title : undefined, edits } : undefined;
 }
 

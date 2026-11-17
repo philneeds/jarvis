@@ -747,7 +747,7 @@ export class Jarvis {
       try {
         const f = await fillTemplate(this.store, spec, { agentId: agent.id, venture: agent.venture });
         decks.push(f.deck);
-        const miss = f.missed.length ? ` ${f.missed.length} change${f.missed.length === 1 ? "" : "s"} didn't match the template's text and weren't made: ${f.missed.slice(0, 8).map((m) => `slide ${m.slide} "${m.find.slice(0, 40)}"`).join("; ")}.` : "";
+        const miss = f.missed.length ? ` ${f.missed.length} change${f.missed.length === 1 ? "" : "s"} didn't match the template and weren't made: ${f.missed.slice(0, 8).map((m) => `slide ${m.slide} ${m.para ? `paragraph ${m.para}` : `"${(m.find ?? "").slice(0, 40)}"`}`).join("; ")}.` : "";
         await this.router.log(agent.id, "system", `${agent.name} filled in the template: ${f.deck.title} (${f.done} changes)${miss}`, r.runId);
         // A Google Slides copy in Phil's Drive, when Google is connected: the template came from Google Slides.
         let slidesLink = "";

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import JSZip from "jszip";
 process.env.JARVIS_UPLOAD_DIR = await fs.mkdtemp(path.join(os.tmpdir(), "jarvis-deckfill-"));
-const { memoryStore, Jarvis, ModelRouter, mockProvider, setTemplate, getTemplate, templateText, fillTemplate, normalizeFill, loadFile, deckFile } = await import("../src/index.js");
+const { memoryStore, Jarvis, ModelRouter, mockProvider, setTemplate, getTemplate, templateText, templateListing, fillTemplate, normalizeFill, loadFile, deckFile } = await import("../src/index.js");
 const { extractBlocks } = await import("../src/jarvis/blocks.js");
 
 /** A real .pptx made by hand: two slides, a run split in two (as PowerPoint often saves), a table cell, a picture. */
@@ -62,7 +62,7 @@ test("a deckfill block in an agent's reply becomes the filled-in deck in chat", 
   const r = await jarvis.runAgent(getAgent("stevon")!, "Fill in the deck", { direct: true });
   assert.match(r.text, /\[Deck ready: ProEdge weekly sales\]/);
   const chat = await store.chat.list(10);
-  const msg = chat.find((m) => /Deck ready: ProEdge weekly sales · your template with 1 change\. 1 change didn't match the template's text and weren't made: slide 2 "Nope"/.test(m.text));
+  const msg = chat.find((m) => /Deck ready: ProEdge weekly sales · your template with 1 change\. 1 change didn't match the template and weren't made: slide 2 "Nope"/.test(m.text));
   assert.ok(msg?.files?.length, "the file is handed over in chat");
   assert.deepEqual(extractBlocks("```deckfill\n{\"edits\":[]}\n```").fills.length, 1);
   assert.equal(normalizeFill({ edits: [] }), undefined);
@@ -122,4 +122,42 @@ test("a .pptx Phil attached in chat can be made the template by the agent", asyn
   assert.match(out, /^ProEdge_Sales_Meeting\.pptx is now the template \(2 slides\)/);
   assert.equal((await getTemplate(store, "proedge"))?.name, "ProEdge_Sales_Meeting.pptx");
   assert.match(await tool.handler({ name: "budget" }, { store, agentId: "stevon" }), /No attached PowerPoint matches "budget"/);
+});
+
+/** A leaderboard like Phil's slides 10, 11 and 14: names and percentages repeat, so only position can tell rows apart. */
+async function board(): Promise<Buffer> {
+  const zip = new JSZip();
+  const run = (t: string) => `<a:r><a:rPr lang="en-US"/><a:t>${t}</a:t></a:r>`;
+  const rows = [["Marino", "~24%"], ["Shehadeh", "~24%"], ["Marino", "~18%"]];
+  zip.file("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>');
+  zip.file("ppt/presentation.xml", '<p:presentation><p:sldSz cx="12192000" cy="6858000"/></p:presentation>');
+  zip.file("ppt/slides/slide1.xml", `<p:sld><p:cSld><p:spTree><p:sp><p:txBody><a:p>${run("Close Rate Leaderboard")}</a:p><a:p></a:p></p:txBody></p:sp>${rows.map(([n, v]) => `<p:sp><p:txBody><a:p>${run(n!)}</a:p></p:txBody></p:sp><p:sp><p:txBody><a:p>${run(v!)}</a:p></p:txBody></p:sp>`).join("")}</p:spTree></p:cSld></p:sld>`);
+  return zip.generateAsync({ type: "nodebuffer" });
+}
+
+test("a leaderboard with repeated names and percentages is rewritten row by row, by paragraph number", async () => {
+  const store = memoryStore(); await store.init();
+  await setTemplate(store, "proedge", "Board.pptx", await board());
+  const listing = await templateListing(store, "proedge");
+  assert.match(listing, /Slide 1: \[1\] Close Rate Leaderboard  \[2\] Marino  \[3\] ~24%  \[4\] Shehadeh  \[5\] ~24%  \[6\] Marino  \[7\] ~18%/, "empty paragraphs aren't numbered");
+  const spec = normalizeFill({ edits: [
+    { slide: 1, para: 2, text: "Shehadeh" }, { slide: 1, para: 3, text: "50%" },
+    { slide: 1, para: 4, text: "Marino" }, { slide: 1, para: 5, text: "38%" },
+    { slide: 1, para: 6, text: "" }, { slide: 1, para: 7, text: "" },
+    { slide: 1, para: 1, find: "Close Rate", replace: "Close-to-Issue" },
+    { slide: 1, para: 3, find: "nope", replace: "x" },
+    { slide: 1, para: 40, text: "x" },
+  ] })!;
+  assert.equal(spec.edits.length, 9);
+  const { deck, missed, done } = await fillTemplate(store, spec, { agentId: "stevon", venture: "proedge" });
+  assert.equal(done, 7);
+  assert.deepEqual(missed.map((m) => m.para), [3, 40], "a check that fails, or a paragraph that isn't there, is reported");
+  const out = await JSZip.loadAsync((await loadFile(deck.fileId))!.data);
+  const texts = [...(await out.file("ppt/slides/slide1.xml")!.async("string")).matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]);
+  assert.deepEqual(texts, ["Close-to-Issue Leaderboard", "Shehadeh", "50%", "Marino", "38%", "", ""], "numbering is against the template as uploaded, so earlier edits never shift later ones");
+});
+
+test("normalizeFill keeps position edits and drops broken ones", () => {
+  assert.equal(normalizeFill({ edits: [{ slide: 1, para: 0, text: "x" }, { slide: 1, para: 2 }, { slide: 1, para: 1.5, text: "x" }] }), undefined);
+  assert.deepEqual(normalizeFill({ edits: [{ slide: 2, para: 3, replace: "x" }] })!.edits, [{ slide: 2, replace: "x", para: 3, text: "x" }], "\"replace\" alone with a para is read as its new text");
 });
