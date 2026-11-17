@@ -20,10 +20,11 @@ await jarvis.secrets.load().catch((e) => console.warn("[secrets] load:", (e as E
 const google = GoogleConnector.fromEnv(store);
 if (google) {
   jarvis.addConnector(google, GoogleConnector.promptHint());
-  // Filled-in meeting decks go to Drive as Google Slides, in the agent's own Google account when it has one set.
-  jarvis.slidesExport = async (title, pptx, agentId) => {
+  // Filled-in meeting decks go to Drive as Google Slides, in the venture's deck folder ("ProEdge decks"), in the agent's
+  // own Google account when it has one set.
+  jarvis.slidesExport = async (title, pptx, agentId, folder) => {
     const account = (await getAgentConfig(store, agentId)).accounts?.[0];
-    const id = await google.driveUpload(title, pptx, "application/vnd.openxmlformats-officedocument.presentationml.presentation", account, { folder: "Jarvis decks", convertTo: "application/vnd.google-apps.presentation" });
+    const id = await google.driveUpload(title, pptx, "application/vnd.openxmlformats-officedocument.presentationml.presentation", account, { folder, convertTo: "application/vnd.google-apps.presentation" });
     return `https://docs.google.com/presentation/d/${id}/edit`;
   };
 }

@@ -68,23 +68,25 @@ test("a deckfill block in an agent's reply becomes the filled-in deck in chat", 
   assert.equal(normalizeFill({ edits: [] }), undefined);
 });
 
-test("with Google connected, the filled-in deck also comes back as a Google Slides link", async () => {
+test("with Google connected, the filled-in deck goes straight into the venture's Drive folder, with no .pptx in chat", async () => {
   const store = memoryStore(); await store.init();
   await setTemplate(store, "proedge", "Weekly Sales.pptx", await template());
   const provider = mockProvider("m");
   provider.run = async () => ({ text: '```deckfill\n{"title":"ProEdge weekly sales","edits":[{"slide":2,"find":"NSLI $1,900","replace":"NSLI $2,358"}]}\n```', provider: "m", modelId: "m", inputTokens: 1, outputTokens: 1, costUsd: 0, durationMs: 1 });
   const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [provider], grok: [provider] } }) });
-  const sent: { title: string; size: number; agent: string }[] = [];
-  jarvis.slidesExport = async (title, pptx, agentId) => { sent.push({ title, size: pptx.length, agent: agentId }); return "https://docs.google.com/presentation/d/abc123/edit"; };
+  const sent: { title: string; size: number; agent: string; folder: string }[] = [];
+  jarvis.slidesExport = async (title, pptx, agentId, folder) => { sent.push({ title, size: pptx.length, agent: agentId, folder }); return "https://docs.google.com/presentation/d/abc123/edit"; };
   const { getAgent } = await import("../src/index.js");
   await jarvis.runAgent(getAgent("stevon")!, "Fill in the deck", { direct: true });
   assert.equal(sent[0]?.title, "ProEdge weekly sales");
   assert.ok(sent[0]!.size > 100);
-  assert.ok((await store.chat.list(10)).some((m) => /Deck ready: ProEdge weekly sales · your template with 1 change\. Google Slides: https:\/\/docs\.google\.com\/presentation\/d\/abc123\/edit/.test(m.text)));
+  assert.equal(sent[0]!.folder, "ProEdge decks");
+  const saved = (await store.chat.list(10)).find((m) => /Deck ready: ProEdge weekly sales · your template with 1 change\. Saved to your Google Drive in "ProEdge decks": https:\/\/docs\.google\.com\/presentation\/d\/abc123\/edit/.test(m.text));
+  assert.ok(saved && !saved.files?.length, "no .pptx handed over when it's in Drive");
   // Drive refusing still hands over the .pptx and says why.
   jarvis.slidesExport = async () => { throw new Error("Google refused: reconnect Google"); };
   await jarvis.runAgent(getAgent("stevon")!, "Fill in the deck", { direct: true });
-  assert.ok((await store.chat.list(10)).some((m) => /couldn't be put in Google Slides: Google refused: reconnect Google; the \.pptx is attached/.test(m.text) && m.files?.length));
+  assert.ok((await store.chat.list(10)).some((m) => /couldn't be saved to Google Drive: Google refused: reconnect Google; the \.pptx is attached instead/.test(m.text) && m.files?.length));
 });
 
 test("Drive gets a Google Slides conversion in a 'Jarvis decks' folder HQ made", async () => {

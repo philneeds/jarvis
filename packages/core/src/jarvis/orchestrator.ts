@@ -23,7 +23,7 @@ import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { LOOKUP_TOOLS } from "../lookup.js";
 import { INSTAGRAM_LINE, VideoAnalyzer, videoCaps, videoLogLine, videoRefs, videoText, videoTools, withoutInstagramLinks, type VideoDeps, type VideoRef } from "../video.js";
 import { Secrets } from "../secrets.js";
-import { DECK_HINT, makeDeck, fillTemplate, normalizeFill, normalizeDeck, type Deck } from "../decks.js";
+import { DECK_HINT, makeDeck, fillTemplate, normalizeFill, normalizeDeck, deckFolderName, type Deck } from "../decks.js";
 import { GUARDRAIL_FILES, WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
 /** Settings keys for Phil's auto-ship switch and the day's auto-ships. */
 export const AUTO_SHIP_KEY = "workshop.autoShip";
@@ -749,16 +749,18 @@ export class Jarvis {
         decks.push(f.deck);
         const miss = f.missed.length ? ` ${f.missed.length} change${f.missed.length === 1 ? "" : "s"} didn't match the template and weren't made: ${f.missed.slice(0, 8).map((m) => `slide ${m.slide} ${m.para ? `paragraph ${m.para}` : `"${(m.find ?? "").slice(0, 40)}"`}`).join("; ")}.` : "";
         await this.router.log(agent.id, "system", `${agent.name} filled in the template: ${f.deck.title} (${f.done} changes)${miss}`, r.runId);
-        // A Google Slides copy in Phil's Drive, when Google is connected: the template came from Google Slides.
-        let slidesLink = "";
+        // It goes straight into Phil's Google Drive, in the venture's own deck folder, as Google Slides. The .pptx is
+        // handed over in chat only when Drive isn't there to take it.
+        let where = "", attach = true;
         if (this.slidesExport) {
+          const folder = deckFolderName(agent.venture);
           try {
             const { deckFile } = await import("../decks.js");
             const file = await deckFile(this.store, f.deck.id);
-            if (file) slidesLink = ` Google Slides: ${await this.slidesExport(f.deck.title, file.data, agent.id)}`;
-          } catch (e) { slidesLink = ` (It couldn't be put in Google Slides: ${(e as Error).message.slice(0, 160)}; the .pptx is attached.)`; }
+            if (file) { where = ` Saved to your Google Drive in "${folder}": ${await this.slidesExport(f.deck.title, file.data, agent.id, folder)}`; attach = false; }
+          } catch (e) { where = ` (It couldn't be saved to Google Drive: ${(e as Error).message.slice(0, 160)}; the .pptx is attached instead.)`; }
         }
-        await this.say({ role: "agent", agentId: agent.id, text: `Deck ready: ${f.deck.title} · your template with ${f.done} change${f.done === 1 ? "" : "s"}.${miss}${slidesLink}`, runId: r.runId, files: [{ id: f.deck.id, name: f.deck.name }], kind: "progress" });
+        await this.say({ role: "agent", agentId: agent.id, text: `Deck ready: ${f.deck.title} · your template with ${f.done} change${f.done === 1 ? "" : "s"}.${miss}${where}`, runId: r.runId, ...(attach ? { files: [{ id: f.deck.id, name: f.deck.name }] } : {}), kind: "progress" });
       } catch (e) { text += `\n\n(The template couldn't be filled in: ${(e as Error).message})`; }
     }
     if (decks.length) text = `${text}\n\n[Deck ready: ${decks.map((d) => d.title).join("; ")}]`.trim();
@@ -1311,8 +1313,8 @@ export class Jarvis {
 
   /** Which connections are working right now. The server sets this from its connectors; without it nothing counts as connected. */
   connectionProbe?: () => Promise<Set<Connection>>;
-  /** Turn a filled-in deck into a Google Slides file in Phil's Drive and return its link (set when Google is connected). */
-  slidesExport?: (title: string, pptx: Buffer, agentId: string) => Promise<string>;
+  /** Puts a filled-in deck in Phil's Google Drive, in the named folder, as Google Slides; returns its link. */
+  slidesExport?: (title: string, pptx: Buffer, agentId: string, folder: string) => Promise<string>;
   private connectionsCache?: { at: number; text: string };
   /**
    * What is connected this minute, for every agent's prompt. Memory and old reports go stale the moment Phil adds a key

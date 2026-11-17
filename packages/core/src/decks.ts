@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import { randomUUID } from "node:crypto";
 import type { Store } from "./store/types.js";
 import { saveFile, loadFile } from "./uploads.js";
+import { VENTURES } from "./registry/ventures.js";
 
 /**
  * Presentations agents make. An agent writes the deck as a fenced ```slides block of JSON (DeckSpec); HQ turns it
@@ -31,7 +32,7 @@ export const DECK_HINT = [
   '{"title":"...","subtitle":"...","slides":[{"title":"...","stats":[{"label":"Revenue","value":"$42,300","change":"+12% vs last week"}],"chart":{"type":"bar|line|pie","title":"...","labels":["Mon","Tue"],"series":[{"name":"Sales","values":[1200,900]}]},"table":{"columns":["Rep","Closed"],"rows":[["Ana",5]]},"bullets":["..."],"notes":"what to say on this slide"}]}',
   "Every slide needs a title; use at most one of chart or table per slide, up to 4 stats, up to 6 short bullets, up to 12 table rows. Numbers in charts are plain numbers. Use only figures from the data; never invent one. HQ builds the file and sends it to Phil; outside the block, reply with the three headlines in a few lines.",
   "If a template exists (deck_template), follow its slide order and section names.",
-  'When Phil wants HIS template filled in (his own slides, look and logos kept), write a fenced block tagged "deckfill" instead: {"title":"ProEdge weekly sales 11/09-11/15","edits":[{"slide":2,"find":"Close rate 15%","replace":"Close rate 17.5%"},{"slide":10,"para":3,"text":"Shehadeh, Tarek"},{"slide":10,"para":4,"text":"~30%"}]}. deck_template numbers every paragraph on every slide. For tables, leaderboards and anything that repeats (names, percentages), point at the paragraph by its number with "para" and give its whole new "text"; rewrite a board row by row in order, and give "text":"" to blank a row that has no one now. Elsewhere you can quote text with "find" and give its "replace". Change every number, date and name that the new data changes; leave the rest. Charts in the template aren\'t changed: say which ones need updating by hand. HQ reports any edit whose text wasn\'t found, and when Google is connected also puts the result in Phil\'s Drive as Google Slides and sends him the link.',
+  'When Phil wants HIS template filled in (his own slides, look and logos kept), write a fenced block tagged "deckfill" instead: {"title":"ProEdge weekly sales 11/09-11/15","edits":[{"slide":2,"find":"Close rate 15%","replace":"Close rate 17.5%"},{"slide":10,"para":3,"text":"Shehadeh, Tarek"},{"slide":10,"para":4,"text":"~30%"}]}. deck_template numbers every paragraph on every slide. For tables, leaderboards and anything that repeats (names, percentages), point at the paragraph by its number with "para" and give its whole new "text"; rewrite a board row by row in order, and give "text":"" to blank a row that has no one now. Elsewhere you can quote text with "find" and give its "replace". Change every number, date and name that the new data changes; leave the rest. Charts in the template aren\'t changed: say which ones need updating by hand. HQ reports any edit that didn\'t match, and when Google is connected saves the result straight into Phil\'s Google Drive as Google Slides, in the venture\'s deck folder ("ProEdge decks"), and posts where it went: tell Phil it\'s going to his Drive; don\'t say you can\'t give him a link.',
 ].join("\n");
 
 const hex = (c: string | undefined, d: string) => (c && /^[0-9a-f]{6}$/i.test(c) ? c.toUpperCase() : d);
@@ -308,4 +309,14 @@ export async function deckFile(store: Store, id: string): Promise<{ name: string
   const d = (await store.settings.get<Deck[]>(DECKS_KEY, [])).find((x) => x.id === id || x.fileId === id);
   const f = d ? await loadFile(d.fileId) : undefined;
   return d && f ? { name: d.name, ...f } : undefined;
+}
+
+/**
+ * The Google Drive folder a venture's decks go in ("ProEdge decks"). HQ makes it the first time; HQ's Drive access only
+ * reaches what it makes, so Phil can drag the folder wherever he likes (into his own ProEdge folder) and decks keep going
+ * there.
+ */
+export function deckFolderName(venture: string): string {
+  const label = (VENTURES as Record<string, { label?: string } | undefined>)[venture]?.label;
+  return label && venture !== "root" ? `${label} decks` : "Jarvis decks";
 }
