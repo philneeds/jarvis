@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { memoryStore, RobinhoodConnector, sseResult, Jarvis, CHARTERS } from "../src/index.js";
+import { memoryStore, RobinhoodConnector, LOOPBACK_REDIRECT, sseResult, Jarvis, CHARTERS } from "../src/index.js";
 
 test("Robinhood: HQ registers itself, signs Phil in with PKCE, speaks MCP over HTTP, reads freely and writes only on approval", async () => {
   const store = memoryStore(); await store.init();
@@ -43,9 +43,26 @@ test("Robinhood: HQ registers itself, signs Phil in with PKCE, speaks MCP over H
   assert.equal(u.searchParams.get("code_challenge_method"), "S256");
   challenge = u.searchParams.get("code_challenge")!;
   assert.match(seen.find((s) => s.url === "/oauth/trading/register")!.body!, /"token_endpoint_auth_method":"none"/);
-  await assert.rejects(rh.exchangeCode("x", "wrong-state"), /unknown sign-in state/);
+  await assert.rejects(rh.exchangeCode("x", "wrong-state"), /expired or was already used/);
   await rh.exchangeCode("the-code", state);
   assert.equal((await rh.status()).connected, true);
+  await rh.disconnect();
+
+  // Robinhood only returns a sign-in to its listed apps and to localhost, so HQ uses localhost and Phil pastes the
+  // address back. A restart in between (a fresh connector) still finishes it.
+  const loop = new RobinhoodConnector(store, { mcpUrl: "https://agent.robinhood.com/mcp/trading", redirectUri: LOOPBACK_REDIRECT, fetch: f, now: () => now });
+  assert.equal(loop.pasteBack, true);
+  assert.equal(rh.pasteBack, false);
+  const second = await loop.authUrl();
+  assert.equal(new URL(second.url).searchParams.get("redirect_uri"), "http://localhost:8765/robinhood/callback");
+  challenge = new URL(second.url).searchParams.get("code_challenge")!;
+  const afterRestart = new RobinhoodConnector(store, { mcpUrl: "https://agent.robinhood.com/mcp/trading", redirectUri: LOOPBACK_REDIRECT, fetch: f, now: () => now });
+  await assert.rejects(afterRestart.finishFromUrl("not an address"), /copy the whole address/);
+  await assert.rejects(afterRestart.finishFromUrl("http://localhost:8765/robinhood/callback?error=access_denied"), /Robinhood said: access_denied/);
+  await assert.rejects(afterRestart.finishFromUrl("http://localhost:8765/robinhood/callback"), /no sign-in code/);
+  await afterRestart.finishFromUrl(` http://localhost:8765/robinhood/callback?code=the-code&state=${second.state}&iss=x `);
+  assert.equal((await rh.status()).connected, true);
+  await assert.rejects(afterRestart.finishFromUrl(`http://localhost:8765/robinhood/callback?code=the-code&state=${second.state}`), /already used/, "a code can't be replayed");
 
   const jarvis = new Jarvis({ store });
   jarvis.addConnector(rh, RobinhoodConnector.promptHint());
@@ -72,7 +89,7 @@ test("Robinhood: HQ registers itself, signs Phil in with PKCE, speaks MCP over H
   // An expired token refreshes on its own.
   now += 3600_000;
   assert.equal(await t("robinhood_read").handler({ tool: "get_positions" }, ctx), "AAPL 10 sh · NVDA 5 sh");
-  assert.equal(tokenCalls, 2, "one exchange, one refresh");
+  assert.equal(tokenCalls, 3, "two sign-ins, one refresh");
   assert.ok(CHARTERS.buffett!.tools!.includes("robinhood_read") && CHARTERS.munger!.tools!.includes("robinhood_read"));
   assert.equal(sseResult("data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":1}\n\ndata: {\"jsonrpc\":\"2.0\",\"id\":8,\"result\":2}\n\n", 8)!.result, 2);
 });

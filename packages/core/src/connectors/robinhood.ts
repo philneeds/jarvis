@@ -25,6 +25,10 @@ const CLIENT_KEY = "robinhood.client";
 const TOKENS_KEY = "robinhood.tokens";
 const STATUS_KEY = "robinhood.status";
 const DEFAULT_URL = "https://agent.robinhood.com/mcp/trading";
+const PENDING_KEY = "robinhood.pending";
+/** Where Robinhood sends Phil back after he approves: a localhost address, which Robinhood accepts for any app. */
+export const LOOPBACK_REDIRECT = "http://localhost:8765/robinhood/callback";
+const isLoopback = (u: string) => { try { return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(u).hostname); } catch { return false; } };
 /** Without an annotation, only a tool that plainly reads is treated as a read; anything else waits for Phil. */
 const READ = /^(get|list|search|quote|quotes|lookup|fetch|read|history|show|describe|view|find|check)[_-]?/i;
 const b64url = (b: Buffer) => b.toString("base64url");
@@ -43,7 +47,12 @@ export class RobinhoodConnector {
 
   static fromEnv(store: Store): RobinhoodConnector {
     const origin = (process.env.HQ_ORIGIN ?? "http://localhost:3000").split(",")[0]!.trim();
-    return new RobinhoodConnector(store, { mcpUrl: process.env.ROBINHOOD_MCP_URL, redirectUri: `${origin}/api/connectors/robinhood/callback` });
+    // Robinhood sends a sign-in back only to the agent apps it lists and to localhost, so HQ's own address is refused
+    // ("Something's gone wrong" after logging in). HQ uses a localhost return address instead: the browser lands on a
+    // page that doesn't load, and Phil pastes that page's address into Settings to finish. ROBINHOOD_REDIRECT_URI
+    // overrides it (HQ's own callback is ${origin}/api/connectors/robinhood/callback, should Robinhood allow it).
+    void origin;
+    return new RobinhoodConnector(store, { mcpUrl: process.env.ROBINHOOD_MCP_URL, redirectUri: process.env.ROBINHOOD_REDIRECT_URI?.trim() || LOOPBACK_REDIRECT });
   }
 
   // ---- OAuth -------------------------------------------------------------------------------------
@@ -78,6 +87,10 @@ export class RobinhoodConnector {
     const state = b64url(randomBytes(16));
     const verifier = b64url(randomBytes(32));
     this.pending.set(state, verifier);
+    // Kept in settings too (sealed), so a restart between "Connect" and pasting the address back doesn't lose it.
+    const pend = (openJson<Record<string, { v: string; at: number }>>(await this.store.settings.get<unknown>(PENDING_KEY, null)) ?? {});
+    const fresh = Object.fromEntries(Object.entries(pend).filter(([, x]) => this.now() - x.at < 30 * 60_000).slice(-4));
+    await this.store.settings.set(PENDING_KEY, sealJson({ ...fresh, [state]: { v: verifier, at: this.now() } }));
     const u = new URL(meta.authorization_endpoint);
     u.searchParams.set("response_type", "code");
     u.searchParams.set("client_id", c.client_id);
@@ -90,10 +103,30 @@ export class RobinhoodConnector {
     return { url: u.toString(), state };
   }
 
+  /** True when the sign-in comes back to localhost, so Phil pastes the address into Settings to finish. */
+  get pasteBack(): boolean { return isLoopback(this.opts.redirectUri); }
+
+  /**
+   * Finish from the address Phil pasted: where Robinhood sent his browser after he approved
+   * (http://localhost:8765/robinhood/callback?code=…&state=…). Only that address's code and state are read.
+   */
+  async finishFromUrl(pasted: string): Promise<Tokens> {
+    let u: URL;
+    try { u = new URL(pasted.trim()); } catch { throw new Error("that isn't an address: copy the whole address from the browser's address bar, starting with http://localhost"); }
+    const err = u.searchParams.get("error");
+    if (err) throw new Error(`Robinhood said: ${u.searchParams.get("error_description") || err}`);
+    const code = u.searchParams.get("code"), state = u.searchParams.get("state");
+    if (!code || !state) throw new Error("that address has no sign-in code in it: copy it from the page Robinhood sent you to after you approved (it starts with http://localhost:8765)");
+    return this.exchangeCode(code, state);
+  }
+
   async exchangeCode(code: string, state: string): Promise<Tokens> {
-    const verifier = this.pending.get(state);
-    if (!verifier) throw new Error("unknown sign-in state; start again from Settings");
+    const pend = openJson<Record<string, { v: string; at: number }>>(await this.store.settings.get<unknown>(PENDING_KEY, null)) ?? {};
+    const verifier = this.pending.get(state) ?? (pend[state] && this.now() - pend[state]!.at < 30 * 60_000 ? pend[state]!.v : undefined);
+    if (!verifier) throw new Error("that sign-in has expired or was already used; press Connect Robinhood again");
     this.pending.delete(state);
+    delete pend[state];
+    await this.store.settings.set(PENDING_KEY, Object.keys(pend).length ? sealJson(pend) : null);
     const c = await this.client();
     const t = await this.token({ grant_type: "authorization_code", code, redirect_uri: c.redirect_uri, client_id: c.client_id, code_verifier: verifier, resource: this.url });
     this.session = undefined; this.toolsCache = undefined;

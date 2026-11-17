@@ -492,7 +492,18 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   });
   api.get("/connectors/robinhood/auth", async (c) => {
     if (!connectors.robinhood) return c.json({ error: "Robinhood connector not configured" }, 400);
-    try { return c.json({ url: (await connectors.robinhood.authUrl()).url }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
+    try { return c.json({ url: (await connectors.robinhood.authUrl()).url, pasteBack: connectors.robinhood.pasteBack }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
+  });
+  // Robinhood returns the sign-in to localhost; Phil pastes that address here and HQ finishes connecting.
+  api.post("/connectors/robinhood/finish", async (c) => {
+    if (!connectors.robinhood) return c.json({ error: "Robinhood connector not configured" }, 400);
+    const { url } = (await c.req.json().catch(() => ({}))) as { url?: unknown };
+    if (typeof url !== "string" || !url.trim() || url.length > 4000) return c.json({ error: "paste the address from your browser" }, 400);
+    try {
+      await connectors.robinhood.finishFromUrl(url);
+      await jarvis.router.log("jarvis", "system", "Phil connected Robinhood");
+      return c.json({ ok: true });
+    } catch (e) { return c.json({ error: (e as Error).message }, 400); }
   });
   api.get("/connectors/robinhood/callback", async (c) => {
     const { code, state, error } = c.req.query();

@@ -44,7 +44,22 @@ export default function SettingsPage() {
   const short = (sha?: string) => (sha ?? "").slice(0, 7);
   const backupNow = async () => { setBkMsg("Backing up…"); try { const r = await post<{ result: string }>("/api/backup", {}); setBkMsg(r.result); setBk(await api<typeof bk>("/api/backup")); } catch (e) { setBkMsg((e as Error).message); } };
   const [rhMsg, setRhMsg] = useState<string>();
-  const connectRobinhood = async () => { try { const r = await api<{ url: string }>("/api/connectors/robinhood/auth"); location.href = r.url; } catch (e) { setRhMsg((e as Error).message); } };
+  // Robinhood returns the sign-in to localhost (the only address it accepts from HQ), so the sign-in opens in a new
+  // tab and Phil pastes back the address that tab ends on.
+  const [rhPaste, setRhPaste] = useState<string | null>(null);
+  const connectRobinhood = async () => {
+    try {
+      const r = await api<{ url: string; pasteBack?: boolean }>("/api/connectors/robinhood/auth");
+      if (!r.pasteBack) { location.href = r.url; return; }
+      window.open(r.url, "_blank", "noopener");
+      setRhPaste(""); setRhMsg(undefined);
+    } catch (e) { setRhMsg((e as Error).message); }
+  };
+  const finishRobinhood = async () => {
+    setRhMsg("Connecting…");
+    try { await post("/api/connectors/robinhood/finish", { url: rhPaste ?? "" }); setRhPaste(null); setRhMsg("Robinhood connected."); await load(); }
+    catch (e) { setRhMsg((e as Error).message); }
+  };
   const disconnectRobinhood = async () => { if (!confirm("Disconnect Robinhood? Buffett and Munger lose the holdings until you reconnect.")) return; await post("/api/connectors/robinhood/disconnect", {}); setRhMsg(undefined); await load(); };
   const [dcMsg, setDcMsg] = useState<string>();
   const [ghMsg, setGhMsg] = useState<string>();
@@ -210,8 +225,17 @@ export default function SettingsPage() {
               <span><b>Robinhood</b> · Buffett and Munger read your positions, balances and orders through Robinhood's official agent access. Any order waits for your approval and can only run in your Robinhood Agentic account.</span>
               {conn?.robinhood?.connected
                 ? <><span style={{ color: "var(--dim)" }}>connected{conn.robinhood.connectedAt ? ` · ${fmtTime(conn.robinhood.connectedAt)}` : ""}</span><button className="btn btn-sm" onClick={() => void testSimple("/api/connectors/robinhood/test", setRhMsg)}>Check now</button><button className="btn btn-sm btn-danger ml-auto" onClick={disconnectRobinhood}>Disconnect</button></>
-                : <button className="btn btn-sm btn-primary ml-auto" onClick={connectRobinhood}>Connect Robinhood</button>}
+                : <button className="btn btn-sm btn-primary ml-auto" onClick={connectRobinhood}>{rhPaste !== null ? "Open Robinhood again" : "Connect Robinhood"}</button>}
             </div>
+            {rhPaste !== null && !conn?.robinhood?.connected && (
+              <form className="flex flex-col gap-2 pl-6" onSubmit={(e) => { e.preventDefault(); void finishRobinhood(); }}>
+                <p className="m-0" style={{ color: "var(--ink)" }}>Robinhood opened in a new tab. Log in and approve. You&apos;ll land on a page that says it can&apos;t be reached (an address starting with <code>http://localhost:8765</code>): that&apos;s expected. Copy that whole address from the address bar and paste it here.</p>
+                <div className="flex gap-2">
+                  <input className="input h-9 flex-1" placeholder="http://localhost:8765/robinhood/callback?code=…" aria-label="Address Robinhood sent you to" value={rhPaste} onChange={(e) => setRhPaste(e.target.value)} />
+                  <button className="btn btn-sm btn-primary h-9" disabled={!rhPaste.trim()}>Finish</button>
+                </div>
+              </form>
+            )}
             {(rhMsg || (conn?.robinhood?.lastFetch && !conn.robinhood.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: rhMsg && !/refused|error|expired|isn't connected|failed/i.test(rhMsg) ? "var(--ink)" : "var(--red)" }}>{rhMsg ?? conn?.robinhood?.lastFetch?.error}</p>}
           </div>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Kubera">

@@ -3,7 +3,7 @@ export { XConnector, X_SCOPES, type XOptions, type XAccount } from "./x.js";
 export { KuberaConnector, type KuberaOptions, type KuberaPortfolio, type KuberaItem } from "./kubera.js";
 export { DiscordConnector, parseChannels, type DiscordOptions } from "./discord.js";
 export { GithubConnector, type GithubOptions } from "./github.js";
-export { RobinhoodConnector, sseResult, type RobinhoodOptions, type McpTool } from "./robinhood.js";
+export { RobinhoodConnector, sseResult, LOOPBACK_REDIRECT, type RobinhoodOptions, type McpTool } from "./robinhood.js";
 export { GoHighLevelConnector, type GhlOptions } from "./gohighlevel.js";
 export { EagleViewConnector, takeoff, takeoffText, EV_PRODUCTS, EV_DELIVERY, EV_STRUCTURES, type EagleViewOptions, type Takeoff } from "./eagleview.js";
 export { LeadPerfectionConnector, changesData, isFilterField, postChangesData, sameName, WRITE_WORDS, type LeadPerfectionOptions, type Assignment } from "./leadperfection.js";
