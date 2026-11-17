@@ -97,3 +97,30 @@ export class Secrets implements SecretReader {
     this.open.delete(name); this.problems.delete(name);
   }
 }
+
+/**
+ * Seal any small JSON value (a connector's sign-in tokens) with the same key the saved keys use, so the settings
+ * table, the nightly backup and db_query hold ciphertext. With no server secret (an open dev HQ) it stays as it is.
+ */
+export function sealJson(value: unknown, env: NodeJS.ProcessEnv = process.env): unknown {
+  const s = (env.HQ_SECRETS_KEY || env.HQ_SESSION_SECRET || env.HQ_PASSWORD || "").trim();
+  if (!s || value === null || value === undefined) return value;
+  const key = scryptSync(s, SALT, 32), iv = randomBytes(12);
+  const c = createCipheriv("aes-256-gcm", key, iv);
+  const data = Buffer.concat([c.update(JSON.stringify(value), "utf8"), c.final()]);
+  return { v: 1, alg: "aes-256-gcm", iv: iv.toString("base64"), tag: c.getAuthTag().toString("base64"), data: data.toString("base64"), at: new Date().toISOString() } satisfies Sealed;
+}
+/** Open what sealJson stored; a value saved before sealing (plain JSON) passes through. Undefined if it can't be opened. */
+export function openJson<T>(raw: unknown, env: NodeJS.ProcessEnv = process.env): T | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  if (!isSealed(raw)) return raw as T;
+  const s = (env.HQ_SECRETS_KEY || env.HQ_SESSION_SECRET || env.HQ_PASSWORD || "").trim();
+  if (!s) return undefined;
+  try {
+    const d = createDecipheriv("aes-256-gcm", scryptSync(s, SALT, 32), Buffer.from(raw.iv, "base64"));
+    d.setAuthTag(Buffer.from(raw.tag, "base64"));
+    return JSON.parse(Buffer.concat([d.update(Buffer.from(raw.data, "base64")), d.final()]).toString("utf8")) as T;
+  } catch { return undefined; }
+}
+/** Whether a stored value is sealed. */
+export const isSealedValue = (x: unknown) => isSealed(x);

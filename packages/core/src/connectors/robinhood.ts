@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Store } from "../store/types.js";
 import { defineTool, type ToolDef } from "../tools/index.js";
 import type { Describer, Executor } from "../jarvis/orchestrator.js";
+import { sealJson, openJson, isSealedValue } from "../secrets.js";
 
 /**
  * Robinhood's official agent access (the Trading MCP server, public beta since May 2026) for Buffett and Munger.
@@ -104,14 +105,25 @@ export class RobinhoodConnector {
     const res = await this.f(meta.token_endpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body: new URLSearchParams(form) });
     if (!res.ok) throw new Error(`Robinhood sign-in failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
     const j = (await res.json()) as { access_token: string; refresh_token?: string; expires_in?: number; scope?: string };
-    const prev = await this.store.settings.get<Tokens | null>(TOKENS_KEY, null);
+    const prev = await this.tokens();
     const t: Tokens = { access_token: j.access_token, refresh_token: j.refresh_token ?? prev?.refresh_token, expires_at: j.expires_in ? this.now() + j.expires_in * 1000 : undefined, connectedAt: prev?.connectedAt ?? new Date(this.now()).toISOString(), scope: j.scope };
-    await this.store.settings.set(TOKENS_KEY, t);
+    await this.store.settings.set(TOKENS_KEY, sealJson(t));
+    return t;
+  }
+
+  /**
+   * The sign-in, sealed at rest (AES-256-GCM, the same server secret that seals pasted keys), so the database, the
+   * nightly backup in Drive and db_query only ever hold ciphertext. One saved before sealing is sealed on first read.
+   */
+  private async tokens(): Promise<Tokens | undefined> {
+    const raw = await this.store.settings.get<unknown>(TOKENS_KEY, null);
+    const t = openJson<Tokens>(raw);
+    if (t && raw && !isSealedValue(raw)) { const sealed = sealJson(t); if (isSealedValue(sealed)) await this.store.settings.set(TOKENS_KEY, sealed); }
     return t;
   }
 
   private async accessToken(force = false): Promise<string> {
-    const t = await this.store.settings.get<Tokens | null>(TOKENS_KEY, null);
+    const t = await this.tokens();
     if (!t) throw new Error("Robinhood isn't connected. Phil connects it in Settings.");
     if (force || (t.expires_at && this.now() > t.expires_at - 60_000)) {
       if (!t.refresh_token) throw new Error("Robinhood's sign-in expired; reconnect it in Settings.");
@@ -123,7 +135,7 @@ export class RobinhoodConnector {
 
   async disconnect() { await this.store.settings.set(TOKENS_KEY, null); this.session = undefined; this.toolsCache = undefined; }
   async status() {
-    const t = await this.store.settings.get<Tokens | null>(TOKENS_KEY, null);
+    const t = await this.tokens();
     return { configured: true, connected: !!t, connectedAt: t?.connectedAt, lastFetch: await this.store.settings.get<{ ok: boolean; at: string; error?: string } | null>(STATUS_KEY, null) };
   }
 
@@ -135,7 +147,7 @@ export class RobinhoodConnector {
     const res = await this.f(this.url, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18", ...(this.session ? { "mcp-session-id": this.session } : {}) }, body: JSON.stringify({ jsonrpc: "2.0", id, method, params: params ?? {} }) });
     if (res.status === 401) {
       // One refresh and retry before giving up (the token may have expired without an expires_in to warn us).
-      if (!fresh && (await this.store.settings.get<Tokens | null>(TOKENS_KEY, null))?.refresh_token) return this.rpc(method, params, retry, true);
+      if (!fresh && (await this.tokens())?.refresh_token) return this.rpc(method, params, retry, true);
       await this.mark(false, "Robinhood refused the token"); throw new Error("Robinhood refused HQ's sign-in; reconnect it in Settings.");
     }
     if (res.status === 404 && this.session && retry) { this.session = undefined; return this.rpc(method, params, false); } // session expired
@@ -188,7 +200,7 @@ export class RobinhoodConnector {
    * Robinhood isn't connected. Read-only: a tool that could change anything is never called here.
    */
   async positionsText(): Promise<string | undefined> {
-    if (!(await this.store.settings.get<Tokens | null>(TOKENS_KEY, null))) return undefined;
+    if (!(await this.tokens())) return undefined;
     const reads = (await this.listTools()).filter((t) => !this.isWrite(t));
     const rank = (n: string) => (/equity.*position|position.*equit|stock.*position/i.test(n) ? 0 : /position|holding/i.test(n) ? 1 : /portfolio/i.test(n) ? 2 : 9);
     const picks = reads.filter((t) => rank(t.name) < 9).sort((a, b) => rank(a.name) - rank(b.name)).slice(0, 2);
