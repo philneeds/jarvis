@@ -20,6 +20,7 @@ export default function GoalsPage() {
   const { base, goals, setGoals, toggle, repick } = useBase();
   const [err, setErr] = useState<string>();
   const [editing, setEditing] = useState<string | null>(null);
+  const [allTrophies, setAllTrophies] = useState(false);
 
   const ventures = state ? Object.values(state.ventures).filter((v) => v.id !== "root" && state.agents.some((a) => a.venture === v.id)) : [];
   const venture = (id?: string) => (id && state ? state.ventures[id as keyof typeof state.ventures] : undefined);
@@ -41,10 +42,12 @@ export default function GoalsPage() {
   return (
     <Shell>
       <div className="p-4 md:p-6 flex flex-col gap-6 max-w-[1400px] w-full mx-auto">
-        <header className="flex flex-wrap items-end gap-x-4 gap-y-1">
-          <h1 className="display m-0 text-3xl font-bold tracking-[0.06em]" style={{ color: "var(--ink-strong)" }}>Goals</h1>
-          <p className="m-0 text-[12px] flex-1 min-w-60" style={{ color: "var(--muted)" }}>Long term is where you&apos;re headed. Mid and short-term goals feed it. David gives each goal its benchmarks, ticks them on evidence, and picks today&apos;s three.</p>
-          <Link href="/" className="btn btn-sm">Back to base ›</Link>
+        <header className="flex items-start gap-4">
+          <div className="flex-1 min-w-0">
+            <h1 className="display m-0 text-3xl font-bold tracking-[0.06em]" style={{ color: "var(--ink-strong)" }}>Goals</h1>
+            <p className="m-0 mt-1 text-[12px]" style={{ color: "var(--muted)" }}>Short-term goals feed long-term ones. David sets the benchmarks and ticks them on evidence.</p>
+          </div>
+          <Link href="/" className="btn btn-sm flex-none">Back to base ›</Link>
         </header>
         {err && <div className="card text-[12px]" style={{ borderColor: "var(--red)", color: "var(--red)" }}>{err}</div>}
 
@@ -67,7 +70,7 @@ export default function GoalsPage() {
             return (
               <section key={h} aria-label={HORIZON_LABEL[h]} className="flex flex-col gap-3 min-w-0">
                 <div className="flex items-baseline justify-between gap-2"><h2 className="label m-0 font-normal">{HORIZON_LABEL[h]} · {list.length}</h2><span className="text-[11px]" style={{ color: "var(--muted)" }}>{HORIZON_HINT[h]}</span></div>
-                {list.length === 0 && <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>{h === "long" ? "No long-term goal yet. Start here: one or two per venture is plenty." : h === "mid" ? "Nothing for this quarter yet." : "Nothing for the next two weeks yet."}</p>}
+                {list.length === 0 && h === "long" && <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>No long-term goal yet. One or two per venture is plenty.</p>}
                 {list.map((g) => {
                   const v = venture(g.venture), parent = goals.find((x) => x.id === g.parent), kids = goals.filter((x) => x.parent === g.id);
                   const marks = g.benchmarks ?? [];
@@ -79,7 +82,7 @@ export default function GoalsPage() {
                         <div className="flex-1 min-w-0">
                           <h3 className="m-0 text-[15px] leading-snug" style={{ color: "var(--ink-bright)" }}>{g.primary && <span title="Your primary goal" style={{ color: "var(--gold)" }}>★ </span>}{g.name}</h3>
                           <p className="m-0 text-[11px]" style={{ color: "var(--muted)" }}>
-                            {v ? <span style={{ color: v.color }}>{v.short}</span> : "No venture"}{g.deadline ? ` · due ${g.deadline}` : ""}{parent ? ` · feeds “${parent.name}”` : ""}{kids.length ? ` · ${kids.length} goal${kids.length === 1 ? "" : "s"} feeding it` : ""}
+                            {[v && <span key="v" style={{ color: v.color }}>{v.short}</span>, g.deadline && `due ${g.deadline}`, parent && `feeds “${parent.name}”`, kids.length > 0 && `${kids.length} goal${kids.length === 1 ? "" : "s"} feeding it`, marks.length > 0 && `${marks.filter((b) => b.done).length} of ${marks.length} benchmarks`].filter(Boolean).flatMap((x, i) => (i ? [" · ", x] : [x]))}
                           </p>
                         </div>
                         <span className="text-[13px] flex-none" style={{ color: g.pct >= 100 ? "var(--green)" : "var(--ink-strong)" }}>{g.pct}%</span>
@@ -87,11 +90,7 @@ export default function GoalsPage() {
                       </div>
                       <div className="bar"><i style={{ width: `${g.pct}%` }} /></div>
                       {stalled && <p className="m-0 text-[11px]" style={{ color: "var(--amber)" }}>Nothing is feeding this yet: no benchmarks and no shorter goal under it. Ask David for benchmarks, or add a mid-term goal that feeds it.</p>}
-                      {marks.length > 0 && (
-                        <ul className="m-0 p-0 list-none flex flex-col gap-1">
-                          {marks.map((b) => <li key={b.id}><button className="base-todo" data-done={b.done} aria-pressed={b.done} onClick={() => void update(g, { benchmarksDone: b.done ? { undone: [b.id] } : { done: [b.id] } })}><i aria-hidden="true" /><span className="text-[12px]">{b.text}</span></button></li>)}
-                        </ul>
-                      )}
+                      {marks.length > 0 && <Benchmarks marks={marks} onToggle={(b) => void update(g, { benchmarksDone: b.done ? { undone: [b.id] } : { done: [b.id] } })} />}
                       {editing === g.id && <GoalEditor goal={g} goals={goals} ventures={ventures} onUpdate={(p) => update(g, p)} onDelete={() => void remove(g)} />}
                     </article>
                   );
@@ -103,20 +102,23 @@ export default function GoalsPage() {
         </div>
 
         <section aria-label="Trophies" className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-baseline gap-3"><h2 className="label m-0 font-normal">Trophies · {trophies.length}</h2><span className="text-[11px]" style={{ color: "var(--muted)" }}>A benchmark met is one, and finishing the goal is one more. A venture&apos;s level comes from the trophies on its goals: 1, 3, 6 and 10 reach levels 2 to 5.</span></div>
+          <div className="flex flex-wrap items-baseline gap-3"><h2 className="label m-0 font-normal">Trophies · {trophies.length}</h2><span className="text-[11px]" style={{ color: "var(--muted)" }}>One per benchmark met, one more for a finished goal. They level up the venture.</span></div>
           {levels.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {levels.map(([id, lv]) => { const v = venture(id); return <span key={id} className="base-chip normal-case tracking-normal text-[12px]" style={{ borderColor: v?.color }}><b style={{ color: v?.color }}>{v?.short ?? id}</b>&nbsp;· level {lv.level} {LEVEL_NAME[lv.level]}{lv.next ? ` · ${lv.next - lv.hits} to go` : ""}</span>; })}
             </div>
           )}
-          {trophies.length === 0 ? <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>None yet. The first benchmark you or David tick earns one, and the venture it belongs to starts to grow.</p> : (
-            <ul className="m-0 p-0 list-none grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {trophies.slice(0, 30).map((t) => { const v = venture(t.venture); return (
-                <li key={t.id} className="card flex items-start gap-3 py-2.5">
-                  <span aria-hidden="true" className="flex-none mt-1 w-3 h-3 rotate-45" style={{ background: "var(--gold)", boxShadow: "0 0 8px var(--gold)" }} />
-                  <span className="min-w-0 text-[12px]"><b style={{ color: "var(--ink-bright)" }}>{t.title}</b><br /><span style={{ color: "var(--muted)" }}>{t.kind === "goal" ? "Goal finished" : `Toward “${t.goalName}”`} · {v ? <span style={{ color: v.color }}>{v.short}</span> : "no venture"} · {fmtTime(t.at)}</span></span>
+          {trophies.length === 0 ? <p className="m-0 text-[12px]" style={{ color: "var(--muted)" }}>None yet. The first benchmark you or David tick earns one.</p> : (
+            <ul className="card m-0 p-0 list-none flex flex-col">
+              {trophies.slice(0, allTrophies ? 60 : 8).map((t, i) => { const v = venture(t.venture); return (
+                <li key={t.id} className={`flex items-center gap-3 px-3 py-2 text-[12px] ${i ? "border-t" : ""}`} style={{ borderColor: "var(--line)" }}>
+                  <span aria-hidden="true" className="flex-none w-2.5 h-2.5 rotate-45" style={{ background: "var(--gold)", boxShadow: "0 0 6px var(--gold)" }} />
+                  <span className="flex-1 min-w-0 truncate" style={{ color: "var(--ink-bright)" }} title={t.kind === "goal" ? "Goal finished" : `Toward “${t.goalName}”`}>{t.kind === "goal" ? `Finished: ${t.title}` : t.title}</span>
+                  {v && <span className="flex-none text-[10px] tracking-[0.12em]" style={{ color: v.color }}>{v.short}</span>}
+                  <span className="flex-none hidden sm:inline" style={{ color: "var(--muted)" }}>{fmtTime(t.at)}</span>
                 </li>
               ); })}
+              {trophies.length > 8 && <li className="border-t px-3 py-1.5" style={{ borderColor: "var(--line)" }}><button className="text-[11px] underline-offset-2 hover:underline" style={{ color: "var(--muted)" }} onClick={() => setAllTrophies(!allTrophies)}>{allTrophies ? "Show fewer" : `Show all ${trophies.length}`}</button></li>}
             </ul>
           )}
         </section>
@@ -126,6 +128,21 @@ export default function GoalsPage() {
 }
 
 type V = { id: string; short: string };
+type Mark = NonNullable<Goal["benchmarks"]>[number];
+
+/** Open benchmarks listed; finished ones folded under one line, so a goal that's moving doesn't grow longer. */
+function Benchmarks({ marks, onToggle }: { marks: Mark[]; onToggle: (b: Mark) => void }) {
+  const [open, setOpen] = useState(false);
+  const todo = marks.filter((b) => !b.done), done = marks.filter((b) => b.done);
+  const row = (b: Mark) => <li key={b.id}><button className="base-todo" data-done={b.done} aria-pressed={b.done} onClick={() => onToggle(b)}><i aria-hidden="true" /><span className="text-[12px]">{b.text}</span></button></li>;
+  return (
+    <ul className="m-0 p-0 list-none flex flex-col gap-1">
+      {todo.map(row)}
+      {done.length > 0 && <li><button className="text-[11px] py-0.5 underline-offset-2 hover:underline" style={{ color: "var(--green)" }} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} {done.length} done</button></li>}
+      {open && done.map(row)}
+    </ul>
+  );
+}
 
 function GoalEditor({ goal, goals, ventures, onUpdate, onDelete }: { goal: Goal; goals: Goal[]; ventures: V[]; onUpdate: (p: Record<string, unknown>) => Promise<boolean>; onDelete: () => void }) {
   const [name, setName] = useState(goal.name);
@@ -173,20 +190,26 @@ function AddGoal({ horizon, goals, ventures, onAdd }: { horizon: Horizon; goals:
   const [name, setName] = useState("");
   const [venture, setVenture] = useState("");
   const [parent, setParent] = useState("");
+  const [open, setOpen] = useState(false);
   // A shorter goal can feed a longer one.
   const longer = goals.filter((g) => HORIZONS.indexOf(horizonOf(g)) < HORIZONS.indexOf(horizon));
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    if (await onAdd({ name: name.trim(), horizon, ...(venture ? { venture } : {}), ...(parent ? { parent } : {}) })) { setName(""); setParent(""); }
+    if (await onAdd({ name: name.trim(), horizon, ...(venture ? { venture } : {}), ...(parent ? { parent } : {}) })) { setName(""); setParent(""); setOpen(false); }
   };
+  const label = horizon === "long" ? "Add a long-term goal" : horizon === "mid" ? "Add a goal for this quarter" : "Add a goal for the next two weeks";
+  if (!open) return <button className="border border-dashed px-3 py-2 text-left text-[12px] hover:border-solid" style={{ borderColor: "var(--line)", color: "var(--muted)" }} onClick={() => setOpen(true)}>+ {label}</button>;
   return (
     <form onSubmit={submit} className="flex flex-col gap-2 border border-dashed p-3" style={{ borderColor: "var(--line)" }} aria-label={`Add a ${HORIZON_LABEL[horizon].toLowerCase()} goal`}>
-      <input className="input h-9" placeholder={horizon === "long" ? "A long-term goal, e.g. where this is in 3 years" : horizon === "mid" ? "A goal for this quarter" : "A goal for the next two weeks"} aria-label="New goal" value={name} maxLength={160} onChange={(e) => setName(e.target.value)} />
+      <input autoFocus className="input h-9" onKeyDown={(e) => { if (e.key === "Escape") { setOpen(false); setName(""); } }} placeholder={horizon === "long" ? "A long-term goal, e.g. where this is in 3 years" : horizon === "mid" ? "A goal for this quarter" : "A goal for the next two weeks"} aria-label="New goal" value={name} maxLength={160} onChange={(e) => setName(e.target.value)} />
       <div className="flex gap-2">
-        <select className="input h-9 flex-1" aria-label="Venture" value={venture} onChange={(e) => setVenture(e.target.value)}><option value="">No venture</option>{ventures.map((v) => <option key={v.id} value={v.id}>{v.short}</option>)}</select>
-        {longer.length > 0 && <select className="input h-9 flex-1" aria-label="Feeds" value={parent} onChange={(e) => setParent(e.target.value)}><option value="">Feeds nothing</option>{longer.map((g) => <option key={g.id} value={g.id}>Feeds: {g.name}</option>)}</select>}
-        <button className="btn btn-sm btn-primary h-9 flex-none" disabled={!name.trim()}>Add</button>
+        <select className="input h-9 flex-1 min-w-0" aria-label="Venture" value={venture} onChange={(e) => setVenture(e.target.value)}><option value="">No venture</option>{ventures.map((v) => <option key={v.id} value={v.id}>{v.short}</option>)}</select>
+        {longer.length > 0 && <select className="input h-9 flex-1 min-w-0" aria-label="Feeds" value={parent} onChange={(e) => setParent(e.target.value)}><option value="">Feeds nothing</option>{longer.map((g) => <option key={g.id} value={g.id}>Feeds: {g.name}</option>)}</select>}
+      </div>
+      <div className="flex justify-end gap-2">
+        <button type="button" className="btn btn-sm h-9" onClick={() => { setOpen(false); setName(""); }}>Cancel</button>
+        <button className="btn btn-sm btn-primary h-9" disabled={!name.trim()}>Add</button>
       </div>
     </form>
   );

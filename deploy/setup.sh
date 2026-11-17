@@ -119,6 +119,7 @@ SERVICES_UP=0; systemctl is-active -q jarvis-server 2>/dev/null && SERVICES_UP=1
 # That is longer than any run HQ allows (Einstein's code jobs get 60 minutes, everything else 20), so the wait ends
 # when the run does. At 20 minutes it cut off his longer jobs. FORCE=1 skips the wait. Runs older than 70 minutes
 # are ignored; HQ ends every run before that. If the database can't be asked, the wait is skipped, never the deploy.
+# The HQ build is tried twice: Next.js can stop a build once to show an upgrade notice, and the retry goes through.
 # The long wait comes before the build: once the new code is built, the old HQ is serving half-replaced files, so
 # only a short second wait (3 minutes, for a run that started during the build) sits between the build and the restart.
 wait_for_runs() {
@@ -139,7 +140,7 @@ wait_for_runs() {
 [[ "$SERVICES_UP" == 1 ]] && wait_for_runs 260
 
 log "Build"
-sudo -u "$APP_USER" -H bash -lc "cd $APP_DIR && pnpm install --frozen-lockfile --prod=false >/dev/null && pnpm --filter @jarvis/core build >/dev/null && set -a && . ./.env && set +a && pnpm --filter @jarvis/core db:migrate && pnpm --filter @jarvis/server build >/dev/null && pnpm --filter @jarvis/hq build >/dev/null"
+sudo -u "$APP_USER" -H bash -lc "cd $APP_DIR && pnpm install --frozen-lockfile --prod=false >/dev/null && pnpm --filter @jarvis/core build >/dev/null && set -a && . ./.env && set +a && pnpm --filter @jarvis/core db:migrate && pnpm --filter @jarvis/server build >/dev/null && { pnpm --filter @jarvis/hq build >/dev/null || pnpm --filter @jarvis/hq build >/dev/null; }"
 
 # A headless browser for LeadPerfection (ProEdge's CRM has no API, so HQ reads it through a browser). The system
 # libraries need root; the browser itself goes in the app user's cache. A failure here never stops the deploy: only
