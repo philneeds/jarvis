@@ -230,8 +230,13 @@ export default function HomePage() {
   return (
     <Shell>
       {on && view === "base" ? null : on || !background ? <Skyline dim={on} /> : (
-        // Display off: Phil's own picture, full screen.
-        <div aria-hidden="true" className="fixed inset-0" style={{ zIndex: 0, backgroundImage: `url(/api/uploads/${background})`, backgroundSize: "cover", backgroundPosition: "center" }} />
+        // Display off: Phil's own picture. On a wide screen it's shown whole (not cropped to the screen's shape), and any
+        // space it leaves at the edges is filled with a soft, darkened copy of it rather than bars; a phone held upright
+        // fills the screen with it instead, where whole would be a thin strip.
+        <div aria-hidden="true" className="fixed inset-0 overflow-hidden" style={{ zIndex: 0, background: "#02060f" }}>
+          <div className="absolute" style={{ inset: "-40px", backgroundImage: `url(/api/uploads/${background})`, backgroundSize: "cover", backgroundPosition: "center", filter: "blur(28px) brightness(0.45) saturate(1.2)" }} />
+          <div className="absolute inset-0 bg-cover landscape:bg-contain bg-no-repeat bg-center" style={{ backgroundImage: `url(/api/uploads/${background})` }} />
+        </div>
       )}
       <div className="relative flex-1 flex flex-col p-4 md:p-6 gap-5" style={{ zIndex: 1 }}>
         {on && view === "base" ? (
