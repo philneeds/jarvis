@@ -201,6 +201,31 @@ export class KuberaConnector {
     return lines.join("\n");
   }
 
+  /**
+   * Phil's holdings in a few lines, for the money team's shared memory: every position with a ticker (shares, value,
+   * cost, gain) grouped by account, then the other investment accounts with their balances. Stocks first; cash,
+   * property and the rest are Munger's and stay out unless there are no positions at all.
+   */
+  async holdingsText(name?: string): Promise<string> {
+    const p = await this.portfolio(name);
+    const cur = p.currency || "USD";
+    const items = (p.assets ?? []) as (KuberaItem & { sheetName?: string; sectionName?: string })[];
+    const positions = items.filter((i) => i.ticker && amt(i.value));
+    const pct = (a: number, b: number) => (b ? ` (${a >= b ? "+" : ""}${Math.round(((a - b) / b) * 100)}%)` : "");
+    const lines: string[] = [];
+    const byAccount = new Map<string, typeof positions>();
+    for (const i of positions) { const k = i.parent_account || i.connection?.provider || i.sectionName || i.sheetName || "Other"; byAccount.set(k, [...(byAccount.get(k) ?? []), i]); }
+    for (const [acct, xs] of [...byAccount].sort((a, b) => sum(b[1]) - sum(a[1]))) {
+      lines.push(`${acct} (${money(sum(xs), cur)}): ${xs.sort((a, b) => amt(b.value) - amt(a.value)).map((i) => `${i.ticker}${i.quantity ? ` ${+i.quantity.toFixed(4)} sh` : ""} ${money(amt(i.value), cur)}${i.cost && amt(i.cost) ? ` cost ${money(amt(i.cost), cur)}${pct(amt(i.value), amt(i.cost))}` : ""}`).join("; ")}`);
+    }
+    const accounts = items.filter((i) => !i.ticker && amt(i.value) && /invest|brokerage|stock|retire|401|ira|roth|crypto/i.test(`${i.sheetName ?? ""} ${i.sectionName ?? ""} ${i.name ?? ""}`));
+    if (accounts.length) lines.push(`Investment accounts without a position list: ${accounts.map((i) => `${i.name} ${money(amt(i.value), cur)}`).join("; ")}`);
+    const total = sum(positions) + sum(accounts);
+    const head = `Phil's holdings from Kubera, ${new Date(this.now()).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET${total ? `: ${money(total, cur)} invested of ${money(this.netWorth(p), cur)} net worth` : ""}. Read-only; for the full detail use kubera_items, or robinhood_read where you have it.`;
+    if (!lines.length) return `${head}\nKubera lists no stock positions or investment accounts (only ${items.length} other asset${items.length === 1 ? "" : "s"}).`;
+    return [head, ...lines].join("\n").slice(0, 5800);
+  }
+
   tools(): ToolDef[] {
     const portfolio = z.string().max(80).optional().describe("Kubera portfolio name, if Phil has more than one");
     return [

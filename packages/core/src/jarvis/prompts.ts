@@ -31,7 +31,7 @@ export function memoryBrief(items: MemoryItem[], opts: { own?: (m: MemoryItem) =
   const noteMax = opts.noteMax ?? 480, ownMax = opts.ownMax ?? 6000, budget = opts.budget ?? 14_000;
   const more = opts.more ?? "memory_read with this scope and key for the rest";
   const own = opts.own ?? (() => false);
-  const pinned = (m: MemoryItem) => /^(watch|handoff):/.test(m.key);
+  const pinned = (m: MemoryItem) => /^(watch|handoff|live):/.test(m.key);
   const ordered = [...items.filter((m) => pinned(m)), ...items.filter((m) => !pinned(m) && own(m)), ...items.filter((m) => !pinned(m) && !own(m))];
   const lines: string[] = [], titles: string[] = [];
   let used = 0;

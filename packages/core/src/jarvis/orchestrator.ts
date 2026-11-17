@@ -691,6 +691,7 @@ export class Jarvis {
 
   /** Run one agent on a task with its persona, memory and safety rules; queue approvals and memories it emits. */
   async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string; depth?: number; noBlocks?: boolean } = {}) {
+    if (agent.venture === "money") await this.refreshHoldings();
     const memory = [...(await this.store.memory.list("phil")), ...(await this.store.memory.list(`venture:${agent.venture}`)), ...(await this.store.memory.list(`agent:${agent.id}`))];
     const cfg = await getAgentConfig(this.store, agent.id);
     // memory_read goes to everyone: briefings carry long notes cut short, and the rest must be one call away.
@@ -1315,6 +1316,22 @@ export class Jarvis {
   connectionProbe?: () => Promise<Set<Connection>>;
   /** Puts a filled-in deck in Phil's Google Drive, in the named folder, as Google Slides; returns its link. */
   slidesExport?: (title: string, pptx: Buffer, agentId: string, folder: string) => Promise<string>;
+  /** Phil's holdings as text (from Kubera), shared with the whole money team; set when Kubera is connected. */
+  holdingsSource?: () => Promise<string>;
+  private holdingsAt = 0;
+  /**
+   * Keep the money team's shared "live:holdings" note fresh: before any money agent runs (Munger, Buffett, the
+   * scouts, Mayne), at most every 30 minutes. It goes in their shared memory, so every one of them sees the same
+   * positions, the Grok scouts included, who can't call tools. A plain read of Kubera: no model tokens.
+   */
+  async refreshHoldings(force = false): Promise<void> {
+    if (!this.holdingsSource || (!force && Date.now() - this.holdingsAt < 30 * 60_000)) return;
+    this.holdingsAt = Date.now();
+    try {
+      const text = await this.holdingsSource();
+      if (text) await this.store.memory.set({ scope: "venture:money", key: "live:holdings", value: text, source: "kubera" });
+    } catch (e) { console.warn("[holdings]", (e as Error).message); }
+  }
   private connectionsCache?: { at: number; text: string };
   /**
    * What is connected this minute, for every agent's prompt. Memory and old reports go stale the moment Phil adds a key

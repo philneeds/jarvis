@@ -37,6 +37,8 @@ const kubera = KuberaConnector.fromEnv(store);
 if (kubera) {
   jarvis.addConnector(kubera, KuberaConnector.promptHint());
   kubera.onDaily = async (nw) => { await jarvis.recordMetric("money", "net_worth", Math.round(nw), "munger"); };
+  // The whole money team shares one holdings note, refreshed from Kubera before any of them runs.
+  jarvis.holdingsSource = () => kubera.holdingsText();
 }
 // JD PM's GoHighLevel (read-only): contacts, conversations, pipeline, invoices, appointments.
 const ghl = GoHighLevelConnector.fromEnv(store);

@@ -90,3 +90,37 @@ test("an empty Kubera read isn't saved as the day's net worth", async () => {
   assert.equal(called, false);
   assert.equal((await k.status()).days, 0);
 });
+
+test("the whole money team shares one holdings note from Kubera, scouts included, refreshed before they run", async () => {
+  const { Jarvis, ModelRouter, mockProvider, getAgent } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const body = { id: "p1", name: "Phil", ticker: "USD", netWorth: 150_000, assetTotal: 165_000, debtTotal: 15_000,
+    asset: [
+      { name: "Vanguard S&P 500", ticker: "VOO", quantity: 100, sheetName: "Investments", value: { amount: 60_000 }, cost: { amount: 50_000 }, connection: { providerName: "Robinhood" } },
+      { name: "NVIDIA", ticker: "NVDA", quantity: 50, sheetName: "Investments", value: { amount: 9_000 }, cost: { amount: 10_000 }, connection: { providerName: "Robinhood" } },
+      { name: "Roth IRA", sheetName: "Retirement", value: { amount: 30_000 } },
+      { name: "Checking", sheetName: "Cash", value: { amount: 66_000 } },
+    ], debt: [] };
+  let calls = 0;
+  const fetch = (async (url: string) => { calls++; return Response.json({ data: new URL(url).pathname.endsWith("/portfolio") ? [{ id: "p1", name: "Phil", currency: "USD" }] : body, errorCode: 0 }); }) as typeof globalThis.fetch;
+  const k = new KuberaConnector(store, { apiKey: "k", secret: "s", fetch });
+  const text = await k.holdingsText();
+  assert.match(text, /Robinhood \(\$69,000\): VOO 100 sh \$60,000 cost \$50,000 \(\+20%\); NVDA 50 sh \$9,000 cost \$10,000 \(-10%\)/);
+  assert.match(text, /Investment accounts without a position list: Roth IRA \$30,000/);
+  assert.doesNotMatch(text, /Checking/, "cash is Munger's, not the stock note");
+
+  const provider = mockProvider("m");
+  const systems: string[] = [];
+  provider.run = async (req) => { systems.push(req.system ?? ""); return { text: "ok", provider: "m", modelId: "m", inputTokens: 1, outputTokens: 1, costUsd: 0, durationMs: 1 }; };
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [provider], grok: [provider] } }) });
+  jarvis.holdingsSource = () => k.holdingsText();
+  await jarvis.runAgent(getAgent("altman")!, "Pre-market note", { direct: true });
+  assert.match(systems.at(-1)!, /\[venture:money\] live:holdings: Phil's holdings from Kubera/, "a Grok scout sees the positions in its prompt");
+  assert.match(systems.at(-1)!, /NVDA 50 sh/);
+  const before = calls;
+  await jarvis.runAgent(getAgent("buffett")!, "Holdings review", { direct: true });
+  assert.match(systems.at(-1)!, /live:holdings/);
+  assert.equal(calls, before, "a second run within 30 minutes reuses the note");
+  await jarvis.runAgent(getAgent("stevon")!, "Not money", { direct: true });
+  assert.doesNotMatch(systems.at(-1)!, /live:holdings/, "other teams don't get it");
+});
