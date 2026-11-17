@@ -37,8 +37,6 @@ const kubera = KuberaConnector.fromEnv(store);
 if (kubera) {
   jarvis.addConnector(kubera, KuberaConnector.promptHint());
   kubera.onDaily = async (nw) => { await jarvis.recordMetric("money", "net_worth", Math.round(nw), "munger"); };
-  // The whole money team shares one holdings note, refreshed from Kubera before any of them runs.
-  jarvis.holdingsSource = () => kubera.holdingsText();
 }
 // JD PM's GoHighLevel (read-only): contacts, conversations, pipeline, invoices, appointments.
 const ghl = GoHighLevelConnector.fromEnv(store);
@@ -57,6 +55,15 @@ if (github) jarvis.addConnector(github, GithubConnector.promptHint());
 // Robinhood's official agent access, for Buffett and Munger: Phil connects it from Settings; orders wait for his approval.
 const robinhood = RobinhoodConnector.fromEnv(store);
 jarvis.addConnector(robinhood, RobinhoodConnector.promptHint());
+// The whole money team shares one holdings note, refreshed before any of them runs: Kubera's overall picture, plus
+// each position straight from Robinhood once Phil connects it (Kubera shows the Robinhood account as one total).
+jarvis.holdingsSource = async () => {
+  const parts = await Promise.all([
+    kubera?.holdingsText().catch((e: Error) => `Kubera couldn't be read: ${e.message.slice(0, 160)}`),
+    robinhood.positionsText().catch((e: Error) => `Robinhood couldn't be read: ${e.message.slice(0, 160)}`),
+  ]);
+  return parts.filter(Boolean).join("\n\n");
+};
 // Einstein's workshop: a copy of the code he can change and test; ships through Phil's approval, deploys itself.
 const workshop = Workshop.fromEnv();
 if (workshop) {

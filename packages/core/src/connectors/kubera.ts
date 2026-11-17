@@ -223,7 +223,7 @@ export class KuberaConnector {
     const total = sum(positions) + sum(accounts);
     const head = `Phil's holdings from Kubera, ${new Date(this.now()).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET${total ? `: ${money(total, cur)} invested of ${money(this.netWorth(p), cur)} net worth` : ""}. Read-only; for the full detail use kubera_items, or robinhood_read where you have it.`;
     if (!lines.length) return `${head}\nKubera lists no stock positions or investment accounts (only ${items.length} other asset${items.length === 1 ? "" : "s"}).`;
-    return [head, ...lines].join("\n").slice(0, 5800);
+    return [head, ...lines].join("\n").slice(0, 2400);
   }
 
   tools(): ToolDef[] {

@@ -182,6 +182,26 @@ export class RobinhoodConnector {
     return text.length > 12_000 ? `${text.slice(0, 12_000)}\n… (cut)` : text;
   }
 
+  /**
+   * Phil's positions straight from Robinhood, for the money team's shared holdings note: the read tools that list
+   * positions (stocks first, then crypto or the portfolio summary), called as they are and kept short. Nothing when
+   * Robinhood isn't connected. Read-only: a tool that could change anything is never called here.
+   */
+  async positionsText(): Promise<string | undefined> {
+    if (!(await this.store.settings.get<Tokens | null>(TOKENS_KEY, null))) return undefined;
+    const reads = (await this.listTools()).filter((t) => !this.isWrite(t));
+    const rank = (n: string) => (/equity.*position|position.*equit|stock.*position/i.test(n) ? 0 : /position|holding/i.test(n) ? 1 : /portfolio/i.test(n) ? 2 : 9);
+    const picks = reads.filter((t) => rank(t.name) < 9).sort((a, b) => rank(a.name) - rank(b.name)).slice(0, 2);
+    if (!picks.length) return "Robinhood is connected, but none of its read tools lists positions; use robinhood_tools to see what it offers.";
+    const parts: string[] = [];
+    // Pretty-printed JSON wastes the room: compact it, and drop empty and null fields.
+    const tight = (x: string) => { try { return JSON.stringify(JSON.parse(x), (_k, v) => (v === null || v === "" ? undefined : v)); } catch { return x.replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n"); } };
+    for (const [i, t] of picks.entries()) {
+      try { parts.push(`${t.name}:\n${tight(await this.call(t.name, {})).slice(0, i === 0 ? 2800 : 500)}`); } catch (e) { parts.push(`${t.name}: couldn't be read (${(e as Error).message.slice(0, 160)})`); }
+    }
+    return `Phil's positions straight from Robinhood (all his Robinhood accounts; read-only):\n${parts.join("\n\n")}`.slice(0, 3400);
+  }
+
   async check(): Promise<string> {
     const tools = await this.listTools();
     const reads = tools.filter((t) => !this.isWrite(t)).length;

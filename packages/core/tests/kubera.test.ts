@@ -124,3 +124,21 @@ test("the whole money team shares one holdings note from Kubera, scouts included
   await jarvis.runAgent(getAgent("stevon")!, "Not money", { direct: true });
   assert.doesNotMatch(systems.at(-1)!, /live:holdings/, "other teams don't get it");
 });
+
+test("once Robinhood is connected, its positions go in the shared note; only read tools are called", async () => {
+  const { RobinhoodConnector } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const rh = new RobinhoodConnector(store, { redirectUri: "http://x/cb", fetch: (async () => { throw new Error("no network"); }) as typeof fetch });
+  assert.equal(await rh.positionsText(), undefined, "nothing until Phil connects it");
+  await store.settings.set("robinhood.tokens", { access_token: "t", connectedAt: new Date().toISOString() });
+  const called: string[] = [];
+  rh.listTools = async () => [
+    { name: "get_accounts" }, { name: "get_portfolio" }, { name: "get_equity_positions" },
+    { name: "place_equity_order", annotations: { readOnlyHint: false } }, { name: "cancel_order" },
+  ];
+  rh.call = async (name: string) => { called.push(name); return name === "get_equity_positions" ? "VOO 100 shares $60,000\nNVDA 50 shares $9,000" : "total $69,000"; };
+  const text = (await rh.positionsText())!;
+  assert.deepEqual(called, ["get_equity_positions", "get_portfolio"]);
+  assert.match(text, /straight from Robinhood[\s\S]*get_equity_positions:\nVOO 100 shares/);
+  assert.ok(text.length <= 3400);
+});
