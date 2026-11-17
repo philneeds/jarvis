@@ -6,7 +6,7 @@ import type { Describer, Executor } from "../jarvis/orchestrator.js";
 
 /**
  * LeadPerfection for ProEdge, through a browser: the software has no API, so HQ signs in like a person and reads the
- * screens. The Scheduler (and Stevon) read appointments, rep availability and results freely; changing anything goes
+ * screens. Stevon (and the Auditor, for reports) read appointments, rep availability and results freely; changing anything goes
  * through one approval card Phil decides, and only HQ's own code clicks Save, never an agent.
  *   LP_URL        the site, default https://kl26.leadperfection.com
  *   LP_USER       the login HQ uses (best: its own user, so it can be switched off without touching anyone's password)

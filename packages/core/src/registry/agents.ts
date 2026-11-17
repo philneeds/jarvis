@@ -167,8 +167,10 @@ export const AGENTS: AgentDef[] = [
 
   // ---- ProEdge -----------------------------------------------------------
   // Phil, Nov 14 2026: the Sales Coach agent (salescoach) was retired and folded into Stevon as his "sales coaching" skill;
-  // Nov 15 2026: the Mindset Coach (mindset) followed, as his "mindset coaching" skill.
-  { id: "stevon", name: "Stevon", short: "ProEdge", layer: 1, parent: "jarvis", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", desc: "Responsible for everything to do with ProEdge, including sales coaching and mindset coaching for the team, with two sub-agents that optimize the business." },
-  { id: "scheduler", name: "Scheduler", short: "Team schedule optimizer", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Schedule optimizer and maker for managing the team." },
+  // Nov 15 2026: the Mindset Coach (mindset) followed, as his "mindset coaching" skill; Nov 17 2026: the Scheduler
+  // (scheduler) too, as his "scheduling" skill: he reads LeadPerfection and files the day's lp.assign card himself.
+  // Phil, Nov 9 2026: an accounting audit bot for ProEdge. That's the Auditor: reads only, moves no money.
+  { id: "stevon", name: "Stevon", short: "ProEdge", layer: 1, parent: "jarvis", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", desc: "Responsible for everything to do with ProEdge: sales coaching and mindset coaching for the team, the team's daily schedule in LeadPerfection, and Email AI and the Auditor under him." },
   { id: "emailai", name: "Email AI", short: "Email automation & info", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Email automation and information." },
+  { id: "auditor", name: "Auditor", short: "Accounting audit", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", desc: "ProEdge's accounting auditor: checks the commissions and sales figures against LeadPerfection's reports and what was actually paid, and reports every gap to Stevon. Reads only; moves no money and changes nothing." },
 ];

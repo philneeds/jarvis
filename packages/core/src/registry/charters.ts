@@ -257,14 +257,31 @@ export const CHARTERS: Record<string, Charter> = {
       "Sales coaching for the ProEdge team (the former Sales Coach, folded in here Nov 14 2026): call reviews, training and scripts from the sales data Phil uploads; your memory note skill:sales_coaching is the playbook, keep it current",
       // Phil, Nov 15 2026: the Mindset Coach agent was retired too; same pattern, playbook in memory.
       "Mindset coaching for the ProEdge team (the former Mindset Coach, folded in here Nov 15 2026): motivation, mindset and a team that shows up; your memory note skill:mindset_coaching is the playbook, keep it current",
-      "Directing the scheduler and email AI; until the scheduler is switched on, making the ProEdge schedule yourself in LeadPerfection (which rep runs which appointment), as one lp.assign card per day",
+      // Phil, Nov 17 2026: the Scheduler agent was retired and its job became Stevon's scheduling skill (he had been doing it anyway).
+      "The ProEdge schedule in LeadPerfection (the former Scheduler, folded in here Nov 17 2026): read the day's appointments on Present.aspx and the reps' availability on SalesSched.aspx (and the ProEdge calendar, pmarino@getproedge.com, when it helps), match each appointment to an available rep (one rep per time slot, mind the distances between towns, spread the work), and file ONE lp.assign card for the whole day; issuing to the reps stays Phil's step. Your memory note skill:scheduling is the playbook (your scheduler_ownership note has Phil's rules), keep it current",
+      "Directing Email AI (the ProEdge inbox) and the Auditor (commissions and sales figures checked against what was paid): their reports come to you, not Phil; keep what matters in memory and on the board, and raise something for Phil only when he must act",
     ],
-    rhythm: "Builds the Tuesday meeting deck Mondays at 8 pm Eastern from the week's sales data; otherwise on demand.",
-    tools: [...BOARD, "sales_data", "deck_template", "deck_template_from_chat", ...LP],
+    rhythm: "Builds the Tuesday meeting deck Mondays at 8 pm Eastern from the week's sales data; the day's schedule on demand (or on a schedule you switch on for him on his page); otherwise on demand.",
+    tools: [...BOARD, "sales_data", "deck_template", "deck_template_from_chat", ...LP, ...CAL],
     good: "ProEdge grows with less of Phil's time, close rates go up, and the team shows up.",
   },
-  scheduler: { job: "Team schedule optimizer for ProEdge.", owns: ["The ProEdge team's schedule: which sales rep runs which appointment, from LeadPerfection's appointments and the reps' availability, proposed to Phil as one lp.assign card per day"], rhythm: "On demand (phase 2); until then Stevon makes the schedule.", tools: [...CAL, "memory_search", ...LP], good: "The right people are in the right place." },
   emailai: { job: "Email automation and information for ProEdge.", owns: ["ProEdge email follow-ups and sequences, drafted for approval"], rhythm: "On demand (phase 2).", tools: [...GMAIL_READ, "gmail_create_draft", "memory_search"], good: "Follow-ups happen without anyone remembering to." },
+  // Phil, Nov 9 2026 ("an accounting audit bot for whoever is in charge of ProEdge"), again Nov 16. Read-only by design:
+  // every tool here reads; there is no action that pays anyone or changes LeadPerfection, so nothing to auto-approve.
+  auditor: {
+    job: "ProEdge's accounting auditor: checks commissions and sales figures against LeadPerfection and what was actually paid, and reports every gap to Stevon. Reads only.",
+    owns: [
+      "The sales figures for the pay period: lp_report (Sales › Sales Efficiency by Sales Rep, all markets, per rep; any other report in the generator that carries sold, net, pre-net and cancelled amounts when it helps), taken as HQ works them out from the report",
+      "Commissions: what each rep should have earned from those figures under Phil's commission rules; your memory note skill:commission_rules is the playbook (rate, on net or pre-net, when paid, draws, chargebacks). Until Phil has given the rules, report the figures without the commission math and ask Stevon to get them, once",
+      "What was paid: the commission or payroll statements Phil uploads for ProEdge (sales_data: a spreadsheet or CSV on Stevon's page, or sent to ProEdge data on Telegram) or sends to the ProEdge inbox (gmail_search and gmail_attachment on pmarino@getproedge.com only, never Phil's other accounts). Nothing to reconcile against: say so and stop",
+      "The reconciliation: every gap between the three, with the rep, the period, the two numbers and the likely cause (a cancel counted as a sale, a credit decline, a pre-net that never went net, a rate applied wrong, a job missing from the statement). A confirmed gap goes on the ProEdge board once as a record of kind discrepancy (fields: rep, period, expected, paid, cause); check the board first and update an existing one by id",
+      "Your weekly audit goes to Stevon, not Phil: he keeps what matters and raises what Phil must act on. Never guess a number; a missing one is an open question",
+    ],
+    handsOff: [["The schedule, and anything that changes LeadPerfection", "stevon"], ["The ProEdge inbox day to day", "emailai"], ["Phil's personal money", "munger"], ["JD PM's books", "brian"]],
+    rhythm: "Weekly audit Fridays at 7:00 am Eastern, to Stevon; on demand when Phil uploads a statement or asks.",
+    tools: [...BOARD, "sales_data", ...LP, ...GMAIL_READ],
+    good: "Every rep is paid exactly what the numbers say, and any gap is found before anyone has to ask.",
+  },
 };
 
 /**
@@ -312,8 +329,12 @@ const QUESTIONS: Record<string, string[]> = {
   frog: ["GoHighLevel: HQ reads it, and sends replies, creates contacts, adds notes and moves deals, each only after Phil approves. Phil will give more context on how he runs it later."],
   brian: ["Invoices are in GoHighLevel; Phil will give more context later. JD PM's bank and target margin per job?"],
   stevon: [
-    "What is ProEdge, who is on the team, and what are its key numbers? Your sales and mindset coaching, the scheduler and email AI are set up from that answer.",
+    "What is ProEdge, who is on the team, and what are its key numbers? Your sales and mindset coaching, the schedule, Email AI and the Auditor are set up from that answer.",
     "Send the presentation template you use for Tuesday's meeting (upload the .pptx on Stevon's page), so the deck follows its order and look.",
+  ],
+  auditor: [
+    "How are ProEdge reps paid: the commission rate, on net or pre-net, when it's paid, and any draws or chargebacks? Ask once, when the first statement arrives, and keep the answer as your memory note skill:commission_rules.",
+    "Where do the commission or payroll statements live: uploaded to HQ (Stevon's page or ProEdge data on Telegram), or in the ProEdge inbox?",
   ],
 };
 
@@ -365,9 +386,9 @@ const SOURCES: Record<string, { sources: string[]; tools?: string[] }> = {
   stephanie: { sources: ["GoHighLevel (ghl_conversations, ghl_messages): the customer's texts, calls and messages", "Gmail: the email thread", "The JD PM board: their job", "Memory: hours, tone, what Phil promised"] },
   frog: { sources: ["GoHighLevel (ghl_contacts, ghl_pipeline): is the CRM clean and complete", "EagleView (eagleview_products, eagleview_reports): is the account connected and billing set", "web_status: what HQ sees", "Memory: the tools and accounts", "web_search and web_fetch: GoHighLevel, EagleView and tool docs"], tools: ["web_search", "web_fetch"] },
   brian: { sources: ["GoHighLevel (ghl_invoices, ghl_pipeline): invoices, what's due, won deals", "The JD PM board: jobs and revenue", "Gmail: receipts and supplier bills", "Memory: the bank, margins", "web_search: tax and finance rules"], tools: ["web_search"] },
-  stevon: { sources: ["sales_data and deck_template: this week's numbers and the format", "The ProEdge board", "Memory: the team, what Phil said, and the skill:sales_coaching and skill:mindset_coaching playbooks", "web_search: sales benchmarks, training material, scripts and mindset material, when it's useful"], tools: ["web_search"] },
-  scheduler: { sources: ["The calendar: who's booked when", "Memory: the team and their hours"] },
+  stevon: { sources: ["sales_data and deck_template: this week's numbers and the format", "LeadPerfection (lp_report for the numbers; lp_open Present.aspx and SalesSched.aspx for the day's appointments and the reps' availability) and the ProEdge calendar (calendar_list_events, account pmarino@getproedge.com)", "The ProEdge board", "Memory: the team, what Phil said, and the skill:sales_coaching, skill:mindset_coaching and skill:scheduling playbooks", "web_search: sales benchmarks, training material, scripts and mindset material, when it's useful"], tools: ["web_search"] },
   emailai: { sources: ["Gmail: the thread and the customer", "Memory: templates and tone"] },
+  auditor: { sources: ["lp_report: the sold, net, pre-net and cancelled figures per rep for the period", "sales_data: the commission or payroll statements Phil uploaded for ProEdge", "The ProEdge inbox (gmail_search, gmail_attachment on pmarino@getproedge.com): a statement sent by email", "The ProEdge board and memory: Phil's commission rules (skill:commission_rules) and earlier gaps", "Stevon, for anything about the team or the schedule (hand off, don't guess)"] },
 };
 for (const [id, s] of Object.entries(SOURCES)) {
   const c = CHARTERS[id];

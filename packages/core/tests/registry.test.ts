@@ -25,8 +25,44 @@ test("Sales Coach and Mindset Coach are retired and folded into Stevon as skills
   assert.ok(CHARTERS.stevon!.tools?.includes("sales_data"), "Stevon keeps the sales data the coach used");
   assert.ok(CHARTERS.stevon!.tools?.includes("web_search") && CHARTERS.stevon!.tools?.includes("memory_search"), "Stevon has the tools the mindset coach had");
   assert.ok(CHARTERS.stevon!.sources?.some((s) => /training material/.test(s) && /mindset material/.test(s)), "both coaches' web sources moved to Stevon");
-  assert.deepEqual(AGENTS.filter((a) => a.parent === "stevon").map((a) => a.id), ["scheduler", "emailai"]);
+  assert.deepEqual(AGENTS.filter((a) => a.parent === "stevon").map((a) => a.id), ["emailai", "auditor"]);
   assert.equal(teamSize("stevon"), 2);
+});
+
+test("the Scheduler is retired and the schedule is Stevon's skill (Phil, Nov 17 2026); the Auditor is ProEdge's accounting audit bot (Phil, Nov 9 2026)", async () => {
+  const { SCHEDULES, scheduleView, memoryStore } = await import("../src/index.js");
+  assert.equal(AGENT_BY_ID["scheduler"], undefined);
+  assert.equal(findAgent("@scheduler"), undefined);
+  assert.equal(findAgent("Scheduler"), undefined);
+  assert.equal(CHARTERS["scheduler"], undefined);
+  assert.ok(!SCHEDULES.some((s) => s.agentId === "scheduler"));
+  // Stevon makes the day's schedule himself: reads LeadPerfection and the ProEdge calendar, files one lp.assign card per day.
+  const stevon = CHARTERS.stevon!;
+  assert.ok(stevon.owns.some((o) => /former Scheduler/.test(o) && o.includes("lp.assign") && o.includes("skill:scheduling") && /Present\.aspx/.test(o) && /SalesSched\.aspx/.test(o)));
+  assert.ok(!stevon.owns.some((o) => /until the scheduler is switched on/i.test(o)), "no line still waits on a Scheduler agent");
+  for (const t of ["lp_open", "lp_report", "calendar_list_events", "google_accounts"]) assert.ok(stevon.tools?.includes(t), `Stevon has ${t}`);
+  assert.ok(stevon.sources?.some((s) => /skill:scheduling/.test(s)));
+  assert.ok(stevon.owns.some((o) => /Directing Email AI/.test(o) && /the Auditor/.test(o)));
+  // The Auditor: under Stevon, live in phase 1, read-only, with a Friday routine that reports to Stevon and never to Phil.
+  const auditor = AGENT_BY_ID["auditor"]!;
+  assert.equal(auditor.layer, 2); assert.equal(auditor.parent, "stevon"); assert.equal(auditor.venture, "proedge"); assert.equal(auditor.phase, 1); assert.equal(auditor.model, "claude-sonnet");
+  assert.equal(findAgent("Auditor")?.id, "auditor");
+  const c = CHARTERS.auditor!;
+  for (const t of ["lp_report", "sales_data", "gmail_search", "gmail_attachment", "venture_board", "memory_search"]) assert.ok(c.tools?.includes(t), `Auditor has ${t}`);
+  for (const t of c.tools ?? []) assert.ok(!/create|update|delete|send|draft|order|assign|post/.test(t), `Auditor's ${t} isn't a read tool`);
+  assert.equal(c.autoApprove, undefined, "nothing goes through on its own; it has nothing to approve");
+  assert.ok(c.owns.some((o) => /skill:commission_rules/.test(o)) && c.owns.some((o) => /pmarino@getproedge\.com/.test(o)) && c.owns.some((o) => /kind discrepancy/.test(o)));
+  assert.ok(c.open!.some((q) => /commission rate/.test(q)));
+  assert.ok(c.handsOff?.some(([, to]) => to === "stevon"));
+  const weekly = SCHEDULES.find((s) => s.id === "auditor-weekly")!;
+  assert.equal(weekly.agentId, "auditor"); assert.equal(weekly.when, "weekly:fri@07:00"); assert.equal(weekly.phase, 1); assert.equal(weekly.to, "stevon"); assert.ok(!weekly.push);
+  assert.match(weekly.task, /lp_report/); assert.match(weekly.task, /sales_data/); assert.match(weekly.task, /skill:commission_rules/); assert.match(weekly.task, /goes to Stevon, not Phil/);
+  const store = memoryStore();
+  await store.settings.set("phase", 1); // where HQ stands today (Nov 17 2026)
+  const view = await scheduleView(store, new Date(2026, 10, 17, 9, 0));
+  const v = view.find((x) => x.id === "auditor-weekly")!;
+  assert.equal(v.to, "stevon"); assert.ok(v.active, "live in phase 1, like Stevon");
+  assert.match(v.summary, /commissions/);
 });
 
 test("the health team is one agent: Metro leads, Doc, Sean and Gordon are retired and live on as his skills (Phil, Nov 14 2026)", () => {

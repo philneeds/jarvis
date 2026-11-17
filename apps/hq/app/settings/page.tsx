@@ -271,7 +271,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="LeadPerfection">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.leadperfection?.lastFetch?.ok ? "dot-working" : conn?.leadperfection?.lastFetch ? "dot-error" : "dot-idle"}`} />
-              <span><b>LeadPerfection</b> · Stevon (and the Scheduler) read ProEdge&apos;s appointments and rep availability through a browser, since it has no API, and propose each day&apos;s schedule as one card; the reps are entered only after you approve it. Issuing to the reps stays your step.</span>
+              <span><b>LeadPerfection</b> · Stevon reads ProEdge&apos;s appointments and rep availability through a browser, since it has no API, and proposes each day&apos;s schedule as one card; the reps are entered only after you approve it. Issuing to the reps stays your step. The Auditor reads its reports to check commissions against what was paid.</span>
               {conn?.leadperfection?.configured
                 ? <><span style={{ color: "var(--dim)" }}>{conn.leadperfection.user ? `as ${conn.leadperfection.user} · ` : ""}{conn.leadperfection.lastFetch ? `${conn.leadperfection.lastFetch.ok ? "signed in" : "failed"} ${fmtTime(conn.leadperfection.lastFetch.at)}` : "not signed in yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testSimple("/api/connectors/leadperfection/test", setLpMsg)}>Check now</button></>
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set LP_USER and LP_PASSWORD (best: a LeadPerfection user made for HQ)</span>}
