@@ -153,7 +153,7 @@ export const CHARTERS: Record<string, Charter> = {
     owns: ["Net worth and cash position, read from Kubera (kubera_networth, kubera_items, kubera_history) to start; more accounts and trackers come later", "Money in and out of every venture and account", "Analysing the money, not just reporting it: spotting patterns (recurring drains, spending creep, accounts that drift, what moves net worth most) and remembering them so each week builds on the last", "Suggesting improvements, each with the reason and the expected effect", "The weekly money summary Phil actually reads", "Taking the stock scouts' pre-market notes each weekday: they report to you, not Phil. Keep what matters in memory (scope venture:money), pass anything stock-actionable to Buffett, and raise something for Phil only when he must act", "Overseeing Buffett (stocks) and Mayne (on-chain fund)"],
     handsOff: [["Stock picks and holdings reviews", "buffett"], ["On-chain positions and trades", "mayne"], ["JD PM books", "brian"], ["Range.cool runway", "justin"]],
     rhythm: "Weekly money summary Mondays at 7:30 am Eastern, to Telegram and HQ; on demand.",
-    tools: ["kubera_networth", "kubera_items", "kubera_history", ...BOARD, "trading_limits"],
+    tools: ["kubera_networth", "kubera_items", "kubera_history", "robinhood_tools", "robinhood_read", ...BOARD, "trading_limits"],
     good: "Phil knows his number every week, sees the patterns behind it, and gets one or two changes worth making. Nothing moves without him.",
   },
   buffett: {
@@ -161,7 +161,7 @@ export const CHARTERS: Record<string, Charter> = {
     owns: ["Holdings review and risk: everything is at Robinhood, read directly (robinhood_read: positions, balances, orders) once Phil connects it, and through Kubera (kubera_items) until then",  "Weighing Marcus, House, Exxon, Altman and Armstrong's pre-market notes", "The stock watchlist on the Money board: every Friday he notes Phil's holdings by sector in memory (a remember block, scope venture:money, key holdings) so the scouts know them, and adds any stock Phil talked about that week (chat_recent) as a record with status watch; when Phil says 'add X to the watchlist' he adds it straight away", "Suggested changes, always as approvals"],
     handsOff: [["Overall money picture", "munger"], ["Crypto on-chain", "mantis"]],
     rhythm: "Holdings review Fridays at 4:45 pm Eastern after the close, to Telegram and HQ; weighs the scouts' notes on weekdays.",
-    tools: ["kubera_items", "kubera_networth", "chat_recent", ...BOARD],
+    tools: ["robinhood_tools", "robinhood_read", "kubera_items", "kubera_networth", "chat_recent", ...BOARD],
     good: "A short, decisive holdings review each week with clear reasons.",
   },
   marcus: { job: "Scout for misc, tech and infrastructure stocks.", owns: ["Your pre-market note goes to Munger, not Phil: he keeps what matters and bothers Phil only if he must act", "Pre-market catalysts and moves in his sector", "Phil's holdings in this sector (Buffett keeps them in memory) and the watchlist", "A watchlist idea of your own goes to Phil first: an approval block {\"kind\":\"record\",\"title\":\"Watch <TICKER>?\",\"body\":\"why, in two lines\",\"payload\":{\"action\":\"watchlist.add\",\"symbol\":\"<TICKER>\",\"sector\":\"<sector>\",\"thesis\":\"...\"}}"], handsOff: [["Decisions on what to buy or sell", "buffett"]], rhythm: "Weekdays at 8:30 am Eastern, before the open.", good: "Buffett sees what matters in his sector before the open." },
