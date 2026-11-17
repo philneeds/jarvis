@@ -19,6 +19,31 @@ export interface KuberaOptions { apiKey: string; secret: string; fetch?: typeof 
 type Value = { amount?: number; currency?: string };
 export interface KuberaItem { id?: string; name?: string; description?: string | null; value?: Value; cost?: Value | null; ticker?: string | null; quantity?: number | null; connection?: { provider?: string; last_updated?: string } | null; parent_account?: string | null }
 export interface KuberaPortfolio { id: string; name: string; currency: string; net_worth?: Value; assets?: KuberaItem[]; debts?: KuberaItem[]; insurance?: KuberaItem[] }
+/**
+ * Kubera's v3 portfolio, as it really comes back: "asset" / "debt" / "insurance" arrays (singular), the totals as plain
+ * numbers (netWorth, assetTotal, debtTotal), the currency as "ticker", and connections with providerName, lastUpdated
+ * and status. Turned into the shape the rest of this file reads; the older plural shape still passes through.
+ */
+type RawItem = KuberaItem & { sheetName?: string; sectionName?: string; hidden?: boolean; connection?: { provider?: string; last_updated?: string; providerName?: string; lastUpdated?: string | null; status?: string; statusReason?: string } | null };
+type RawPortfolio = Partial<KuberaPortfolio> & { ticker?: string; asset?: RawItem[]; debt?: RawItem[]; netWorth?: number; assetTotal?: number; debtTotal?: number; investable?: number };
+export function normalizePortfolio(raw: RawPortfolio, fallback: { id: string; name: string; currency?: string }): KuberaPortfolio & { assetTotal?: number; debtTotal?: number } {
+  const currency = raw.currency || raw.ticker || fallback.currency || "USD";
+  const item = (i: RawItem): KuberaItem => ({
+    ...i,
+    value: typeof i.value === "number" ? { amount: i.value, currency } : i.value,
+    connection: i.connection ? { provider: i.connection.provider ?? i.connection.providerName, last_updated: i.connection.last_updated ?? i.connection.lastUpdated ?? undefined, ...(i.connection.status ? { status: i.connection.status } : {}), ...(i.connection.statusReason ? { statusReason: i.connection.statusReason } : {}) } : null,
+  });
+  const visible = (xs?: RawItem[]) => (xs ?? []).filter((i) => !i.hidden).map(item);
+  const nw = typeof raw.netWorth === "number" ? raw.netWorth : raw.net_worth?.amount;
+  return {
+    id: raw.id ?? fallback.id, name: raw.name ?? fallback.name, currency,
+    ...(typeof nw === "number" ? { net_worth: { amount: nw, currency } } : {}),
+    assets: visible(raw.assets ?? raw.asset), debts: visible(raw.debts ?? raw.debt), insurance: visible(raw.insurance),
+    ...(typeof raw.assetTotal === "number" ? { assetTotal: raw.assetTotal } : {}),
+    ...(typeof raw.debtTotal === "number" ? { debtTotal: raw.debtTotal } : {}),
+  };
+}
+
 interface Snapshot { day: string; netWorth: number; assets: number; debts: number; items: Record<string, number> }
 
 const CACHE_MS = 20 * 60_000;
@@ -85,7 +110,7 @@ export class KuberaConnector {
     const c = this.cache.get(pick.id);
     if (c && this.now() - c.at < CACHE_MS) return c.p;
     try {
-      const p = await this.get<KuberaPortfolio>(`/api/v3/data/portfolio/${encodeURIComponent(pick.id)}`);
+      const p = normalizePortfolio(await this.get<RawPortfolio>(`/api/v3/data/portfolio/${encodeURIComponent(pick.id)}`), pick);
       this.cache.set(pick.id, { at: this.now(), p });
       await this.store.settings.set(STATUS_KEY, { ok: true, at: new Date(this.now()).toISOString() });
       await this.remember(p);
@@ -96,16 +121,20 @@ export class KuberaConnector {
     }
   }
 
-  private netWorth(p: KuberaPortfolio) { return p.net_worth?.amount ?? sum(p.assets) - sum(p.debts); }
+  private netWorth(p: KuberaPortfolio) { return p.net_worth?.amount ?? this.assetsOf(p) - this.debtsOf(p); }
+  private assetsOf(p: KuberaPortfolio & { assetTotal?: number }) { return p.assetTotal ?? sum(p.assets); }
+  private debtsOf(p: KuberaPortfolio & { debtTotal?: number }) { return p.debtTotal ?? sum(p.debts); }
 
   /** Keep one snapshot per day (the latest of that day), 400 days. */
   private async remember(p: KuberaPortfolio) {
+    // An empty read (nothing in it, net worth 0) isn't a day's net worth: keep it out of the history and the Money board.
+    if (!p.assets?.length && !p.debts?.length && !this.netWorth(p)) return;
     const day = easternDay(this.now());
-    const hist = await this.store.settings.get<Snapshot[]>(HISTORY_KEY, []);
+    const hist = (await this.store.settings.get<Snapshot[]>(HISTORY_KEY, [])).filter((h) => h.netWorth || Object.keys(h.items).length);
     const items: Record<string, number> = {};
     for (const it of [...(p.assets ?? []), ...(p.debts ?? []).map((d) => ({ ...d, value: { ...d.value, amount: -amt(d.value) } }))]) if (it.name) items[it.name] = amt(it.value);
     const first = !hist.some((h) => h.day === day);
-    const next = [...hist.filter((h) => h.day !== day), { day, netWorth: this.netWorth(p), assets: sum(p.assets), debts: sum(p.debts), items }].sort((a, b) => a.day.localeCompare(b.day)).slice(-400);
+    const next = [...hist.filter((h) => h.day !== day), { day, netWorth: this.netWorth(p), assets: this.assetsOf(p), debts: this.debtsOf(p), items }].sort((a, b) => a.day.localeCompare(b.day)).slice(-400);
     await this.store.settings.set(HISTORY_KEY, next);
     if (first) await this.onDaily?.(this.netWorth(p), p).catch(() => undefined);
   }
@@ -126,7 +155,7 @@ export class KuberaConnector {
     const delta = (s?: Snapshot) => (s ? `${nw - s.netWorth >= 0 ? "+" : ""}${money(nw - s.netWorth, cur)} since ${s.day}` : undefined);
     const wk = ago(7), mo = ago(30);
     const lines = [
-      `${p.name}: net worth ${money(nw, cur)} (assets ${money(sum(p.assets), cur)}, debts ${money(sum(p.debts), cur)}).`,
+      `${p.name}: net worth ${money(nw, cur)} (assets ${money(this.assetsOf(p), cur)}, debts ${money(this.debtsOf(p), cur)}).`,
       [delta(wk), delta(mo)].filter(Boolean).join("; ") || "No earlier snapshot yet; changes show from tomorrow.",
     ];
     if (wk) {
@@ -135,6 +164,9 @@ export class KuberaConnector {
     }
     const stale = [...(p.assets ?? []), ...(p.debts ?? [])].filter((i) => i.connection?.last_updated && this.now() - Date.parse(i.connection.last_updated) > 3 * 86_400_000).map((i) => i.name);
     if (stale.length) lines.push(`Not synced in 3+ days: ${stale.slice(0, 6).join(", ")}.`);
+    const broken = [...(p.assets ?? []), ...(p.debts ?? [])].filter((i) => /error/i.test((i.connection as { status?: string } | null)?.status ?? "")).map((i) => i.name);
+    if (broken.length) lines.push(`Connection errors in Kubera: ${broken.slice(0, 6).join(", ")}.`);
+    if (!p.assets?.length && !p.debts?.length && !nw) lines.push(`Kubera sent this portfolio back empty: no assets or debts. If "${p.name}" isn't the portfolio with your accounts, say which one (Kubera has: ${(await this.portfolios()).map((x) => x.name).join(", ")}).`);
     return lines.join("\n");
   }
 

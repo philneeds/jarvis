@@ -51,3 +51,42 @@ test("Kubera's errors say what to fix: the clock, or the key / IP restriction", 
   assert.match(await say(400, JSON.stringify({ message: "Invalid timestamp", errorCode: 1 })).tools()[0]!.handler({}, { store, agentId: "munger" }), /clock is more than 5 minutes wrong/);
   assert.match(await say(403, "Forbidden").tools()[0]!.handler({}, { store, agentId: "munger" }), /refused the key \(403: Forbidden\).*IP-restricted/);
 });
+
+test("Kubera's real v3 shape is read: asset/debt arrays, netWorth/assetTotal/debtTotal numbers, ticker, providerName/lastUpdated", async () => {
+  const store = memoryStore(); await store.init();
+  const now = Date.parse("2026-11-17T15:00:00Z");
+  const body = { id: "p1", name: "Phil", ticker: "USD", tickerId: 171, assetTotal: 84_500, debtTotal: 15_000, netWorth: 69_500, investable: 60_000,
+    asset: [
+      { id: "a1", name: "ESL Money Maker 3703", sheetName: "Bank", value: { amount: 24_500, currency: "USD" }, connection: { providerName: "Plaid", lastUpdated: new Date(now).toISOString(), status: "Connected" } },
+      { id: "a2", name: "Robinhood", sheetName: "Investments", ticker: "VOO", quantity: 100, value: { amount: 60_000, currency: "USD" }, connection: { providerName: "Robinhood", lastUpdated: "2026-11-01T00:00:00Z", status: "Connection Error", statusReason: "Login needed" } },
+      { id: "a3", name: "Old hidden thing", hidden: true, value: { amount: 999, currency: "USD" } },
+    ],
+    debt: [{ id: "d1", name: "Car loan", value: { amount: 15_000, currency: "USD" }, connection: null }], insurance: [], document: [] };
+  const fetch = (async (url: string) => {
+    const u = new URL(url);
+    if (u.pathname === "/api/v3/data/portfolio") return Response.json({ data: [{ id: "p1", name: "Phil", currency: "USD" }], errorCode: 0 });
+    return Response.json({ data: body, errorCode: 0 });
+  }) as typeof globalThis.fetch;
+  let daily = -1;
+  const k = new KuberaConnector(store, { apiKey: "k", secret: "s", fetch, now: () => now });
+  k.onDaily = async (nw) => { daily = nw; };
+  const s = await k.summary();
+  assert.match(s, /Phil: net worth \$69,500 \(assets \$84,500, debts \$15,000\)/);
+  assert.match(s, /Not synced in 3\+ days: Robinhood/);
+  assert.match(s, /Connection errors in Kubera: Robinhood/);
+  assert.equal(daily, 69_500, "the Money board gets the real number");
+  const items = await k.itemsText();
+  assert.match(items, /Asset · Robinhood \(VOO × 100\): \$60,000 · via Robinhood, synced 2026-11-01/);
+  assert.doesNotMatch(items, /Old hidden thing/);
+});
+
+test("an empty Kubera read isn't saved as the day's net worth", async () => {
+  const store = memoryStore(); await store.init();
+  const fetch = (async (url: string) => Response.json({ data: new URL(url).pathname.endsWith("/portfolio") ? [{ id: "p1", name: "Phil", currency: "USD" }] : { id: "p1", name: "Phil", asset: [], debt: [] }, errorCode: 0 })) as typeof globalThis.fetch;
+  let called = false;
+  const k = new KuberaConnector(store, { apiKey: "k", secret: "s", fetch });
+  k.onDaily = async () => { called = true; };
+  assert.match(await k.summary(), /sent this portfolio back empty/);
+  assert.equal(called, false);
+  assert.equal((await k.status()).days, 0);
+});
