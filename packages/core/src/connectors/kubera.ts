@@ -8,8 +8,9 @@ import type { Executor } from "../jarvis/orchestrator.js";
  * Kubera for Munger: Phil's net worth, assets and debts, read-only, from the Kubera Data API v3.
  * Each request is signed: x-signature = hex HMAC-SHA256(secret, apiKey + timestamp + METHOD + path + body), with
  * x-api-token and x-timestamp (Unix seconds). Responses are wrapped in { data, errorCode }.
- * Kubera allows about 30 calls a minute and 100 a day on Essential (1000 on Black), so portfolios are cached for
- * 20 minutes, and one snapshot a day is kept so Munger can say what changed.
+ * Kubera allows 600 calls a minute and 5,000 a day on Essential (25,000 on Black); portfolios are cached for 20
+ * minutes anyway, and one snapshot a day is kept so Munger can say what changed. A timestamp more than 5 minutes off
+ * is refused, so the server's clock matters.
  *   KUBERA_API_KEY, KUBERA_SECRET   a read-only key from Kubera Settings > API (restrict it to the server's IP)
  * Nothing here writes to Kubera.
  */
@@ -56,10 +57,15 @@ export class KuberaConnector {
 
   private async get<T>(path: string): Promise<T> {
     const res = await this.f(`${this.opts.baseUrl ?? "https://api.kubera.com"}${path}`, { headers: { ...this.sign("GET", path), "content-type": "application/json" } });
-    const j = (await res.json().catch(() => ({}))) as { data?: T; message?: string };
-    if (res.status === 401) throw new Error(`Kubera refused the key${j.message ? ` (${j.message})` : ""}. Check KUBERA_API_KEY and KUBERA_SECRET, and that the key allows this server's IP.`);
-    if (res.status === 429) throw new Error("Kubera's daily limit is reached; try again later.");
-    if (!res.ok) throw new Error(`Kubera error ${res.status}${j.message ? `: ${j.message}` : ""}`);
+    const raw = await res.text().catch(() => "");
+    let j: { data?: T; message?: string; error?: string; errorMessage?: string; errorCode?: number } = {};
+    try { j = raw ? JSON.parse(raw) : {}; } catch { /* not JSON: an HTML error page, say */ }
+    const said = (j.message || j.error || j.errorMessage || (raw && !raw.trimStart().startsWith("{") && !raw.includes("<") ? raw : "")).toString().slice(0, 200);
+    if (/timestamp/i.test(said)) throw new Error(`Kubera says the time is off (${said}): the server's clock is more than 5 minutes wrong. On the droplet: sudo timedatectl set-ntp true`);
+    if (res.status === 401 || res.status === 403) throw new Error(`Kubera refused the key (${res.status}${said ? `: ${said}` : ""}). Either KUBERA_API_KEY / KUBERA_SECRET don't match the key in Kubera Settings > API (the secret is shown only once, when the key is made), or the key is IP-restricted to an address other than this server's.`);
+    if (res.status === 429) throw new Error("Kubera's limit is reached; try again later.");
+    if (!res.ok) throw new Error(`Kubera error ${res.status}${said ? `: ${said}` : ""}`);
+    if (j.errorCode && j.errorCode !== 0) throw new Error(`Kubera error ${j.errorCode}${said ? `: ${said}` : ""}`);
     return (j.data ?? (j as unknown as T));
   }
 

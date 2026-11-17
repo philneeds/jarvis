@@ -44,3 +44,10 @@ test("Kubera: signed like the Kubera API v3, cached, read-only, and a daily snap
   const bad = new KuberaConnector(store, { apiKey: "key123", secret: "wrong", fetch: f, now: () => now + 3_600_000 });
   assert.match(await bad.tools()[0]!.handler({}, { store, agentId: "munger" }), /Kubera refused the key/);
 });
+
+test("Kubera's errors say what to fix: the clock, or the key / IP restriction", async () => {
+  const store = memoryStore(); await store.init();
+  const say = (status: number, body: string) => new KuberaConnector(store, { apiKey: "k", secret: "s", fetch: (async () => new Response(body, { status })) as typeof fetch });
+  assert.match(await say(400, JSON.stringify({ message: "Invalid timestamp", errorCode: 1 })).tools()[0]!.handler({}, { store, agentId: "munger" }), /clock is more than 5 minutes wrong/);
+  assert.match(await say(403, "Forbidden").tools()[0]!.handler({}, { store, agentId: "munger" }), /refused the key \(403: Forbidden\).*IP-restricted/);
+});
