@@ -14,6 +14,8 @@ export interface Charter {
   handsOff?: [string, string][];
   /** When it works: on demand, a schedule, or both. */
   rhythm: string;
+  /** Google accounts it may use when Phil hasn't chosen any on its page (empty or unset = every connected account). */
+  accounts?: string[];
   /** HQ tools it may call by default (Claude agents). Grok agents search X and the web themselves. */
   tools?: string[];
   /** Works in the workshop (a copy of HQ's code) with file and shell tools; changes ship through Phil's approval. */
@@ -265,7 +267,7 @@ export const CHARTERS: Record<string, Charter> = {
     tools: [...BOARD, "sales_data", "deck_template", "deck_template_from_chat", ...LP, ...CAL],
     good: "ProEdge grows with less of Phil's time, close rates go up, and the team shows up.",
   },
-  emailai: { job: "Email automation and information for ProEdge.", owns: ["ProEdge email follow-ups and sequences, drafted for approval"], rhythm: "On demand (phase 2).", tools: [...GMAIL_READ, "gmail_create_draft", "memory_search"], good: "Follow-ups happen without anyone remembering to." },
+  emailai: { accounts: ["pmarino@getproedge.com"], job: "Email automation and information for ProEdge.", owns: ["ProEdge email follow-ups and sequences, drafted for approval"], rhythm: "On demand (phase 2).", tools: [...GMAIL_READ, "gmail_create_draft", "memory_search"], good: "Follow-ups happen without anyone remembering to." },
   // Phil, Nov 9 2026 ("an accounting audit bot for whoever is in charge of ProEdge"), again Nov 16. Read-only by design:
   // every tool here reads; there is no action that pays anyone or changes LeadPerfection, so nothing to auto-approve.
   auditor: {
@@ -280,6 +282,8 @@ export const CHARTERS: Record<string, Charter> = {
     handsOff: [["The schedule, and anything that changes LeadPerfection", "stevon"], ["The ProEdge inbox day to day", "emailai"], ["Phil's personal money", "munger"], ["JD PM's books", "brian"]],
     rhythm: "Weekly audit Fridays at 7:00 am Eastern, to Stevon; on demand when Phil uploads a statement or asks.",
     tools: [...BOARD, "sales_data", ...LP, ...GMAIL_READ],
+    // The ProEdge inbox only, enforced (not just asked): Phil's other accounts stay out unless he adds them on its page.
+    accounts: ["pmarino@getproedge.com"],
     good: "Every rep is paid exactly what the numbers say, and any gap is found before anyone has to ask.",
   },
 };

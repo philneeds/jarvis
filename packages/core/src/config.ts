@@ -69,7 +69,9 @@ export function effectiveTools(id: string, saved: Partial<Pick<AgentConfig, "too
 export async function getAgentConfig(store: Store, id: string): Promise<AgentConfig> {
   const c = await store.settings.get<Partial<AgentConfig>>(key(id), {});
   const d = charterDefaults(id);
-  return { ...DEFAULT_CONFIG, ...c, persona: { ...DEFAULT_CONFIG.persona, ...(c.persona ?? {}) }, rules: { ...d.rules, ...(c.rules ?? {}) }, tools: effectiveTools(id, c), toolsOff: c.toolsOff ?? [] };
+  // Google accounts: what Phil chose on the agent's page, else the charter's own limit (the ProEdge inbox for its agents).
+  const accounts = c.accounts?.length ? c.accounts : CHARTERS[id]?.accounts;
+  return { ...DEFAULT_CONFIG, ...c, ...(accounts?.length ? { accounts } : {}), persona: { ...DEFAULT_CONFIG.persona, ...(c.persona ?? {}) }, rules: { ...d.rules, ...(c.rules ?? {}) }, tools: effectiveTools(id, c), toolsOff: c.toolsOff ?? [] };
 }
 
 export async function setAgentConfig(store: Store, id: string, patch: Partial<AgentConfig>): Promise<AgentConfig> {

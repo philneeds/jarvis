@@ -34,7 +34,7 @@ function reportPdf(pages: string[]): Buffer {
 }
 interface Appt { id: string; customer: string; time: string; town: string; rep: string; issued?: boolean }
 const REPS = ["Dilibeto, Dominic", "Furia, Michael", "Golinitz, Jason", "Irwin, Steven", "Marino, Phillip", "Robak, Ronald", "Singleton, Evan"];
-function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: "link" | "hover" | "none"; rowEdit?: boolean } = {}) {
+function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: "link" | "hover" | "none"; rowEdit?: boolean; weekdayOnly?: boolean } = {}) {
   // Sales › Schedule: each rep's Morning / Afternoon / Evening per day. The read view draws a set slot as a picture.
   const SCHED_REPS = ["Marino, Phillip", "Robak, Ronald"];
   const sched: Record<string, Record<string, { M: boolean; A: boolean; E: boolean }>> = {};
@@ -144,7 +144,7 @@ function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: 
         return send(page(`<form method="post" action="/SalesSched.aspx"><input type="hidden" name="__EVENTTARGET" value=""><input type="hidden" name="__EVENTARGUMENT" value=""><input type="hidden" name="hdnEdit" value="${editing.join(",")}">
           <h3>Sales Schedule</h3>Market: <select name="ddlMarket" onchange="__doPostBack('ddlMarket','')"><option ${market.startsWith("NYRO") ? "selected" : ""}>NYRO - NYRO</option><option ${market.startsWith("NYBU") ? "selected" : ""}>NYBU - NYBU</option></select>
           Start Date: <input type="text" name="txtDate" value="${start}" onchange="__doPostBack('txtDate','')"> ${buttons}
-          <table><tr>${opts.rowEdit ? '<th rowspan="2"></th>' : ""}<th rowspan="2">Sales Rep</th>${dates.map((d) => `<th colspan="3">${wd(d)} ${d.slice(0, 5)}</th>`).join("")}</tr>
+          <table><tr>${opts.rowEdit ? '<th rowspan="2"></th>' : ""}<th rowspan="2">Sales Rep</th>${dates.map((d) => `<th colspan="3">${opts.weekdayOnly ? wd(d) : `${wd(d)} ${d.slice(0, 5)}`}</th>`).join("")}</tr>
           <tr>${dates.map(() => "<th>M</th><th>A</th><th>E</th>").join("")}</tr>${rows}</table></form>`));
       }
       if (url.pathname === "/Present.aspx") {
@@ -454,3 +454,37 @@ for (const rowEdit of [false, true]) {
     } finally { site.close(); }
   });
 }
+
+test("Sales › Schedule: a rep named the way Phil says it, and a grid that shows only weekdays", async () => {
+  const site = await fakeLeadPerfection({ weekdayOnly: true });
+  try {
+    const { jarvis } = await connect(site);
+    // "Ron Robak" isn't every word of "Robak, Ronald", but only one rep is a Robak.
+    const card = await jarvis.requestApproval({ agentId: "stevon", kind: "other", title: "Robak off Tue", body: "x", payload: { action: "lp.schedule", reps: [{ rep: "Ron Robak", market: "NYRO", days: [{ date: "11/24/2026", M: false, A: false, E: false }] }] } });
+    const done = await jarvis.decide(card.id, "approved");
+    assert.deepEqual(site.sched["Robak, Ronald"]!["11/24/2026"], { M: false, A: false, E: false }, done?.note);
+    assert.match(done?.note ?? "", /Sales › Schedule for Robak, Ronald \(NYRO\): 1 of 1 day set/);
+    assert.deepEqual(site.sched["Robak, Ronald"]!["11/25/2026"], { M: true, A: true, E: false }, "the next day, worked out from the weekday headers, stays");
+  } finally { site.close(); }
+});
+
+test("pickRep: every word first, else a surname only one rep has; never a guess between two", async () => {
+  const { pickRep } = await import("../src/index.js");
+  const reps = ["Gollnitz, Jason", "Robak, Ronald", "Smith, Devin", "Smith, Aaron"];
+  assert.equal(pickRep("Gollnitz, Jason", reps), 0);
+  assert.equal(pickRep("Jay Gollnitz", reps), 0);
+  assert.equal(pickRep("Ronald Robak", reps), 1);
+  assert.equal(pickRep("Devin Smith", reps), 2);
+  assert.equal(pickRep("Smith", reps), -1, "two Smiths: no guess");
+  assert.equal(pickRep("Nobody", reps), -1);
+});
+
+test("the Auditor and Email AI only reach the ProEdge inbox unless Phil chooses accounts on their page", async () => {
+  const { getAgentConfig, setAgentConfig } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  assert.deepEqual((await getAgentConfig(store, "auditor")).accounts, ["pmarino@getproedge.com"]);
+  assert.deepEqual((await getAgentConfig(store, "emailai")).accounts, ["pmarino@getproedge.com"]);
+  assert.equal((await getAgentConfig(store, "stevon")).accounts, undefined, "no limit where the charter sets none");
+  await setAgentConfig(store, "auditor", { accounts: ["phil@example.com"] });
+  assert.deepEqual((await getAgentConfig(store, "auditor")).accounts, ["phil@example.com"], "Phil's choice wins");
+});

@@ -143,7 +143,14 @@ function scheduleGrid(a: GridArg): GridOut {
   const result: GridOut = { rows: best.rows.map((x: any) => ({ name: x.name, cells: x.cells.map((c: any) => ({ date: c.date, slot: c.slot, mark: c.mark })) })) };
   if (!a.rep) return result;
   const want = words(a.rep);
-  const mine = best.rows.filter((x: any) => { const have = new Set(words(x.name)); return want.length > 0 && want.every((t) => have.has(t)); });
+  let mine = best.rows.filter((x: any) => { const have = new Set(words(x.name)); return want.length > 0 && want.every((t) => have.has(t)); });
+  // Not every word matches ("Jay Gollnitz" for "Gollnitz, Jason"): a surname only one row has. Two sharing it: no guess.
+  if (!mine.length) {
+    const sur = (n: string) => { const w = words(n.includes(",") ? n.split(",")[0]! : n); return w[w.length - 1]; };
+    const by = best.rows.filter((x: any) => want.includes(sur(x.name) ?? ""));
+    if (by.length === 1) mine = by;
+    else if (by.length > 1) return { ...result, error: `${by.length} reps named ${by.map((x: any) => x.name).join(" and ")} on the schedule; use the full name as it shows` };
+  }
   if (!mine.length) return { ...result, error: `no row for ${a.rep} on the schedule` };
   if (mine.length > 1) return { ...result, error: `${mine.length} rows match ${a.rep} on the schedule` };
   const row = mine[0]!;
@@ -226,6 +233,19 @@ export function postChangesData(body: string, url = ""): string | undefined {
 const tokens = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((t) => t.length > 1);
 /** "Phillip Marino" matches "Marino, Phillip": every word of the one is in the other. */
 export const sameName = (want: string, have: string) => { const w = tokens(want), h = new Set(tokens(have)); return w.length > 0 && w.every((t) => h.has(t)); };
+/** A name's surname: before the comma in "Gollnitz, Jason", else the last word. */
+const surname = (name: string) => { const n = name.trim(); const t = tokens(n.includes(",") ? n.split(",")[0]! : n); return n.includes(",") ? t[t.length - 1] : t[t.length - 1]; };
+/**
+ * The one rep among names that is meant: every word of the name first; else a surname only one of them has, so
+ * "Jay Gollnitz" finds "Gollnitz, Jason" (Phil, Nov 18). Two reps sharing the surname is never guessed.
+ */
+export function pickRep(want: string, names: string[]): number {
+  const full = names.map((n, i) => (sameName(want, n) ? i : -1)).filter((i) => i >= 0);
+  if (full.length) return full.length === 1 ? full[0]! : -1;
+  const w = new Set(tokens(want));
+  const bySurname = names.map((n, i) => { const s = surname(n); return s && w.has(s) ? i : -1; }).filter((i) => i >= 0);
+  return bySurname.length === 1 ? bySurname[0]! : -1;
+}
 const usDate = (d: string): string | undefined => {
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(d.trim()), us = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(d.trim());
   if (iso) return `${iso[2]!.padStart(2, "0")}/${iso[3]!.padStart(2, "0")}/${iso[1]}`;
@@ -790,7 +810,8 @@ export class LeadPerfectionConnector {
     for (let i = 0; i < (await selects.count()); i++) {
       const s = selects.nth(i);
       const opts = await s.locator("option").evaluateAll((os) => os.map((o) => ({ value: (o as HTMLOptionElement).value, text: (o.textContent ?? "").trim() })));
-      const hit = opts.find((o) => sameName(rep, o.text));
+      const at = pickRep(rep, opts.map((o) => o.text));
+      const hit = at >= 0 ? opts[at] : undefined;
       if (hit) return { select: s, option: hit, current: (await s.evaluate((el) => (el as HTMLSelectElement).selectedOptions[0]?.textContent ?? "")).trim(), locked: await s.isDisabled() };
     }
     return undefined;
