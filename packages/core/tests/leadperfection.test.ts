@@ -34,7 +34,12 @@ function reportPdf(pages: string[]): Buffer {
 }
 interface Appt { id: string; customer: string; time: string; town: string; rep: string; issued?: boolean }
 const REPS = ["Dilibeto, Dominic", "Furia, Michael", "Golinitz, Jason", "Irwin, Steven", "Marino, Phillip", "Robak, Ronald", "Singleton, Evan"];
-function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: "link" | "hover" | "none" } = {}) {
+function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: "link" | "hover" | "none"; rowEdit?: boolean } = {}) {
+  // Sales › Schedule: each rep's Morning / Afternoon / Evening per day. The read view draws a set slot as a picture.
+  const SCHED_REPS = ["Marino, Phillip", "Robak, Ronald"];
+  const sched: Record<string, Record<string, { M: boolean; A: boolean; E: boolean }>> = {};
+  for (const r of SCHED_REPS) sched[r] = { "11/23/2026": { M: true, A: true, E: true }, "11/24/2026": { M: true, A: false, E: true }, "11/25/2026": { M: true, A: true, E: false } };
+  const plus = (d: string, n: number) => { const [m, dd, y] = d.split("/").map(Number); const x = new Date(y!, m! - 1, dd! + n); return `${String(x.getMonth() + 1).padStart(2, "0")}/${String(x.getDate()).padStart(2, "0")}/${x.getFullYear()}`; };
   const sessions = new Set<string>();
   const days: Record<string, Appt[]> = {
     "11/17/2026": [
@@ -112,6 +117,34 @@ function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: 
         return send(page(`<form method="post" action="/LeadDetail.aspx?CustID=${url.searchParams.get("CustID")}"><input type="hidden" name="__EVENTTARGET" value=""><input type="hidden" name="__EVENTARGUMENT" value="">
           <h3>Contact Detail</h3><p>527800 - Slott, Susan</p>${["General", "Appointment", "Notes", "Results"].map((t) => `<a href="javascript:__doPostBack('tab${t}','')">${t}</a>`).join(" ")}<div>${content[tab] ?? `<p>${tab} tab</p>`}</div></form>`));
       }
+      if (url.pathname === "/SalesSched.aspx") {
+        const f = req.method === "POST" ? Object.fromEntries(new URLSearchParams(body)) : {} as Record<string, string>;
+        if (req.method === "POST") posts.push(f);
+        const start = f.txtDate || "11/23/2026", market = f.ddlMarket || "NYRO - NYRO";
+        const dates = [start, plus(start, 1)];
+        const target = f.__EVENTTARGET ?? "";
+        // Which rows are being edited: all of them (one page-wide Edit) or one (a grid that edits a row at a time).
+        let editing: number[] = (f.hdnEdit ?? "").split(",").filter(Boolean).map(Number);
+        const saveRows = (rows: number[]) => { for (const i of rows) for (const d of dates) for (const s of ["M", "A", "E"] as const) { const day = (sched[SCHED_REPS[i]!]![d] ??= { M: false, A: false, E: false }); day[s] = `c_${i}_${d}_${s}` in f; } };
+        if ("btnEdit.x" in f) editing = SCHED_REPS.map((_, i) => i);
+        else if ("btnSave.x" in f) { saveRows(editing); editing = []; }
+        else if ("btnCancel.x" in f) editing = [];
+        else if (/lnkEdit$/.test(target)) editing = [Number(/ctl0(\d)/.exec(target)![1])];
+        else if (/lnkUpdate$/.test(target)) { saveRows(editing); editing = []; }
+        else if (/lnkCancel$/.test(target)) editing = [];
+        const wd = (d: string) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(d).getDay()];
+        const rows = SCHED_REPS.map((r, i) => {
+          const cells = dates.map((d) => (["M", "A", "E"] as const).map((s) => { const on = sched[r]![d]?.[s] ?? false; return editing.includes(i) ? `<td><input type="checkbox" name="c_${i}_${d}_${s}" ${on ? "checked" : ""}></td>` : `<td>${on ? '<img src="/img/chk.gif">' : ""}</td>`; }).join("")).join("");
+          const links = !opts.rowEdit ? "" : `<td>${editing.includes(i) ? `<a href="javascript:__doPostBack('gv$ctl0${i}$lnkUpdate','')">Update</a> <a href="javascript:__doPostBack('gv$ctl0${i}$lnkCancel','')">Cancel</a>` : `<a href="javascript:__doPostBack('gv$ctl0${i}$lnkEdit','')">Edit</a>`}</td>`;
+          return `<tr>${links}<td>${r}</td>${cells}</tr>`;
+        }).join("");
+        const buttons = opts.rowEdit ? "" : editing.length ? '<input type="image" name="btnSave" title="Save" src="/s.gif"> <input type="image" name="btnCancel" title="Cancel" src="/c.gif">' : '<input type="image" name="btnEdit" title="Edit" src="/e.gif">';
+        return send(page(`<form method="post" action="/SalesSched.aspx"><input type="hidden" name="__EVENTTARGET" value=""><input type="hidden" name="__EVENTARGUMENT" value=""><input type="hidden" name="hdnEdit" value="${editing.join(",")}">
+          <h3>Sales Schedule</h3>Market: <select name="ddlMarket" onchange="__doPostBack('ddlMarket','')"><option ${market.startsWith("NYRO") ? "selected" : ""}>NYRO - NYRO</option><option ${market.startsWith("NYBU") ? "selected" : ""}>NYBU - NYBU</option></select>
+          Start Date: <input type="text" name="txtDate" value="${start}" onchange="__doPostBack('txtDate','')"> ${buttons}
+          <table><tr>${opts.rowEdit ? '<th rowspan="2"></th>' : ""}<th rowspan="2">Sales Rep</th>${dates.map((d) => `<th colspan="3">${wd(d)} ${d.slice(0, 5)}</th>`).join("")}</tr>
+          <tr>${dates.map(() => "<th>M</th><th>A</th><th>E</th>").join("")}</tr>${rows}</table></form>`));
+      }
       if (url.pathname === "/Present.aspx") {
         let date = "11/16/2026", market = "NYRO";
         if (req.method === "POST") {
@@ -126,7 +159,7 @@ function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: 
       res.writeHead(404); res.end("not found");
     });
   });
-  return new Promise<{ url: string; days: typeof days; posts: typeof posts; reportRuns: typeof reportRuns; sessions: Set<string>; close: () => void }>((resolve) => server.listen(0, "127.0.0.1", () => resolve({ url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, days, posts, reportRuns, sessions, close: () => server.close() })));
+  return new Promise<{ url: string; days: typeof days; sched: typeof sched; posts: typeof posts; reportRuns: typeof reportRuns; sessions: Set<string>; close: () => void }>((resolve) => server.listen(0, "127.0.0.1", () => resolve({ url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, days, sched, posts, reportRuns, sessions, close: () => server.close() })));
 }
 
 const open: { close(): Promise<void> }[] = [];
@@ -370,3 +403,45 @@ test("an agent clicking around by hand is stopped after a limit, and told to rep
     assert.match(await call("lp_report", { start: "11/01/2026", end: "11/15/2026" }), /Close 33%/);
   } finally { delete process.env.LP_MAX_STEPS; site.close(); }
 });
+
+test("Sales › Schedule: an agent reads each rep's M / A / E marks, and can't press Edit", async () => {
+  const site = await fakeLeadPerfection();
+  try {
+    const { call } = await connect(site);
+    const screen = await call("lp_open", { screen: "SalesSched.aspx" });
+    assert.match(screen, /Schedule grid, as HQ reads it/);
+    assert.match(screen, /Robak, Ronald: 11\/23 M chk\.gif, A chk\.gif, E chk\.gif \| 11\/24 M chk\.gif, A -, E chk\.gif/, "the pictures are read as marks");
+    const refused = await call("lp_click", { ref: ref(screen, /icon "Edit"/) });
+    assert.match(refused, /^Refused: .*would change data.*lp\.schedule/);
+    assert.ok(!site.posts.some((p) => "btnEdit.x" in p), "Edit never reached the site");
+  } finally { site.close(); }
+});
+
+for (const rowEdit of [false, true]) {
+  test(`Sales › Schedule: a rep's availability changes only through Phil's approval, and is read back (${rowEdit ? "Edit on each row" : "one Edit for the page"})`, async () => {
+    const site = await fakeLeadPerfection({ rowEdit });
+    try {
+      const { jarvis } = await connect(site);
+      const card = await jarvis.requestApproval({ agentId: "stevon", kind: "other", title: "Sales › Schedule: Robak off Mon 11/23 and Tue 11/24", body: "Phil needs Robak off both days", payload: { action: "lp.schedule", rep: "Ronald Robak", market: "NYRO", days: [{ date: "11/23/2026", M: false, A: false, E: false }, { date: "2026-11-24", morning: "off", A: false, E: false }] } });
+      assert.equal(card.status, "pending", "a change to LeadPerfection always waits for Phil");
+      assert.match(card.effect ?? "", /Sets Ronald Robak's availability on Sales › Schedule in LeadPerfection \(NYRO\): 11\/23\/2026 M off, A off, E off; 2026-11-24 M off, A off, E off/);
+      assert.equal(site.sched["Robak, Ronald"]!["11/23/2026"]!.M, true, "nothing changed before he approved");
+      const done = await jarvis.decide(card.id, "approved");
+      const note = done?.note ?? "";
+      assert.deepEqual(site.sched["Robak, Ronald"]!["11/23/2026"], { M: false, A: false, E: false }, note);
+      assert.deepEqual(site.sched["Robak, Ronald"]!["11/24/2026"], { M: false, A: false, E: false });
+      assert.deepEqual(site.sched["Robak, Ronald"]!["11/25/2026"], { M: true, A: true, E: false }, "a day not on the card stays");
+      assert.deepEqual(site.sched["Marino, Phillip"]!["11/23/2026"], { M: true, A: true, E: true }, "another rep stays");
+      assert.match(note, /Sales › Schedule for Robak, Ronald \(NYRO\): 2 of 2 days set and checked in LeadPerfection \(11\/23\/2026 M off, A off, E off; 11\/24\/2026 M off, A off \(already\), E off\)/);
+      assert.match(note, /Appointments already booked for those slots aren't moved/);
+      // Putting him back on one slot, leaving the rest alone.
+      const back = await jarvis.requestApproval({ agentId: "stevon", kind: "other", title: "Robak back on", body: "x", payload: { action: "lp.schedule", rep: "Robak, Ronald", days: [{ date: "11/23/2026", E: true }] } });
+      await jarvis.decide(back.id, "approved");
+      assert.deepEqual(site.sched["Robak, Ronald"]!["11/23/2026"], { M: false, A: false, E: true });
+      // Someone not on the grid: said plainly, nothing saved.
+      const none = await jarvis.requestApproval({ agentId: "stevon", kind: "other", title: "x", body: "x", payload: { action: "lp.schedule", rep: "Nobody, Here", days: [{ date: "11/23/2026", M: false }] } });
+      const said = await jarvis.decide(none.id, "approved");
+      assert.match(said?.note ?? "", /0 of 1 day set.*Not done: 11\/23\/2026: no row for Nobody, Here on the schedule/);
+    } finally { site.close(); }
+  });
+}
