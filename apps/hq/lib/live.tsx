@@ -120,7 +120,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             setStreams((st) => { const n = { ...st }; for (const [k, v] of Object.entries(n)) if (v.agentId === (e.message.agentId ?? (e.message.role === "jarvis" ? "jarvis" : v.agentId))) delete n[k]; return n; });
             break;
           case "chat.stream":
-            setStreams((st) => ({ ...st, [e.runId]: { agentId: e.agentId, text: (st[e.runId]?.text ?? "") + e.delta, at: Date.now() } }));
+            // A failed attempt's text is dropped when another model takes over (reset).
+            setStreams((st) => ({ ...st, [e.runId]: { agentId: e.agentId, text: (e.reset ? "" : st[e.runId]?.text ?? "") + e.delta, at: Date.now() } }));
             break;
           case "approval.new":
             setPendingState((p) => [e.approval, ...p.filter((x) => x.id !== e.approval.id)]);

@@ -5,7 +5,7 @@ export type AgentStatus = "idle" | "working" | "waiting" | "error" | "paused";
 export type JarvisEvent =
   | { type: "agent.status"; agentId: string; status: AgentStatus; detail?: string; at: string }
   | { type: "chat.message"; message: ChatMessage }
-  | { type: "chat.stream"; runId: string; agentId: string; delta: string }
+  | { type: "chat.stream"; runId: string; agentId: string; delta: string; reset?: boolean }
   | { type: "approval.new"; approval: Approval }
   | { type: "approval.decided"; approval: Approval }
   | { type: "approval.updated"; approval: Approval }

@@ -138,7 +138,9 @@ function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: 
           const links = !opts.rowEdit ? "" : `<td>${editing.includes(i) ? `<a href="javascript:__doPostBack('gv$ctl0${i}$lnkUpdate','')">Update</a> <a href="javascript:__doPostBack('gv$ctl0${i}$lnkCancel','')">Cancel</a>` : `<a href="javascript:__doPostBack('gv$ctl0${i}$lnkEdit','')">Edit</a>`}</td>`;
           return `<tr>${links}<td>${r}</td>${cells}</tr>`;
         }).join("");
-        const buttons = opts.rowEdit ? "" : editing.length ? '<input type="image" name="btnSave" title="Save" src="/s.gif"> <input type="image" name="btnCancel" title="Cancel" src="/c.gif">' : '<input type="image" name="btnEdit" title="Edit" src="/e.gif">';
+        // Like the real screen (Nov 18): hidden copies of Edit and Save come first in the page; only the shown ones work.
+        const decoys = '<div style="display:none"><input type="image" name="btnEditOld" title="Edit" src="/e.gif"><input type="image" name="btnSaveOld" title="Save" src="/s.gif"></div>';
+        const buttons = opts.rowEdit ? "" : decoys + (editing.length ? '<input type="image" name="btnSave" title="Save" src="/s.gif"> <input type="image" name="btnCancel" title="Cancel" src="/c.gif">' : '<input type="image" name="btnEdit" title="Edit" src="/e.gif">');
         return send(page(`<form method="post" action="/SalesSched.aspx"><input type="hidden" name="__EVENTTARGET" value=""><input type="hidden" name="__EVENTARGUMENT" value=""><input type="hidden" name="hdnEdit" value="${editing.join(",")}">
           <h3>Sales Schedule</h3>Market: <select name="ddlMarket" onchange="__doPostBack('ddlMarket','')"><option ${market.startsWith("NYRO") ? "selected" : ""}>NYRO - NYRO</option><option ${market.startsWith("NYBU") ? "selected" : ""}>NYBU - NYBU</option></select>
           Start Date: <input type="text" name="txtDate" value="${start}" onchange="__doPostBack('txtDate','')"> ${buttons}

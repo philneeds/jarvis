@@ -4,7 +4,7 @@ import { bus, type AgentSetup, type Approval, type AttentionItem, type AutoDone,
 import { ALL_CONNECTIONS, connectionsFor, OPTIONAL_CONNECTIONS, type Connection } from "../readiness.js";
 import { HORIZONS, philDay, pickToday, playerLevel, reconcileToday, streakOf, syncTrophies, ventureLevels, type TodayLog } from "../progress.js";
 import { AGENTS, CHARTERS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
-import { ModelRouter } from "../router/index.js";
+import { ModelRouter, STREAM_RESET } from "../router/index.js";
 import type { MemoryItem, MetricPoint, RecordItem, Store } from "../store/types.js";
 import { usageSummary } from "../usage/caps.js";
 import { extractBlocks, parsePlan } from "./blocks.js";
@@ -1597,6 +1597,7 @@ export class Jarvis {
     let runId: string | undefined;
     return (delta: string) => {
       runId ??= randomUUID();
+      if (delta === STREAM_RESET) { bus.emitEvent({ type: "chat.stream", runId, agentId, delta: "", reset: true }); return; }
       bus.emitEvent({ type: "chat.stream", runId, agentId, delta });
     };
   }

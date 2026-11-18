@@ -51,6 +51,8 @@ export interface RunOptions {
 }
 
 /** A run that hangs (a stuck SDK call, a dead connection) must still end: it would hold its agent's status and Einstein's workshop forever. */
+/** Sent through onDelta when an attempt failed and another model takes over: the live text so far is dropped. */
+export const STREAM_RESET = "\u0000reset\u0000";
 export const runTimeoutMs = (workspace: boolean) => Number(workspace ? process.env.WORKSHOP_RUN_TIMEOUT_MS ?? 60 * 60_000 : process.env.RUN_TIMEOUT_MS ?? 20 * 60_000);
 
 export interface RunOutcome extends AgentResult {
@@ -199,6 +201,9 @@ export class ModelRouter {
           return { ...base, ...res, runId, agentId: agent.id };
         } catch (e) {
           const msg = e instanceof ProviderError ? e.message : (e as Error).message;
+          // What the failed attempt streamed (a "you're out of usage credits" notice, half an answer) is wiped from
+          // Phil's screen before the next model starts writing.
+          opts.onDelta?.(STREAM_RESET);
           errors.push(`${p.id}${m !== model ? ` on ${m.label}` : ""}: ${msg}`);
           console.warn(`[run] ${agent.id} failed on ${p.id} (${m.modelId}): ${msg.slice(0, 300)}`);
           if (ctl.signal.aborted) break;

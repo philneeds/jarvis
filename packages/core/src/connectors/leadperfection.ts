@@ -57,6 +57,10 @@ function scheduleGrid(a: GridArg): GridOut {
   const WD = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
   document.querySelectorAll("[data-hq-slot],[data-hq-act]").forEach((e: any) => { e.removeAttribute("data-hq-slot"); e.removeAttribute("data-hq-act"); });
   const labelOf = (el: any) => clean(el.getAttribute("title") || el.getAttribute("alt") || (/submit|button|image/.test(el.type ?? "") ? el.value : "") || (el.tagName === "A" || el.tagName === "BUTTON" ? el.textContent : "") || "");
+  // A control the page shows: LeadPerfection keeps hidden copies of Edit / Save around (Nov 18: HQ picked a hidden Edit and
+  // its click waited 20 seconds for it to appear), so a shown one is always taken before a hidden one.
+  const shown = (el: any) => { const cs = getComputedStyle(el); return el.getClientRects().length > 0 && cs.visibility !== "hidden" && cs.display !== "none"; };
+  const visibleFirst = (els: any[]) => [...els.filter(shown), ...els.filter((e) => !shown(e))];
   const actOf = (el: any) => { const l = labelOf(el).toLowerCase(); return /^edit\b/.test(l) ? "edit" : /^(save|update)\b/.test(l) ? "save" : /^cancel\b/.test(l) ? "cancel" : ""; };
   const markOf = (td: any): string => {
     const boxes = td.querySelectorAll("input[type=checkbox]");
@@ -156,13 +160,13 @@ function scheduleGrid(a: GridArg): GridOut {
   // The row's own Edit / Save / Cancel (a grid that edits one row at a time), else the page's.
   const tr = best.trs[row.r];
   const found = { edit: false, save: false, cancel: false } as Record<string, boolean>;
-  for (const el of Array.from(tr.querySelectorAll("a, button, input[type=submit], input[type=image], input[type=button], img[onclick]")) as any[]) {
+  for (const el of visibleFirst(Array.from(tr.querySelectorAll("a, button, input[type=submit], input[type=image], input[type=button], img[onclick]")))) {
     const k = actOf(el);
     if (k && !found[k]) { el.setAttribute("data-hq-act", k); found[k] = true; }
   }
   // Never another rep's row.
   const others = new Set(best.rows.filter((x: any) => x !== row).map((x: any) => best.trs[x.r]));
-  for (const el of Array.from(document.querySelectorAll("a, button, input[type=submit], input[type=image], input[type=button], img[onclick]")) as any[]) {
+  for (const el of visibleFirst(Array.from(document.querySelectorAll("a, button, input[type=submit], input[type=image], input[type=button], img[onclick]")))) {
     const k = actOf(el);
     if (k && !found[k] && !others.has(el.closest("tr"))) { el.setAttribute("data-hq-act", k); found[k] = true; }
   }
@@ -886,8 +890,14 @@ export class LeadPerfectionConnector {
     const el = page.locator(`[data-hq-act="${act}"]`).first();
     if (!(await el.count())) return false;
     this.writing = true;
-    try { await this.act(page, () => el.click()); } finally { this.writing = false; }
+    try { await this.act(page, () => this.tap(el)); } finally { this.writing = false; }
     return true;
+  }
+
+  /** Click a control; one the page keeps hidden is clicked the way its own script would, not waited on. */
+  private async tap(el: ReturnType<Page["locator"]>) {
+    if (await el.isVisible().catch(() => false)) return el.click({ timeout: 10_000 });
+    return el.evaluate((e: HTMLElement) => e.click());
   }
 
   /**
@@ -922,7 +932,7 @@ export class LeadPerfectionConnector {
             const box = page.locator(`[data-hq-slot="${s}"]`).first();
             if (!(await box.count())) throw new Error(`no ${s} check box for ${d.date} after Edit`);
             this.writing = true;
-            try { if ((await box.isChecked()) !== d[s]) await this.act(page, () => box.setChecked(d[s]!)); } finally { this.writing = false; }
+            try { if ((await box.isChecked()) !== d[s]) await this.act(page, async () => { if (await box.isVisible().catch(() => false)) await box.setChecked(d[s]!, { timeout: 10_000 }); else await box.evaluate((e: HTMLInputElement) => e.click()); }); } finally { this.writing = false; }
             hit = await this.grid(page, rep, d.date, start);
           }
           if (!(await this.press(page, "save"))) { await this.go(page, "SalesSched.aspx"); throw new Error("ticked the boxes but found no Save; nothing saved"); }
