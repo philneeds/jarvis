@@ -9,8 +9,9 @@ import type { Describer, Executor } from "../jarvis/orchestrator.js";
  *   GHL_API_KEY       a Private Integration token (Sub-account Settings > Private Integrations), read-only scopes:
  *                     contacts, conversations, conversations/message, opportunities, invoices, calendars/events, locations
  *   GHL_LOCATION_ID   the sub-account id (Settings > Business Profile)
- * The one write: a reply to a customer (SMS, email, WhatsApp, Facebook or Instagram message), only after Phil approves
- * it in Needs you. That needs the conversations/message.write scope on the token.
+ * Writes, each only after Phil approves it in Needs you (or a JD PM rule he set): a reply to a customer (needs
+ * conversations/message.write), a contact (contacts.write), a note, a deal (opportunities.write), and an appointment on
+ * a calendar (calendars.readonly to find the calendar, calendars/events.write to book it).
  */
 export interface GhlOptions { apiKey: string; locationId: string; fetch?: typeof fetch; now?: () => number; baseUrl?: string }
 
@@ -23,6 +24,28 @@ type Invoice = { _id?: string; id?: string; invoiceNumber?: string | number; nam
 type Appointment = { id: string; title?: string; startTime?: string; endTime?: string; appointmentStatus?: string; contactId?: string; calendarId?: string; address?: string; notes?: string };
 
 const STATUS_KEY = "ghl.status";
+/** The calendars API's version header. */
+const CAL_VERSION = "2021-04-15";
+/**
+ * A date (MM/DD/YYYY or YYYY-MM-DD) and a time (2:00 PM, 2pm, 14:00) in Eastern time, plus minutes, as ISO with the
+ * offset that applies that day (EST or EDT): what GoHighLevel's calendar wants.
+ */
+export function easternIso(date: string, time: string, plusMinutes = 0): string | undefined {
+  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(date.trim()), iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(date.trim());
+  const [y, mo, d] = us ? [+(us[3]!.length === 2 ? `20${us[3]}` : us[3]!), +us[1]!, +us[2]!] : iso ? [+iso[1]!, +iso[2]!, +iso[3]!] : [];
+  const t = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?$/i.exec(time.trim());
+  if (!y || !mo || !d || !t) return undefined;
+  let h = +t[1]!; const mi = +(t[2] ?? 0); const ap = (t[3] ?? "").toLowerCase().replace(/\./g, "");
+  if (ap === "pm" && h < 12) h += 12; if (ap === "am" && h === 12) h = 0;
+  if (h > 23 || mi > 59 || mo > 12 || d > 31) return undefined;
+  // The offset New York has on that day, then the wall-clock time moved by the minutes.
+  const probe = new Date(Date.UTC(y, mo - 1, d, 12));
+  const off = /GMT([+-]\d{2}):?(\d{2})?/.exec(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "longOffset" }).format(probe));
+  const sign = off?.[1] ?? "-05", offMin = (off?.[2] ?? "00");
+  const wall = new Date(Date.UTC(y, mo - 1, d, h, mi) + plusMinutes * 60_000);
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `${wall.getUTCFullYear()}-${p2(wall.getUTCMonth() + 1)}-${p2(wall.getUTCDate())}T${p2(wall.getUTCHours())}:${p2(wall.getUTCMinutes())}:00${sign}:${offMin}`;
+}
 const CACHE_MS = 60_000;
 const money = (n?: number) => (typeof n === "number" && Number.isFinite(n) ? `$${Math.round(n).toLocaleString("en-US")}` : "");
 const when = (v?: string | number) => { if (v === undefined || v === null || v === "") return ""; const d = new Date(typeof v === "number" && v < 1e12 ? v * 1000 : v); return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
@@ -43,12 +66,12 @@ export class GoHighLevelConnector {
 
   get locationId() { return this.opts.locationId; }
 
-  private async call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+  private async call<T>(method: "GET" | "POST", path: string, body?: unknown, version = "2021-07-28"): Promise<T> {
     const key = `${method} ${path} ${body ? JSON.stringify(body) : ""}`;
     const c = this.cache.get(key);
     if (c && this.now() - c.at < CACHE_MS) return c.v as T;
     const res = await this.f(`${this.opts.baseUrl ?? "https://services.leadconnectorhq.com"}${path}`, {
-      method, headers: { authorization: `Bearer ${this.opts.apiKey}`, version: "2021-07-28", accept: "application/json", ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined,
+      method, headers: { authorization: `Bearer ${this.opts.apiKey}`, version, accept: "application/json", ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined,
     });
     const j = (await res.json().catch(() => ({}))) as T & { message?: string | string[] };
     const msg = Array.isArray(j.message) ? j.message.join("; ") : j.message;
@@ -117,6 +140,37 @@ export class GoHighLevelConnector {
     const q = new URLSearchParams({ locationId: this.opts.locationId, startTime: String(from), endTime: String(from + days * 86_400_000) });
     const j = await this.call<{ events?: Appointment[] }>("GET", `/calendars/events?${q}`);
     return j.events ?? [];
+  }
+
+  /** The location's calendars (needs the calendars.readonly scope). */
+  async calendars(): Promise<{ id: string; name: string; isActive?: boolean }[]> {
+    const j = await this.call<{ calendars?: { id: string; name: string; isActive?: boolean }[] }>("GET", `/calendars/?locationId=${encodeURIComponent(this.opts.locationId)}`, undefined, CAL_VERSION);
+    return (j.calendars ?? []).filter((c) => c.isActive !== false);
+  }
+
+  /** The contact a card means: its id, else one found by phone or email, else a new one (and whether it was made). */
+  private async contactFor(p: Record<string, unknown>): Promise<{ id: string; name: string; made: boolean }> {
+    const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+    const full = str(p.name) || [str(p.firstName), str(p.lastName)].filter(Boolean).join(" ");
+    if (str(p.contactId)) return { id: str(p.contactId), name: full || "the contact", made: false };
+    const digits = str(p.phone).replace(/\D/g, "").slice(-10);
+    const email = str(p.email).toLowerCase();
+    for (const q of [digits, email].filter(Boolean)) {
+      const hit = (await this.contacts(q, 10)).find((c) => (digits && (c.phone ?? "").replace(/\D/g, "").endsWith(digits)) || (email && (c.email ?? "").toLowerCase() === email));
+      if (hit) return { id: hit.id, name: name(hit), made: false };
+    }
+    if (!full && !digits && !email) throw new Error("the card needs the customer: a contactId, or a name with a phone or email");
+    const [firstName, ...rest] = full.split(/\s+/);
+    try {
+      const r = await this.post<{ contact?: { id?: string } }>("/contacts/", { locationId: this.opts.locationId, firstName: str(p.firstName) || firstName || undefined, lastName: str(p.lastName) || rest.join(" ") || undefined, phone: str(p.phone) || undefined, email: str(p.email) || undefined, source: str(p.source) || "Phone call", address1: str(p.address) || undefined });
+      if (!r.contact?.id) throw new Error("GoHighLevel made the contact but returned no id");
+      return { id: r.contact.id, name: full || "the new contact", made: true };
+    } catch (e) {
+      // GoHighLevel refuses a duplicate and names the contact it already has: use that one.
+      const existing = /existing contact (\S+)/.exec((e as Error).message)?.[1];
+      if (existing) return { id: existing, name: full || "the contact", made: false };
+      throw e;
+    }
   }
 
   // ---- Text for agents ------------------------------------------------------------------------
@@ -194,8 +248,8 @@ export class GoHighLevelConnector {
     return { conversationId: j.conversationId, messageId: j.messageId };
   }
 
-  private async post<T>(path: string, body: unknown, method: "POST" | "PUT" = "POST"): Promise<T> {
-    const res = await this.f(`${this.opts.baseUrl ?? "https://services.leadconnectorhq.com"}${path}`, { method, headers: { authorization: `Bearer ${this.opts.apiKey}`, version: "2021-07-28", accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body) });
+  private async post<T>(path: string, body: unknown, method: "POST" | "PUT" = "POST", version = "2021-07-28"): Promise<T> {
+    const res = await this.f(`${this.opts.baseUrl ?? "https://services.leadconnectorhq.com"}${path}`, { method, headers: { authorization: `Bearer ${this.opts.apiKey}`, version, accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body) });
     const j = (await res.json().catch(() => ({}))) as T & { message?: string | string[]; meta?: { contactId?: string } };
     const msg = Array.isArray(j.message) ? j.message.join("; ") : j.message;
     if (res.status === 401 || res.status === 403) throw new Error(`GoHighLevel refused (${res.status}${msg ? `: ${msg}` : ""}). The token needs the write scope for this.`);
@@ -250,6 +304,29 @@ export class GoHighLevelConnector {
         await this.post(`/opportunities/${encodeURIComponent(str(p.opportunityId))}`, body, "PUT");
         return `Moved ${str(p.name) || `deal ${str(p.opportunityId)}`} to ${str(p.stage)}${body.status ? ` (${String(body.status)})` : ""} in GoHighLevel.`;
       },
+      "ghl.appointment.create": async (a) => {
+        // An appointment on a GoHighLevel calendar, with its contact found or made first (Phil, Nov 18: one he booked
+        // by phone never reached the calendar, because there was no way to book one).
+        const p = (a.payload ?? {}) as Record<string, unknown>;
+        const startTime = easternIso(str(p.date), str(p.time));
+        if (!startTime) throw new Error(`the card needs a date (MM/DD/YYYY) and a time (like 2:00 PM); it has "${str(p.date)}" "${str(p.time)}"`);
+        const minutes = Math.min(Math.max(Number(p.durationMinutes) || 60, 5), 600);
+        const endTime = easternIso(str(p.date), str(p.time), minutes)!;
+        const cals = await this.calendars();
+        const want = str(p.calendar).toLowerCase();
+        const cal = (want ? cals.find((c) => c.name.toLowerCase() === want || c.id === str(p.calendar)) ?? cals.find((c) => c.name.toLowerCase().includes(want)) : undefined) ?? (cals.length === 1 ? cals[0] : undefined);
+        if (!cal) throw new Error(cals.length ? `which calendar? GoHighLevel has ${cals.map((c) => `"${c.name}"`).join(", ")}; name one on the card` : "GoHighLevel has no active calendar");
+        const who = await this.contactFor(p);
+        const title = str(p.title) || `${who.name}${str(p.address) ? ` · ${str(p.address)}` : ""}`;
+        const r = await this.post<{ id?: string; appointmentStatus?: string }>("/calendars/events/appointments", {
+          calendarId: cal.id, locationId: this.opts.locationId, contactId: who.id, startTime, endTime, title, appointmentStatus: "confirmed",
+          address: str(p.address) || undefined, description: str(p.notes) || undefined,
+          // Booked by hand, so the calendar's open slots and booking window don't apply; its automations (confirmation
+          // texts to the customer) run only when the card says notify.
+          ignoreFreeSlotValidation: true, ignoreDateRange: true, toNotify: p.notify === true,
+        }, "POST", CAL_VERSION);
+        return `Booked "${title}" on ${cal.name} for ${when(startTime)} (${minutes} min)${r.id ? `, appointment ${r.id}` : ""}. ${who.made ? `Added ${who.name} as a new contact.` : `On the existing contact ${who.name}.`}${p.notify === true ? " The calendar's confirmation went to the customer." : " No message went to the customer."}`;
+      },
       "ghl.message": async (a) => {
         const p = (a.payload ?? {}) as { contactId?: unknown; type?: unknown; message?: unknown; subject?: unknown; html?: unknown; to?: unknown };
         if (typeof p.contactId !== "string" || !p.contactId) throw new Error("ghl.message needs the contactId (from ghl_contacts or ghl_conversations)");
@@ -275,6 +352,7 @@ export class GoHighLevelConnector {
     return {
       "ghl.message": (p) => `Sends this ${String(p.type ?? "SMS")} to ${String(p.to ?? `contact ${String(p.contactId ?? "?")}`)} through GoHighLevel, from JD PM's number or mailbox there. It goes out the moment you approve.`,
       "ghl.contact.create": (p) => `Creates ${String(p.name ?? [p.firstName, p.lastName].filter(Boolean).join(" ") ?? "a contact")}${p.phone ? ` (${String(p.phone)})` : p.email ? ` (${String(p.email)})` : ""} as a contact in JD PM's GoHighLevel${p.source ? `, source ${String(p.source)}` : ""}. Nothing is sent to them.`,
+      "ghl.appointment.create": (p) => `Books ${String(p.name ?? p.to ?? (p.contactId ? `contact ${String(p.contactId)}` : "the customer"))}${p.phone ? ` (${String(p.phone)})` : ""} on JD PM's GoHighLevel calendar${p.calendar ? ` "${String(p.calendar)}"` : ""} for ${String(p.date ?? "?")} at ${String(p.time ?? "?")} (${Number(p.durationMinutes) || 60} min)${p.address ? `, at ${String(p.address)}` : ""}. If they aren't a contact yet, they're added first. ${p.notify === true ? "The calendar's confirmation goes to the customer." : "Nothing is sent to the customer."}`,
       "ghl.note": (p) => `Adds a note to ${String(p.to ?? `contact ${String(p.contactId ?? "?")}`)} in GoHighLevel. Only your team sees it.`,
       "ghl.deal.create": (p) => `Creates the deal "${String(p.name ?? "")}" in JD PM's pipeline${p.stage ? ` at ${String(p.stage)}` : ""}${typeof p.value === "number" ? `, worth $${Number(p.value).toLocaleString("en-US")}` : ""}. Nothing is sent to the customer.`,
       "ghl.deal.move": (p) => `Moves ${String(p.name ?? `deal ${String(p.opportunityId ?? "?")}`)} to ${String(p.stage ?? "?")}${p.status ? ` and marks it ${String(p.status)}` : ""} in JD PM's pipeline. Nothing is sent to the customer.`,
@@ -288,6 +366,6 @@ export class GoHighLevelConnector {
   }
 
   static promptHint(): string {
-    return "GoHighLevel is connected for JD PM: ghl_contacts and ghl_contact for customers and leads, ghl_conversations and ghl_messages for what they said (texts, calls, email, Facebook), ghl_pipeline for the deals by stage, ghl_invoices for billing, ghl_appointments for what's booked. It is the record for JD PM: check it before the board or Gmail. To reply to a customer inside GoHighLevel (text, email, WhatsApp, Facebook or Instagram message), put the exact text in an approval block with \"kind\":\"send\" and \"payload\":{\"action\":\"ghl.message\",\"contactId\":\"<id>\",\"type\":\"SMS|Email|WhatsApp|FB|IG\",\"message\":\"...\",\"subject\":\"<email only>\"}; it goes out only when Phil approves. Other changes, each an approval block with \"kind\":\"other\": a new contact {\"action\":\"ghl.contact.create\",\"name\":\"...\",\"phone\":\"...\",\"email\":\"...\",\"source\":\"Facebook|referral|...\"}; a note {\"action\":\"ghl.note\",\"contactId\":\"<id>\",\"body\":\"...\"}; a new deal {\"action\":\"ghl.deal.create\",\"name\":\"...\",\"contactId\":\"<id>\",\"stage\":\"<stage name>\",\"value\":<dollars>}; a deal moved {\"action\":\"ghl.deal.move\",\"opportunityId\":\"<id from ghl_pipeline>\",\"name\":\"...\",\"stage\":\"<stage name>\",\"status\":\"open|won|lost\"}. Say in the body why.";
+    return "GoHighLevel is connected for JD PM: ghl_contacts and ghl_contact for customers and leads, ghl_conversations and ghl_messages for what they said (texts, calls, email, Facebook), ghl_pipeline for the deals by stage, ghl_invoices for billing, ghl_appointments for what's booked. It is the record for JD PM: check it before the board or Gmail. To reply to a customer inside GoHighLevel (text, email, WhatsApp, Facebook or Instagram message), put the exact text in an approval block with \"kind\":\"send\" and \"payload\":{\"action\":\"ghl.message\",\"contactId\":\"<id>\",\"type\":\"SMS|Email|WhatsApp|FB|IG\",\"message\":\"...\",\"subject\":\"<email only>\"}; it goes out only when Phil approves. Other changes, each an approval block with \"kind\":\"other\": a new contact {\"action\":\"ghl.contact.create\",\"name\":\"...\",\"phone\":\"...\",\"email\":\"...\",\"source\":\"Facebook|referral|...\"}; a note {\"action\":\"ghl.note\",\"contactId\":\"<id>\",\"body\":\"...\"}; a new deal {\"action\":\"ghl.deal.create\",\"name\":\"...\",\"contactId\":\"<id>\",\"stage\":\"<stage name>\",\"value\":<dollars>}; a deal moved {\"action\":\"ghl.deal.move\",\"opportunityId\":\"<id from ghl_pipeline>\",\"name\":\"...\",\"stage\":\"<stage name>\",\"status\":\"open|won|lost\"}; an appointment on the GoHighLevel calendar, which also adds the customer as a contact when they aren't one (use it alone for \"book them and add them\"; no separate contact card) {\"action\":\"ghl.appointment.create\",\"name\":\"...\",\"phone\":\"...\",\"email\":\"<if known>\",\"address\":\"<the job address>\",\"date\":\"MM/DD/YYYY\",\"time\":\"2:00 PM\",\"durationMinutes\":60,\"calendar\":\"<calendar name, when there's more than one>\",\"title\":\"<optional>\",\"notes\":\"<what the call was about>\"} (times are Eastern; add \"notify\":true only if Phil wants the calendar's confirmation sent to the customer). Say in the body why.";
   }
 }

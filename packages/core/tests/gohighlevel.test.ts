@@ -39,7 +39,7 @@ test("GoHighLevel: read-only calls with the v2 headers; contacts, conversations,
   assert.match(await t("ghl_invoices").handler({ status: "sent" }, ctx), /1 invoice \(sent\), \$2,100 still due\.\n\[i1\] #17 Lopez kitchen · Ana Lopez · \$4,200 total, \$2,100 due · sent · due 2026-11-20/);
   assert.match(await t("ghl_appointments").handler({ days: 7 }, ctx), /Nov 10, 8:00 AM–12:00 PM · Install: Lopez kitchen · confirmed · 12 Elm St/);
   assert.ok(calls.every((c) => c.method === "GET" || c.path === "/contacts/search"), "nothing writes");
-  assert.deepEqual(Object.keys(g.executors()), ["ghl.contact.create", "ghl.note", "ghl.deal.create", "ghl.deal.move", "ghl.message"], "every write waits for approval");
+  assert.deepEqual(Object.keys(g.executors()), ["ghl.contact.create", "ghl.note", "ghl.deal.create", "ghl.deal.move", "ghl.appointment.create", "ghl.message"], "every write waits for approval");
   const n = calls.length; await t("ghl_pipeline").handler({}, ctx); assert.equal(calls.length, n, "cached for a minute");
   assert.equal((await g.status()).lastFetch?.ok, true);
   const bad = new GoHighLevelConnector(store, { apiKey: "wrong", locationId: "loc1", fetch: f, now: () => now });
@@ -114,4 +114,46 @@ test("GoHighLevel's internal writes go through on their own for the JD PM team (
   const sms = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Reply to Ana", body: "Friday works.", payload: { action: "ghl.message", contactId: "c1", type: "SMS", message: "Friday works." } });
   assert.equal(sms.status, "pending");
   assert.equal(writes.length, 4);
+});
+
+test("an appointment booked by phone goes on the GoHighLevel calendar, with the customer added first when they're new", async () => {
+  const { Jarvis, easternIso } = await import("../src/index.js");
+  // Eastern time with the offset that day has: EST in November, EDT in July.
+  assert.equal(easternIso("11/20/2026", "2:00 PM"), "2026-11-20T14:00:00-05:00");
+  assert.equal(easternIso("2026-07-01", "9am", 90), "2026-07-01T10:30:00-04:00");
+  assert.equal(easternIso("11/20/2026", "12:30 am"), "2026-11-20T00:30:00-05:00");
+  assert.equal(easternIso("tomorrow", "2pm"), undefined);
+  const store = memoryStore(); await store.init();
+  const writes: { path: string; version: string; body: Record<string, unknown> }[] = [];
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = new URL(String(url)); const m = init?.method ?? "GET"; const h = init?.headers as Record<string, string>;
+    if (u.pathname === "/calendars/") return Response.json({ calendars: [{ id: "cal1", name: "Estimates" }, { id: "cal2", name: "Installs" }, { id: "cal3", name: "Old", isActive: false }] });
+    if (u.pathname === "/contacts/search") { const q = JSON.parse(String(init?.body)).query; return Response.json({ contacts: q === "5855550100" ? [{ id: "c1", firstName: "Ana", lastName: "Lopez", phone: "+1 (585) 555-0100" }] : [] }); }
+    if (m === "POST") { const body = JSON.parse(String(init?.body)); writes.push({ path: u.pathname, version: h.version, body }); return Response.json(u.pathname === "/contacts/" ? { contact: { id: "c9" } } : { id: "appt1" }); }
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  const jarvis = new Jarvis({ store });
+  const g = new GoHighLevelConnector(store, { apiKey: "pit-abc", locationId: "loc1", fetch: f });
+  jarvis.addConnector(g, GoHighLevelConnector.promptHint());
+  // A new customer from a phone call: one card adds them and books them.
+  const card = await jarvis.requestApproval({ agentId: "stella", kind: "other", title: "Book Loneice Sabree", body: "She called; estimate Friday 2 pm", payload: { action: "ghl.appointment.create", name: "Loneice Sabree", phone: "(585) 498-5340", address: "8 Oak St, Rochester", date: "11/20/2026", time: "2:00 PM", calendar: "estimates", notes: "Kitchen estimate" } });
+  assert.equal(card.status, "pending", "an appointment waits for Phil");
+  assert.match(card.effect ?? "", /Books Loneice Sabree \(\(585\) 498-5340\) on JD PM's GoHighLevel calendar "estimates" for 11\/20\/2026 at 2:00 PM \(60 min\), at 8 Oak St, Rochester\. If they aren't a contact yet, they're added first\. Nothing is sent to the customer\./);
+  assert.equal(writes.length, 0, "nothing written before Phil approves");
+  const done = await jarvis.decide(card.id, "approved");
+  assert.deepEqual(writes.map((w) => w.path), ["/contacts/", "/calendars/events/appointments"]);
+  assert.deepEqual(writes[0]!.body, { locationId: "loc1", firstName: "Loneice", lastName: "Sabree", phone: "(585) 498-5340", source: "Phone call", address1: "8 Oak St, Rochester" });
+  assert.deepEqual(writes[1]!.body, { calendarId: "cal1", locationId: "loc1", contactId: "c9", startTime: "2026-11-20T14:00:00-05:00", endTime: "2026-11-20T15:00:00-05:00", title: "Loneice Sabree · 8 Oak St, Rochester", appointmentStatus: "confirmed", address: "8 Oak St, Rochester", description: "Kitchen estimate", ignoreFreeSlotValidation: true, ignoreDateRange: true, toNotify: false });
+  assert.equal(writes[1]!.version, "2021-04-15", "the calendars API's version");
+  assert.match(done?.note ?? "", /Booked "Loneice Sabree · 8 Oak St, Rochester" on Estimates for Nov 20, 2:00 PM \(60 min\), appointment appt1\. Added Loneice Sabree as a new contact\. No message went to the customer\./);
+  // An existing customer, found by phone: no second contact. Two calendars and none named: asked, not guessed.
+  writes.length = 0;
+  const again = await jarvis.requestApproval({ agentId: "stella", kind: "other", title: "Book Ana", body: "x", payload: { action: "ghl.appointment.create", name: "Ana Lopez", phone: "585-555-0100", date: "11/21/2026", time: "9am", durationMinutes: 120, calendar: "Installs" } });
+  const d2 = await jarvis.decide(again.id, "approved");
+  assert.deepEqual(writes.map((w) => w.path), ["/calendars/events/appointments"], d2?.note);
+  assert.equal(writes[0]!.body.contactId, "c1");
+  assert.equal(writes[0]!.body.calendarId, "cal2");
+  assert.equal(writes[0]!.body.endTime, "2026-11-21T11:00:00-05:00");
+  const vague = await jarvis.requestApproval({ agentId: "stella", kind: "other", title: "Book", body: "x", payload: { action: "ghl.appointment.create", name: "Ana Lopez", phone: "585-555-0100", date: "11/21/2026", time: "9am" } });
+  assert.match((await jarvis.decide(vague.id, "approved"))?.note ?? "", /^Failed to execute ghl\.appointment\.create: which calendar\? GoHighLevel has "Estimates", "Installs"/);
 });

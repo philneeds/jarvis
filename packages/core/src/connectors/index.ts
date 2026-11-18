@@ -4,7 +4,7 @@ export { KuberaConnector, type KuberaOptions, type KuberaPortfolio, type KuberaI
 export { DiscordConnector, parseChannels, type DiscordOptions } from "./discord.js";
 export { GithubConnector, type GithubOptions } from "./github.js";
 export { RobinhoodConnector, sseResult, LOOPBACK_REDIRECT, type RobinhoodOptions, type McpTool } from "./robinhood.js";
-export { GoHighLevelConnector, type GhlOptions } from "./gohighlevel.js";
+export { GoHighLevelConnector, easternIso, type GhlOptions } from "./gohighlevel.js";
 export { EagleViewConnector, takeoff, takeoffText, EV_PRODUCTS, EV_DELIVERY, EV_STRUCTURES, type EagleViewOptions, type Takeoff } from "./eagleview.js";
 export { LeadPerfectionConnector, changesData, isFilterField, postChangesData, sameName, pickRep, scheduleDays, scheduleReps, WRITE_WORDS, type LeadPerfectionOptions, type Assignment, type ScheduleDay } from "./leadperfection.js";
 export { SpotifyConnector, SPOTIFY_SCOPES, type SpotifyOptions, type SpotifyTokens } from "./spotify.js";
