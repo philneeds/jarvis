@@ -719,7 +719,10 @@ export class Jarvis {
     const dataImages = cfg.tools.includes("sales_data") ? await recentDataImages(this.store, agent.venture) : [];
     const images = await imageInputs([...(this.convo.getStore()?.images ?? []), ...dataImages]);
     let r: Awaited<ReturnType<ModelRouter["run"]>>;
-    try { r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, tools, toolContext: { store: this.store, agentId: agent.id, workshopClaim }, onDelta: this.streamer(agent.id), images, workspace }); }
+    // An agent working LeadPerfection's screens needs more tool rounds than the default 8 (Nov 18: Stevon stopped mid-check
+    // on Gollnitz's PTO); LeadPerfection's own cap of 25 screens and clicks per 20 minutes still holds.
+    const maxTurns = tools.some((t) => t.name.startsWith("lp_")) ? 24 : undefined;
+    try { r = await this.router.run(agent, { system, prompt, direct: opts.direct, parentRunId: opts.parentRunId, maxTurns, tools, toolContext: { store: this.store, agentId: agent.id, workshopClaim }, onDelta: this.streamer(agent.id), images, workspace }); }
     finally { if (workshopClaim) this.workshop?.release(workshopClaim); } // the workshop is free for the next run once this one's tools are done; only this run's own claim is given back
     if (r.blocked) return r;
     // Parked watcher events and hand-off answers were in this run's memory; it has now seen and handled them, so they

@@ -424,7 +424,7 @@ for (const rowEdit of [false, true]) {
       const { jarvis } = await connect(site);
       const card = await jarvis.requestApproval({ agentId: "stevon", kind: "other", title: "Sales › Schedule: Robak off Mon 11/23 and Tue 11/24", body: "Phil needs Robak off both days", payload: { action: "lp.schedule", rep: "Ronald Robak", market: "NYRO", days: [{ date: "11/23/2026", M: false, A: false, E: false }, { date: "2026-11-24", morning: "off", A: false, E: false }] } });
       assert.equal(card.status, "pending", "a change to LeadPerfection always waits for Phil");
-      assert.match(card.effect ?? "", /Sets Ronald Robak's availability on Sales › Schedule in LeadPerfection \(NYRO\): 11\/23\/2026 M off, A off, E off; 2026-11-24 M off, A off, E off/);
+      assert.match(card.effect ?? "", /Sets availability on Sales › Schedule in LeadPerfection for Ronald Robak \(NYRO\): 11\/23\/2026 M off, A off, E off; 2026-11-24 M off, A off, E off/);
       assert.equal(site.sched["Robak, Ronald"]!["11/23/2026"]!.M, true, "nothing changed before he approved");
       const done = await jarvis.decide(card.id, "approved");
       const note = done?.note ?? "";
@@ -441,7 +441,14 @@ for (const rowEdit of [false, true]) {
       // Someone not on the grid: said plainly, nothing saved.
       const none = await jarvis.requestApproval({ agentId: "stevon", kind: "other", title: "x", body: "x", payload: { action: "lp.schedule", rep: "Nobody, Here", days: [{ date: "11/23/2026", M: false }] } });
       const said = await jarvis.decide(none.id, "approved");
-      assert.match(said?.note ?? "", /0 of 1 day set.*Not done: 11\/23\/2026: no row for Nobody, Here on the schedule/);
+      assert.match(said?.note ?? "", /^Failed to execute lp\.schedule: Sales › Schedule for Nobody, Here: nothing was set\. 11\/23\/2026: no row for Nobody, Here on the schedule/, "nothing set is a failure, so no to-do is ticked off");
+      // Two reps on one card (Phil, Nov 18: Robak and Gollnitz off Thanksgiving week, one approval).
+      const both = await jarvis.requestApproval({ agentId: "stevon", kind: "other", title: "Sales › Schedule: Robak and Marino off 11/27", body: "x", payload: { action: "lp.schedule", reps: [{ rep: "Robak, Ronald", market: "NYRO", days: [{ date: "11/23/2026", E: false }] }, { rep: "Marino, Phillip", market: "NYRO", days: [{ date: "11/23/2026", M: false, A: false, E: false }] }] } });
+      assert.match(both.effect ?? "", /for 2 reps: Robak, Ronald \(NYRO\): 11\/23\/2026 E off \| Marino, Phillip \(NYRO\): 11\/23\/2026 M off, A off, E off/);
+      const bothDone = await jarvis.decide(both.id, "approved");
+      assert.deepEqual(site.sched["Robak, Ronald"]!["11/23/2026"], { M: false, A: false, E: false }, bothDone?.note);
+      assert.deepEqual(site.sched["Marino, Phillip"]!["11/23/2026"], { M: false, A: false, E: false }, bothDone?.note);
+      assert.match(bothDone?.note ?? "", /Robak, Ronald \(NYRO\): 1 of 1 day set.* \| Sales › Schedule for Marino, Phillip \(NYRO\): 1 of 1 day set/);
     } finally { site.close(); }
   });
 }
