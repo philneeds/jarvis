@@ -146,8 +146,9 @@ function scheduleGrid(a: GridArg): GridOut {
   let mine = best.rows.filter((x: any) => { const have = new Set(words(x.name)); return want.length > 0 && want.every((t) => have.has(t)); });
   // Not every word matches ("Jay Gollnitz" for "Gollnitz, Jason"): a surname only one row has. Two sharing it: no guess.
   if (!mine.length) {
-    const sur = (n: string) => { const w = words(n.includes(",") ? n.split(",")[0]! : n); return w[w.length - 1]; };
-    const by = best.rows.filter((x: any) => want.includes(sur(x.name) ?? ""));
+    const split = (n: string) => { const w = words(n.includes(",") ? n.split(",")[0]! : n); const s = w[w.length - 1] ?? ""; const rest = words(n.includes(",") ? n.split(",").slice(1).join(" ") : n).filter((t) => t !== s); return { s, first: rest[0] ?? "" }; };
+    const wq = split(a.rep);
+    const by = wq.s ? best.rows.filter((x: any) => { const h = split(x.name); return h.s === wq.s && (!wq.first || !h.first || h.first[0] === wq.first[0]); }) : [];
     if (by.length === 1) mine = by;
     else if (by.length > 1) return { ...result, error: `${by.length} reps named ${by.map((x: any) => x.name).join(" and ")} on the schedule; use the full name as it shows` };
   }
@@ -234,7 +235,7 @@ const tokens = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split
 /** "Phillip Marino" matches "Marino, Phillip": every word of the one is in the other. */
 export const sameName = (want: string, have: string) => { const w = tokens(want), h = new Set(tokens(have)); return w.length > 0 && w.every((t) => h.has(t)); };
 /** A name's surname: before the comma in "Gollnitz, Jason", else the last word. */
-const surname = (name: string) => { const n = name.trim(); const t = tokens(n.includes(",") ? n.split(",")[0]! : n); return n.includes(",") ? t[t.length - 1] : t[t.length - 1]; };
+const surname = (name: string) => { const n = name.trim(); const t = tokens(n.includes(",") ? n.split(",")[0]! : n); return t[t.length - 1]; };
 /**
  * The one rep among names that is meant: every word of the name first; else a surname only one of them has, so
  * "Jay Gollnitz" finds "Gollnitz, Jason" (Phil, Nov 18). Two reps sharing the surname is never guessed.
@@ -242,8 +243,11 @@ const surname = (name: string) => { const n = name.trim(); const t = tokens(n.in
 export function pickRep(want: string, names: string[]): number {
   const full = names.map((n, i) => (sameName(want, n) ? i : -1)).filter((i) => i >= 0);
   if (full.length) return full.length === 1 ? full[0]! : -1;
-  const w = new Set(tokens(want));
-  const bySurname = names.map((n, i) => { const s = surname(n); return s && w.has(s) ? i : -1; }).filter((i) => i >= 0);
+  // The name asked for, split the same way: "Gollnitz, Jason" or "Jay Gollnitz" → surname gollnitz, first name j….
+  const split = (n: string) => { const s = surname(n) ?? ""; const rest = tokens(n.includes(",") ? n.split(",").slice(1).join(" ") : n).filter((t) => t !== s); return { s, first: rest[0] ?? "" }; };
+  const w = split(want);
+  if (!w.s) return -1;
+  const bySurname = names.map((n, i) => { const h = split(n); return h.s === w.s && (!w.first || !h.first || h.first[0] === w.first[0]) ? i : -1; }).filter((i) => i >= 0);
   return bySurname.length === 1 ? bySurname[0]! : -1;
 }
 const usDate = (d: string): string | undefined => {
@@ -896,11 +900,16 @@ export class LeadPerfectionConnector {
       await box.fill(date);
       await this.act(page, () => box.press("Tab").catch(() => undefined));
     }
-    return (await box.count()) ? await box.inputValue().catch(() => date) : date;
+    // The date the server rendered (the box's value attribute), not what HQ typed: if the page didn't move to that date
+    // (no postback, or it needs a Go button), a grid headed only by weekdays must not be read as the week HQ asked for.
+    return (await box.count()) ? ((await box.getAttribute("value").catch(() => null)) ?? "").trim() : "";
   }
 
-  private async grid(page: Page, rep: string, date: string, start: string) {
+  private async grid(page: Page, rep: string, date: string, _start?: string) {
     const [m, d] = date.split("/").map(Number);
+    // The week as the page shows it now (an Edit or Save posts the form back and can move it), never a value from before.
+    const box = page.locator("input[name*=date i]:visible, input[id*=date i]:visible, input[name*=week i]:visible, input[name*=start i]:visible").first();
+    const start = (await box.count()) ? ((await box.getAttribute("value").catch(() => null)) ?? "").trim() : "";
     const g = await page.evaluate(scheduleGrid, { rep, month: m, day: d, start });
     if (g.error || !g.hit) throw new Error(g.error ?? `no row for ${rep}`);
     return g.hit;
@@ -991,10 +1000,11 @@ export class LeadPerfectionConnector {
         // the card fails only when none of them could be set.
         const people = scheduleReps(a.payload);
         if (!people.length) throw new Error("no rep on the card");
+        if (people.length > 10) throw new Error(`${people.length} reps on one card; 10 is the most (split it)`);
         if (people.length === 1) return this.schedule(people[0]!.rep, people[0]!.days, people[0]!.market);
         const lines: string[] = [];
         let ok = 0;
-        for (const x of people.slice(0, 10)) {
+        for (const x of people) {
           try { lines.push(await this.schedule(x.rep, x.days, x.market)); ok++; } catch (e) { lines.push(`${x.rep}: ${(e as Error).message}`); }
         }
         if (!ok) throw new Error(lines.join(" | "));

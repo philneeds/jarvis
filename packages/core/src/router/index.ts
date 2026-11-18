@@ -187,7 +187,9 @@ export class ModelRouter {
           const sees = model.provider === "claude";
           const n = opts.images?.length ?? 0;
           const prompt = (n && !sees ? `${opts.prompt}\n\n(Phil attached ${n} image${n > 1 ? "s" : ""} you can't see. Say so, and hand anything visual to Joi.)` : opts.prompt) + prefetched;
-          const res = await Promise.race([p.run({ agent, model: m, system: opts.system, prompt, runId, onDelta: opts.onDelta, signal: ctl.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext, images: sees && n ? opts.images : undefined, workspace: opts.workspace }), stopped]);
+          // Only the model attempt itself failing wipes what it streamed; a hiccup saving the result afterwards doesn't.
+          let res: Awaited<ReturnType<typeof p.run>>;
+          try { res = await Promise.race([p.run({ agent, model: m, system: opts.system, prompt, runId, onDelta: opts.onDelta, signal: ctl.signal, maxTurns: opts.maxTurns, tools: opts.tools, toolContext: opts.toolContext, images: sees && n ? opts.images : undefined, workspace: opts.workspace }), stopped]); } catch (e) { opts.onDelta?.(STREAM_RESET); throw e; }
           const finishedAt = new Date().toISOString();
           await this.store.runs.update(runId, { status: "done", output: res.text, provider: res.provider, modelId: res.modelId, finishedAt, inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: res.costUsd });
           // A Grok run through the API spends xAI credits, not the SuperGrok plan.
@@ -201,9 +203,6 @@ export class ModelRouter {
           return { ...base, ...res, runId, agentId: agent.id };
         } catch (e) {
           const msg = e instanceof ProviderError ? e.message : (e as Error).message;
-          // What the failed attempt streamed (a "you're out of usage credits" notice, half an answer) is wiped from
-          // Phil's screen before the next model starts writing.
-          opts.onDelta?.(STREAM_RESET);
           errors.push(`${p.id}${m !== model ? ` on ${m.label}` : ""}: ${msg}`);
           console.warn(`[run] ${agent.id} failed on ${p.id} (${m.modelId}): ${msg.slice(0, 300)}`);
           if (ctl.signal.aborted) break;

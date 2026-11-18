@@ -123,6 +123,11 @@ test("an appointment booked by phone goes on the GoHighLevel calendar, with the 
   assert.equal(easternIso("2026-07-01", "9am", 90), "2026-07-01T10:30:00-04:00");
   assert.equal(easternIso("11/20/2026", "12:30 am"), "2026-11-20T00:30:00-05:00");
   assert.equal(easternIso("tomorrow", "2pm"), undefined);
+  // Reviewer, Nov 18: no AM/PM is a guess, and a date that doesn't exist isn't rolled forward.
+  assert.equal(easternIso("11/20/2026", "2:00"), undefined, "2:00 could be 2 AM or 2 PM");
+  assert.equal(easternIso("11/20/2026", "14:00"), "2026-11-20T14:00:00-05:00", "24-hour time is fine");
+  assert.equal(easternIso("02/30/2026", "2pm"), undefined);
+  assert.equal(easternIso("11/20/2026", "13pm"), undefined);
   const store = memoryStore(); await store.init();
   const writes: { path: string; version: string; body: Record<string, unknown> }[] = [];
   const f = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -156,4 +161,13 @@ test("an appointment booked by phone goes on the GoHighLevel calendar, with the 
   assert.equal(writes[0]!.body.endTime, "2026-11-21T11:00:00-05:00");
   const vague = await jarvis.requestApproval({ agentId: "stella", kind: "other", title: "Book", body: "x", payload: { action: "ghl.appointment.create", name: "Ana Lopez", phone: "585-555-0100", date: "11/21/2026", time: "9am" } });
   assert.match((await jarvis.decide(vague.id, "approved"))?.note ?? "", /^Failed to execute ghl\.appointment\.create: which calendar\? GoHighLevel has "Estimates", "Installs"/);
+  // Reviewer, Nov 18: never the wrong customer or the wrong calendar.
+  writes.length = 0;
+  const fail = async (payload: Record<string, unknown>) => (await jarvis.decide((await jarvis.requestApproval({ agentId: "stella", kind: "other", title: "Book", body: "x", payload: { action: "ghl.appointment.create", date: "11/21/2026", time: "9am", calendar: "Installs", ...payload } })).id, "approved"))?.note ?? "";
+  assert.match(await fail({ name: "Bob Jones", phone: "585-555-0100" }), /the phone 585-555-0100 belongs to Ana Lopez in GoHighLevel, not Bob Jones/, "a number on someone else's record");
+  assert.match(await fail({ name: "Bob Jones", phone: "555-0100" }), /isn't a full 10-digit phone number/, "seven digits match people in every area code");
+  assert.match(await fail({ name: "Ana Lopez", phone: "585-555-0100", calendar: "s" }), /"s" fits "Estimates" and "Installs"; name the one you mean/);
+  assert.match(await fail({ name: "Ana Lopez", phone: "585-555-0100", calendar: "Roofing" }), /no calendar called "Roofing" in GoHighLevel; it has "Estimates", "Installs"/);
+  assert.match(await fail({ name: "Ana Lopez", phone: "585-555-0100", time: "2:00" }), /needs a date \(MM\/DD\/YYYY\) and a time/);
+  assert.equal(writes.length, 0, "none of those wrote anything");
 });

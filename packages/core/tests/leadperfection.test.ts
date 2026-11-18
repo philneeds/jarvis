@@ -34,7 +34,7 @@ function reportPdf(pages: string[]): Buffer {
 }
 interface Appt { id: string; customer: string; time: string; town: string; rep: string; issued?: boolean }
 const REPS = ["Dilibeto, Dominic", "Furia, Michael", "Golinitz, Jason", "Irwin, Steven", "Marino, Phillip", "Robak, Ronald", "Singleton, Evan"];
-function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: "link" | "hover" | "none"; rowEdit?: boolean; weekdayOnly?: boolean } = {}) {
+function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: "link" | "hover" | "none"; rowEdit?: boolean; weekdayOnly?: boolean; noDatePostback?: boolean } = {}) {
   // Sales › Schedule: each rep's Morning / Afternoon / Evening per day. The read view draws a set slot as a picture.
   const SCHED_REPS = ["Marino, Phillip", "Robak, Ronald"];
   const sched: Record<string, Record<string, { M: boolean; A: boolean; E: boolean }>> = {};
@@ -143,7 +143,7 @@ function fakeLeadPerfection(opts: { askCode?: boolean; nested?: boolean; menu?: 
         const buttons = opts.rowEdit ? "" : decoys + (editing.length ? '<input type="image" name="btnSave" title="Save" src="/s.gif"> <input type="image" name="btnCancel" title="Cancel" src="/c.gif">' : '<input type="image" name="btnEdit" title="Edit" src="/e.gif">');
         return send(page(`<form method="post" action="/SalesSched.aspx"><input type="hidden" name="__EVENTTARGET" value=""><input type="hidden" name="__EVENTARGUMENT" value=""><input type="hidden" name="hdnEdit" value="${editing.join(",")}">
           <h3>Sales Schedule</h3>Market: <select name="ddlMarket" onchange="__doPostBack('ddlMarket','')"><option ${market.startsWith("NYRO") ? "selected" : ""}>NYRO - NYRO</option><option ${market.startsWith("NYBU") ? "selected" : ""}>NYBU - NYBU</option></select>
-          Start Date: <input type="text" name="txtDate" value="${start}" onchange="__doPostBack('txtDate','')"> ${buttons}
+          Start Date: <input type="text" name="txtDate" value="${start}"${opts.noDatePostback ? "" : ` onchange="__doPostBack('txtDate','')"`}> ${buttons}
           <table><tr>${opts.rowEdit ? '<th rowspan="2"></th>' : ""}<th rowspan="2">Sales Rep</th>${dates.map((d) => `<th colspan="3">${opts.weekdayOnly ? wd(d) : `${wd(d)} ${d.slice(0, 5)}`}</th>`).join("")}</tr>
           <tr>${dates.map(() => "<th>M</th><th>A</th><th>E</th>").join("")}</tr>${rows}</table></form>`));
       }
@@ -477,6 +477,10 @@ test("pickRep: every word first, else a surname only one rep has; never a guess 
   assert.equal(pickRep("Devin Smith", reps), 2);
   assert.equal(pickRep("Smith", reps), -1, "two Smiths: no guess");
   assert.equal(pickRep("Nobody", reps), -1);
+  // Reviewer, Nov 18: a first name that is another rep's surname, and a different first name, never pick someone.
+  assert.equal(pickRep("James Rizzo", ["James, Paul", "Marino, Phillip"]), -1);
+  assert.equal(pickRep("Paul Robak", reps), -1, "Robak, but not Paul");
+  assert.equal(pickRep("Robak", reps), 1, "a surname alone that only one rep has");
 });
 
 test("the Auditor and Email AI only reach the ProEdge inbox unless Phil chooses accounts on their page", async () => {
@@ -487,4 +491,19 @@ test("the Auditor and Email AI only reach the ProEdge inbox unless Phil chooses 
   assert.equal((await getAgentConfig(store, "stevon")).accounts, undefined, "no limit where the charter sets none");
   await setAgentConfig(store, "auditor", { accounts: ["phil@example.com"] });
   assert.deepEqual((await getAgentConfig(store, "auditor")).accounts, ["phil@example.com"], "Phil's choice wins");
+});
+
+test("Sales › Schedule: a weekday-only grid that didn't move to the typed date is read as the week it shows", async () => {
+  // The date box doesn't post back: the page keeps showing Mon 11/23–Tue 11/24 whatever HQ types.
+  const site = await fakeLeadPerfection({ weekdayOnly: true, noDatePostback: true });
+  try {
+    const { jarvis } = await connect(site);
+    const card = await jarvis.requestApproval({ agentId: "stevon", kind: "other", title: "Robak off Tue", body: "x", payload: { action: "lp.schedule", rep: "Robak, Ronald", market: "NYRO", days: [{ date: "11/24/2026", M: false }] } });
+    const done = await jarvis.decide(card.id, "approved");
+    assert.equal(site.sched["Robak, Ronald"]!["11/24/2026"]!.M, false, done?.note);
+    assert.equal(site.sched["Robak, Ronald"]!["11/23/2026"]!.M, true, "Monday wasn't touched for Tuesday");
+    // A day the page isn't showing: refused, nothing saved.
+    const far = await jarvis.requestApproval({ agentId: "stevon", kind: "other", title: "x", body: "x", payload: { action: "lp.schedule", rep: "Robak, Ronald", days: [{ date: "12/01/2026", M: false }] } });
+    assert.match((await jarvis.decide(far.id, "approved"))?.note ?? "", /^Failed to execute lp\.schedule:.*isn't on the schedule grid/);
+  } finally { site.close(); }
 });

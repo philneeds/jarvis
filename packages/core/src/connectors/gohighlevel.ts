@@ -36,12 +36,19 @@ export function easternIso(date: string, time: string, plusMinutes = 0): string 
   const t = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?$/i.exec(time.trim());
   if (!y || !mo || !d || !t) return undefined;
   let h = +t[1]!; const mi = +(t[2] ?? 0); const ap = (t[3] ?? "").toLowerCase().replace(/\./g, "");
+  // "2:00" with no AM or PM is a guess (2 AM booked for a 2 PM estimate): only a 24-hour time (0 or 13–23) goes without.
+  if (!ap && h >= 1 && h <= 12) return undefined;
+  if (ap && (h < 1 || h > 12)) return undefined;
   if (ap === "pm" && h < 12) h += 12; if (ap === "am" && h === 12) h = 0;
-  if (h > 23 || mi > 59 || mo > 12 || d > 31) return undefined;
+  if (h > 23 || mi > 59) return undefined;
+  // A date that doesn't exist (02/30) is refused, not rolled into March.
+  const real = new Date(Date.UTC(y, mo - 1, d));
+  if (real.getUTCFullYear() !== y || real.getUTCMonth() !== mo - 1 || real.getUTCDate() !== d) return undefined;
   // The offset New York has on that day, then the wall-clock time moved by the minutes.
   const probe = new Date(Date.UTC(y, mo - 1, d, 12));
   const off = /GMT([+-]\d{2}):?(\d{2})?/.exec(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "longOffset" }).format(probe));
-  const sign = off?.[1] ?? "-05", offMin = (off?.[2] ?? "00");
+  if (!off) return undefined;
+  const sign = off[1]!, offMin = off[2] ?? "00";
   const wall = new Date(Date.UTC(y, mo - 1, d, h, mi) + plusMinutes * 60_000);
   const p2 = (n: number) => String(n).padStart(2, "0");
   return `${wall.getUTCFullYear()}-${p2(wall.getUTCMonth() + 1)}-${p2(wall.getUTCDate())}T${p2(wall.getUTCHours())}:${p2(wall.getUTCMinutes())}:00${sign}:${offMin}`;
@@ -153,11 +160,19 @@ export class GoHighLevelConnector {
     const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
     const full = str(p.name) || [str(p.firstName), str(p.lastName)].filter(Boolean).join(" ");
     if (str(p.contactId)) return { id: str(p.contactId), name: full || "the contact", made: false };
-    const digits = str(p.phone).replace(/\D/g, "").slice(-10);
+    // A whole number only (a 7-digit one matches people in every area code), and the name on the card has to agree
+    // with the contact found, so an appointment never lands on someone else's record.
+    const raw = str(p.phone).replace(/\D/g, "");
+    const digits = raw.length === 11 && raw.startsWith("1") ? raw.slice(1) : raw.length === 10 ? raw : "";
+    if (str(p.phone) && !digits && !str(p.email)) throw new Error(`"${str(p.phone)}" isn't a full 10-digit phone number; put the whole number on the card`);
     const email = str(p.email).toLowerCase();
+    const words = (s: string) => s.toLowerCase().replace(/[^a-z ]+/g, " ").split(/\s+/).filter((x) => x.length > 1);
     for (const q of [digits, email].filter(Boolean)) {
-      const hit = (await this.contacts(q, 10)).find((c) => (digits && (c.phone ?? "").replace(/\D/g, "").endsWith(digits)) || (email && (c.email ?? "").toLowerCase() === email));
-      if (hit) return { id: hit.id, name: name(hit), made: false };
+      const hit = (await this.contacts(q, 10)).find((c) => (digits && (c.phone ?? "").replace(/\D/g, "").slice(-10) === digits) || (email && (c.email ?? "").toLowerCase() === email));
+      if (!hit) continue;
+      const found = name(hit);
+      if (full && words(found).length && !words(full).some((x) => words(found).includes(x))) throw new Error(`${q === digits ? `the phone ${str(p.phone)}` : `the email ${email}`} belongs to ${found} in GoHighLevel, not ${full}; check the number, or put the contactId on the card`);
+      return { id: hit.id, name: found, made: false };
     }
     if (!full && !digits && !email) throw new Error("the card needs the customer: a contactId, or a name with a phone or email");
     const [firstName, ...rest] = full.split(/\s+/);
@@ -314,8 +329,14 @@ export class GoHighLevelConnector {
         const endTime = easternIso(str(p.date), str(p.time), minutes)!;
         const cals = await this.calendars();
         const want = str(p.calendar).toLowerCase();
-        const cal = (want ? cals.find((c) => c.name.toLowerCase() === want || c.id === str(p.calendar)) ?? cals.find((c) => c.name.toLowerCase().includes(want)) : undefined) ?? (cals.length === 1 ? cals[0] : undefined);
-        if (!cal) throw new Error(cals.length ? `which calendar? GoHighLevel has ${cals.map((c) => `"${c.name}"`).join(", ")}; name one on the card` : "GoHighLevel has no active calendar");
+        const list = cals.map((c) => `"${c.name}"`).join(", ");
+        let cal: { id: string; name: string } | undefined;
+        if (want) {
+          const parts = cals.filter((c) => c.name.toLowerCase().includes(want));
+          cal = cals.find((c) => c.name.toLowerCase() === want || c.id === str(p.calendar)) ?? (parts.length === 1 ? parts[0] : undefined);
+          if (!cal) throw new Error(parts.length > 1 ? `"${str(p.calendar)}" fits ${parts.map((c) => `"${c.name}"`).join(" and ")}; name the one you mean` : `no calendar called "${str(p.calendar)}" in GoHighLevel; it has ${list || "none active"}`);
+        } else cal = cals.length === 1 ? cals[0] : undefined;
+        if (!cal) throw new Error(cals.length ? `which calendar? GoHighLevel has ${list}; name one on the card` : "GoHighLevel has no active calendar");
         const who = await this.contactFor(p);
         const title = str(p.title) || `${who.name}${str(p.address) ? ` · ${str(p.address)}` : ""}`;
         const r = await this.post<{ id?: string; appointmentStatus?: string }>("/calendars/events/appointments", {
