@@ -58,4 +58,5 @@ export function WalletAccounts({ name, blurb, api: base, hint }: { name: string;
 }
 
 export const HyperliquidAccounts = () => <WalletAccounts name="Hyperliquid" api="hyperliquid" blurb="Pentoshi reads your own account: positions, liquidation distance, orders, fills and balances. Read-only, from your wallet's public address; nothing can be traded." />;
+export const LighterAccounts = () => <WalletAccounts name="Lighter" api="lighter" blurb="Pentoshi reads your Lighter account and sub-accounts: positions, liquidation distance, PnL and funding paid. Read-only, from the public address of the wallet you use on Lighter; nothing can be traded." />;
 export const PolymarketAccounts = () => <WalletAccounts name="Polymarket" api="polymarket" blurb="Cat reads your own bets: each position's side, price, value and PnL, and winnings to claim. Read-only, from your wallet's public address; nothing can be bet. Market odds on Polymarket and Kalshi need nothing." hint="Your Polymarket address is on your profile page (the 0x… under your name), or in Settings on polymarket.com." />;

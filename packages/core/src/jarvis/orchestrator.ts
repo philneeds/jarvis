@@ -21,6 +21,7 @@ import { XREAD_TOOLS, expandXLinks, xPostIds, readXTimeline, type XPost } from "
 import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { PREDICTION_TOOLS } from "../predictions.js";
+import { LIGHTER_TOOLS } from "../lighter.js";
 import { LOOKUP_TOOLS } from "../lookup.js";
 import { INSTAGRAM_LINE, VideoAnalyzer, videoCaps, videoLogLine, videoRefs, videoText, videoTools, withoutInstagramLinks, type VideoDeps, type VideoRef } from "../video.js";
 import { Secrets } from "../secrets.js";
@@ -393,7 +394,7 @@ export class Jarvis {
   }
 
   /** Every tool an agent could be given: built-in plus connectors. */
-  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...this.videoToolList, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...PREDICTION_TOOLS, ...LOOKUP_TOOLS, ...this.workshopToolList, ...this.connectorTools.values()]; }
+  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...this.videoToolList, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...LIGHTER_TOOLS, ...PREDICTION_TOOLS, ...LOOKUP_TOOLS, ...this.workshopToolList, ...this.connectorTools.values()]; }
 
   // ---- Video --------------------------------------------------------------
   /** Keys Phil saved in Settings rather than .env (GEMINI_API_KEY). Write-only from the outside. */
