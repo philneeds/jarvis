@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { DisplayCard } from "@/components/DisplayCard";
 import { GithubRepos } from "@/components/GithubRepos";
-import { HyperliquidAccounts } from "@/components/HyperliquidAccounts";
+import { HyperliquidAccounts, PolymarketAccounts } from "@/components/WalletAccounts";
 import { startRegistration } from "@simplewebauthn/browser";
 import { Shell } from "@/components/Shell";
 import { useLive } from "@/lib/live";
@@ -241,6 +241,7 @@ export default function SettingsPage() {
             {(rhMsg || (conn?.robinhood?.lastFetch && !conn.robinhood.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: rhMsg && !/refused|error|expired|isn't connected|failed/i.test(rhMsg) ? "var(--ink)" : "var(--red)" }}>{rhMsg ?? conn?.robinhood?.lastFetch?.error}</p>}
           </div>
           <HyperliquidAccounts />
+          <PolymarketAccounts />
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Kubera">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.kubera?.lastFetch?.ok ? "dot-working" : conn?.kubera?.lastFetch ? "dot-error" : "dot-idle"}`} />
