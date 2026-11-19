@@ -397,3 +397,17 @@ test("Settings › GitHub: lists the repos the key reads and sets which agents r
   assert.equal(await github.reposFor("paul").then((r) => r?.join()), "range/app");
   assert.equal((await req("/api/github/access", { method: "PUT", cookie, body: JSON.stringify({ repo: "range/app", agents: ["nobody-real"] }) })).status, 400, "only real agents");
 });
+
+test("Settings › Hyperliquid: public addresses only; a private key is refused and never saved", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const key = `0x${"ab".repeat(32)}`;
+  const refused = await call("/api/hyperliquid/accounts", { method: "PUT", cookie, body: JSON.stringify({ accounts: [{ label: "Main", address: key }] }) });
+  assert.equal(refused.status, 400);
+  assert.match(((await refused.json()) as { error: string }).error, /never a private key/);
+  assert.equal(JSON.stringify(await store.settings.get("hyperliquid.accounts", [])).includes("abab"), false);
+  const addr = "0x1111111111111111111111111111111111111111";
+  const saved = await call("/api/hyperliquid/accounts", { method: "PUT", cookie, body: JSON.stringify({ accounts: [{ label: " Main ", address: addr }, { address: "0x2222222222222222222222222222222222222222" }] }) });
+  assert.deepEqual(((await saved.json()) as { accounts: unknown }).accounts, [{ label: "Main", address: addr }, { label: "Account 2", address: "0x2222222222222222222222222222222222222222" }]);
+  assert.equal((await call("/api/hyperliquid/accounts")).status, 401, "behind the login");
+});

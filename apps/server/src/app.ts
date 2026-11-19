@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
+import { hlAccounts, isHlAddress, accountText, HL_ACCOUNTS_KEY } from "@jarvis/core";
 import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type LeadPerfectionConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type EagleViewConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
@@ -528,6 +529,26 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.post("/connectors/discord/test", async (c) => {
     if (!connectors.discord) return c.json({ error: "DISCORD_BOT_TOKEN and DISCORD_CHANNELS aren't set" }, 400);
     try { return c.json({ ok: true, summary: await connectors.discord.check() }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
+  });
+  // Settings › Hyperliquid: the accounts Pentoshi reads, by public address (never a key), and a check that reads them.
+  api.get("/hyperliquid/accounts", async (c) => c.json({ accounts: await hlAccounts(jarvis.store) }));
+  api.put("/hyperliquid/accounts", async (c) => {
+    const { accounts } = (await c.req.json().catch(() => ({}))) as { accounts?: unknown };
+    if (!Array.isArray(accounts) || accounts.length > 10) return c.json({ error: "a list of up to 10 accounts" }, 400);
+    const list: { label: string; address: string }[] = [];
+    for (const a of accounts as { label?: unknown; address?: unknown }[]) {
+      const address = typeof a?.address === "string" ? a.address.trim() : "";
+      if (!isHlAddress(address)) return c.json({ error: `"${address}" isn't a wallet address (0x and 40 letters or digits). Paste the public address, never a private key.` }, 400);
+      list.push({ address, label: (typeof a.label === "string" && a.label.trim() ? a.label.trim() : `Account ${list.length + 1}`).slice(0, 40) });
+    }
+    await jarvis.store.settings.set(HL_ACCOUNTS_KEY, list);
+    await jarvis.router.log("jarvis", "system", `Phil set ${list.length} Hyperliquid account${list.length === 1 ? "" : "s"} for Pentoshi to read`);
+    return c.json({ accounts: list });
+  });
+  api.post("/connectors/hyperliquid/test", async (c) => {
+    const all = await hlAccounts(jarvis.store);
+    if (!all.length) return c.json({ error: "no Hyperliquid address set" }, 400);
+    try { return c.json({ ok: true, summary: (await Promise.all(all.map((x) => accountText(x)))).join("\n\n") }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
   });
   // Settings › GitHub: every repo the key reads, and which agents read each one.
   api.get("/github/repos", async (c) => {

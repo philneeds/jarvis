@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { defineTool, type ToolDef } from "./tools/index.js";
+import type { Store } from "./store/types.js";
 
 /**
  * Hyperliquid's public market data for Pentoshi: funding, open interest, price and volume for every perp. No key and no
- * account; read-only. (Phil's own positions would need his wallet address; Pentoshi asks for it when it's useful.)
+ * account; read-only. Phil's own account is read the same way, from the public address he sets in Settings › Hyperliquid
+ * (hyperliquid_account): positions, orders, fills, balances. No key is ever held, so nothing can be traded.
  */
 type Ctx = { funding?: string; openInterest?: string; markPx?: string; prevDayPx?: string; dayNtlVlm?: string; premium?: string | null };
 export interface PerpRow { coin: string; fundingHr: number; fundingApr: number; oiUsd: number; price: number; change24h: number; volume24h: number }
@@ -48,7 +50,95 @@ export function perpsText(rows: PerpRow[], coins?: string[]): string {
   ].join("\n\n");
 }
 
+// ---- Phil's own account, by its public address (read-only) ----------------------------------------------------------
+
+/** A Hyperliquid account Phil follows: its public address (never a key) and a name. */
+export interface HlAccount { address: string; label: string }
+export const HL_ACCOUNTS_KEY = "hyperliquid.accounts";
+export const isHlAddress = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a.trim());
+/** The accounts Phil set in Settings, else HYPERLIQUID_ADDRESS ("0x…" or "Main=0x…,Sub=0x…"). */
+export async function hlAccounts(store: Pick<Store, "settings">, env: NodeJS.ProcessEnv = process.env): Promise<HlAccount[]> {
+  const saved = await store.settings.get<HlAccount[]>(HL_ACCOUNTS_KEY, []);
+  if (saved.length) return saved;
+  return (env.HYPERLIQUID_ADDRESS ?? "").split(",").map((x, i) => { const [l, a] = x.includes("=") ? x.split("=") : [`Account ${i + 1}`, x]; return { label: l!.trim(), address: (a ?? "").trim() }; }).filter((x) => isHlAddress(x.address));
+}
+
+type Position = { coin: string; szi: string; entryPx?: string | null; positionValue?: string; unrealizedPnl?: string; returnOnEquity?: string; liquidationPx?: string | null; marginUsed?: string; leverage?: { type?: string; value?: number }; cumFunding?: { sinceOpen?: string } };
+type Clearing = { marginSummary?: { accountValue?: string; totalNtlPos?: string; totalMarginUsed?: string }; withdrawable?: string; assetPositions?: { position: Position }[] };
+type Order = { coin: string; side: string; limitPx?: string; sz?: string; origSz?: string; reduceOnly?: boolean; orderType?: string; triggerPx?: string; isTrigger?: boolean; timestamp?: number };
+type Fill = { coin: string; px: string; sz: string; side: string; time: number; dir?: string; closedPnl?: string; fee?: string };
+type Spot = { balances?: { coin: string; total: string; hold?: string; entryNtl?: string }[] };
+
+async function info<T>(body: Record<string, unknown>, f: typeof fetch): Promise<T> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 10_000);
+  try {
+    const res = await f(URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: ctl.signal });
+    if (!res.ok) throw new Error(`Hyperliquid answered ${res.status}`);
+    return (await res.json()) as T;
+  } finally { clearTimeout(t); }
+}
+
+const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+const px = (n: number) => (n < 1 ? n.toPrecision(4) : n.toLocaleString("en-US", { maximumFractionDigits: 2 }));
+const signed = (n: number) => `${n >= 0 ? "+" : "-"}${usd(Math.abs(n))}`;
+const et = (ms: number) => new Date(ms).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+/**
+ * One account in words: what it's worth, every open position with its liquidation distance, open orders, the last
+ * day's fills and spot balances. Five public reads; nothing here can trade.
+ */
+export async function accountText(acct: HlAccount, f: typeof fetch = fetch, now = Date.now()): Promise<string> {
+  const user = acct.address.trim();
+  const [perp, orders, fills, spot] = await Promise.all([
+    info<Clearing>({ type: "clearinghouseState", user }, f),
+    info<Order[]>({ type: "frontendOpenOrders", user }, f).catch(() => [] as Order[]),
+    info<Fill[]>({ type: "userFills", user }, f).catch(() => [] as Fill[]),
+    info<Spot>({ type: "spotClearinghouseState", user }, f).catch(() => ({}) as Spot),
+  ]);
+  const ms = perp.marginSummary ?? {};
+  const equity = num(ms.accountValue), used = num(ms.totalMarginUsed), ntl = num(ms.totalNtlPos);
+  const lines = [`${acct.label} (${short(user)}): perps account value ${usd(equity)}, margin used ${usd(used)}${equity ? ` (${Math.round((used / equity) * 100)}% of it)` : ""}, withdrawable ${usd(num(perp.withdrawable))}, open positions ${usd(ntl)}${equity ? ` (${(ntl / equity).toFixed(1)}x the account)` : ""}.`];
+  const pos = (perp.assetPositions ?? []).map((x) => x.position).filter((p) => num(p.szi) !== 0).sort((a, b) => num(b.positionValue) - num(a.positionValue));
+  if (pos.length) {
+    // Any close to liquidation first, then the largest; a long tail is counted, not listed.
+    const near = (p: Position) => { const sz = num(p.szi), m = sz ? num(p.positionValue) / Math.abs(sz) : 0, l = num(p.liquidationPx); return l && m ? Math.abs(m - l) / m < 0.15 : false; };
+    const ordered = [...pos.filter(near), ...pos.filter((p) => !near(p))];
+    lines.push(`Positions (${pos.length}${pos.length > 25 ? ", the 25 that matter most" : ""}):`);
+    for (const p of ordered.slice(0, 25)) {
+      const size = num(p.szi), value = num(p.positionValue), mark = size ? value / Math.abs(size) : 0, liq = num(p.liquidationPx);
+      const away = liq && mark ? (Math.abs(mark - liq) / mark) * 100 : undefined;
+      lines.push(`- ${away !== undefined && away < 15 ? "⚠ CLOSE TO LIQUIDATION · " : ""}${p.coin} ${size > 0 ? "long" : "short"} ${Math.abs(size)} @ ${px(num(p.entryPx))} · mark ${px(mark)} · ${usd(value)} · uPnL ${signed(num(p.unrealizedPnl))}${p.returnOnEquity ? ` (${pct(num(p.returnOnEquity) * 100, 1)} on margin)` : ""} · ${p.leverage?.value ?? "?"}x ${p.leverage?.type ?? ""}`.trimEnd() + `${liq ? ` · liquidation ${px(liq)} (${away!.toFixed(1)}% away)` : " · no liquidation price"}${p.cumFunding?.sinceOpen ? ` · funding since open ${num(p.cumFunding.sinceOpen) > 0 ? "paid" : "received"} ${usd(Math.abs(num(p.cumFunding.sinceOpen)))}` : ""}`);
+    }
+    if (pos.length > 25) lines.push(`- …and ${pos.length - 25} smaller positions worth ${usd(ordered.slice(25).reduce((t, p) => t + num(p.positionValue), 0))} in all.`);
+  } else lines.push("No open perp positions.");
+  if (orders.length) lines.push(`Open orders (${orders.length}):\n${orders.slice(0, 15).map((o) => `- ${o.coin} ${o.side === "B" ? "buy" : "sell"} ${o.sz ?? o.origSz} ${o.isTrigger && o.triggerPx ? `trigger ${px(num(o.triggerPx))} ` : ""}@ ${px(num(o.limitPx))}${o.orderType ? ` · ${o.orderType}` : ""}${o.reduceOnly ? " · reduce-only" : ""}`).join("\n")}${orders.length > 15 ? `\n- …and ${orders.length - 15} more` : ""}`);
+  const day = fills.filter((x) => now - x.time < 86_400_000).sort((a, b) => b.time - a.time);
+  if (day.length) {
+    const pnl = day.reduce((s2, x) => s2 + num(x.closedPnl), 0), fees = day.reduce((s2, x) => s2 + num(x.fee), 0);
+    lines.push(`Fills in the last 24h (${day.length}; closed PnL ${signed(pnl)}, fees ${usd(fees)}):\n${day.slice(0, 10).map((x) => `- ${et(x.time)} ${x.coin} ${x.dir ?? (x.side === "B" ? "buy" : "sell")} ${x.sz} @ ${px(num(x.px))}${num(x.closedPnl) ? ` · closed ${signed(num(x.closedPnl))}` : ""}`).join("\n")}`);
+  }
+  const bal = (spot.balances ?? []).filter((b) => num(b.total) !== 0);
+  if (bal.length) lines.push(`Spot: ${bal.map((b) => `${b.coin} ${Number(num(b.total).toFixed(4))}${num(b.entryNtl) ? ` (cost ${usd(num(b.entryNtl))})` : ""}`).join(", ")}.`);
+  return lines.join("\n");
+}
+
 export const HYPERLIQUID_TOOLS: ToolDef[] = [
+  defineTool({
+    name: "hyperliquid_account",
+    description: "Phil's own Hyperliquid account(s), read-only from the public address he set in Settings: account value, margin, every open position (size, entry, mark, PnL, leverage, liquidation price and how far away), open orders, the last 24h of fills, spot balances. Nothing can be traded through it. Optionally one account by its name.",
+    schema: { account: z.string().max(60).optional().describe("the account's name in Settings, when Phil has more than one") },
+    async handler({ account }, ctx) {
+      try {
+        const all = await hlAccounts(ctx.store);
+        if (!all.length) return "No Hyperliquid account set. Phil adds his wallet's public address (0x…) in Settings › Hyperliquid; it's read-only, no key.";
+        const pick = account ? all.filter((x) => x.label.toLowerCase().includes(account.toLowerCase()) || x.address.toLowerCase() === account.toLowerCase()) : all;
+        if (!pick.length) return `No Hyperliquid account called "${account}"; Phil's are ${all.map((x) => x.label).join(", ")}.`;
+        const out = await Promise.all(pick.slice(0, 5).map((x) => accountText(x).catch((e: Error) => `${x.label}: couldn't read it (${e.message})`)));
+        return out.join("\n\n");
+      } catch (e) { return `Hyperliquid: ${(e as Error).message}`; }
+    },
+  }),
   defineTool({
     name: "hyperliquid_perps",
     description: "Hyperliquid perps market data (public, read-only): funding (hourly and APR), open interest, price, 24h change and volume. With no coins: the biggest open interest, the most extreme funding both ways and the biggest moves. With coins: those markets.",
