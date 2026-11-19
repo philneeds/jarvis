@@ -149,6 +149,8 @@ export class Jarvis {
   private describers = new Map<string, Describer>();
   /** Extra tools from connectors, by name. */
   readonly connectorTools = new Map<string, import("../tools/index.js").ToolDef>();
+  /** Tools a connector grants an agent because of something Phil set there (a GitHub repo he assigned it). */
+  private toolGrants: ((agentId: string) => Promise<string[]>)[] = [];
   /**
    * After a restart nothing is running, whatever the database says: a run that died with the old process would otherwise
    * show as "working" forever. Called once at boot; returns the agents that were reset.
@@ -309,10 +311,11 @@ export class Jarvis {
   onApproved(action: string, fn: Executor) { this.executors.set(action, fn); }
 
   /** Plug in a connector: its tools become available in agent settings, its actions run on approval. */
-  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer>; normalize?: Normalizer; preflight?(a: Omit<Approval, "id" | "at" | "status">): Promise<string | undefined>; undoers?(): Record<string, (a: Approval) => Promise<string>>; pulses?(): Record<string, (agentId: string) => Promise<string>> }, hint?: string) {
+  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer>; normalize?: Normalizer; preflight?(a: Omit<Approval, "id" | "at" | "status">): Promise<string | undefined>; undoers?(): Record<string, (a: Approval) => Promise<string>>; pulses?(): Record<string, (agentId: string) => Promise<string>>; toolsFor?(agentId: string): Promise<string[]> }, hint?: string) {
     for (const [k, fn] of Object.entries(c.undoers?.() ?? {})) this.undoers.set(k, fn);
     for (const [k, fn] of Object.entries(c.pulses?.() ?? {})) this.pulses.set(k, fn);
     for (const t of c.tools()) this.connectorTools.set(t.name, t);
+    if (c.toolsFor) this.toolGrants.push((id) => c.toolsFor!(id));
     for (const [k, fn] of Object.entries(c.executors())) this.executors.set(k, fn);
     for (const [k, fn] of Object.entries(c.describe?.() ?? {})) this.describers.set(k, fn);
     if (c.normalize) this.normalizers.push(c.normalize.bind(c));
@@ -695,7 +698,8 @@ export class Jarvis {
     const memory = [...(await this.store.memory.list("phil")), ...(await this.store.memory.list(`venture:${agent.venture}`)), ...(await this.store.memory.list(`agent:${agent.id}`))];
     const cfg = await getAgentConfig(this.store, agent.id);
     // memory_read goes to everyone: briefings carry long notes cut short, and the rest must be one call away.
-    const tools = this.allTools().filter((t) => cfg.tools.includes(t.name) || t.name === "memory_read");
+    const granted = new Set((await Promise.all(this.toolGrants.map((g) => g(agent.id).catch(() => [] as string[])))).flat());
+    const tools = this.allTools().filter((t) => cfg.tools.includes(t.name) || granted.has(t.name) || t.name === "memory_read");
     // Einstein's workshop: a fresh branch of the code for this task, with the file and shell tools inside it.
     let workspace: import("../router/types.js").Workspace | undefined;
     let workshopHint = "";

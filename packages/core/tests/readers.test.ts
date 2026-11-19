@@ -58,6 +58,55 @@ test("GitHub: read-only repos, tree, file, commits and issues, limited to the re
   assert.match(await t("github_commits").handler({ repo: "range/app" }, ctx), /^abcdef1 · jason · Nov 5, 2026 · Fix login$/);
   assert.match(await t("github_issues").handler({ repo: "range/app" }, ctx), /#7 issue · open · phil · Nov 3, 2026 · Wallet connect fails on mobile \[bug\]\n#8 PR · open · jason/);
   assert.match(await t("github_file").handler({ repo: "other/secret", path: "x" }, ctx), /isn't one of the repos Phil shared \(range\/app\)/);
-  assert.deepEqual(Object.keys(g.executors()), []);
+  assert.deepEqual(Object.keys(g.executors()), ["github.access"], "the one action is who in HQ reads which repo");
   for (const id of ["jason", "paul", "ansem", "devteam"]) assert.ok(CHARTERS[id]!.tools!.includes("github_file"), `${id} reads code`);
+});
+
+test("GitHub: Phil assigns repos to agents; each agent reads only its own, and gets the read tools", async () => {
+  const { Jarvis, ModelRouter, mockProvider, getAgent } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const repo = (n: string) => ({ full_name: n, private: true, default_branch: "main", pushed_at: "2026-11-05T00:00:00Z" });
+  const f = (async (url: string | URL | Request) => {
+    const u = new URL(String(url));
+    if (u.pathname === "/user/repos") return Response.json([repo("range/app"), repo("range/api"), repo("philneeds/site")]);
+    if (/^\/repos\/[^/]+\/[^/]+$/.test(u.pathname)) return Response.json(repo(u.pathname.slice(7)));
+    if (u.pathname.endsWith("/commits")) return Response.json([{ sha: "abcdef1234", commit: { message: "Work", author: { name: "J", date: "2026-11-05T12:00:00Z" } } }]);
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  const g = new GithubConnector(store, { token: "ghp", fetch: f });
+  const t = (n: string) => g.tools().find((x) => x.name === n)!;
+  // Nothing assigned: the charter agents see everything the key reads.
+  assert.equal(await g.reposFor("jason"), undefined);
+  assert.match(await t("github_repos").handler({}, { store, agentId: "jason" }), /range\/app[\s\S]*range\/api[\s\S]*philneeds\/site/);
+  // Phil assigns: Jason gets the Range repos, Boo the site.
+  await g.setAccess("range/app", ["jason", "paul"]);
+  await g.setAccess("range/api", ["jason"]);
+  await g.setAccess("philneeds/site", ["boo"]);
+  const jason = await t("github_repos").handler({}, { store, agentId: "jason" });
+  assert.match(jason, /range\/app/); assert.match(jason, /range\/api/); assert.doesNotMatch(jason, /philneeds\/site/);
+  assert.match(await t("github_commits").handler({ repo: "philneeds/site" }, { store, agentId: "jason" }), /isn't one of your repos.*yours: range\/app, range\/api/, "enforced on every read, not just the list");
+  assert.match(await t("github_commits").handler({ repo: "Range/App" }, { store, agentId: "paul" }), /abcdef1 · J/);
+  assert.match(await t("github_commits").handler({ repo: "range/app" }, { store, agentId: "ansem" }), /you have none yet/);
+  // Everyone with GitHub.
+  await g.setAccess("philneeds/site", ["*"]);
+  assert.match(await t("github_commits").handler({ repo: "philneeds/site" }, { store, agentId: "ansem" }), /abcdef1/);
+  // An agent given a repo gets the read tools, even without GitHub in its charter.
+  await g.setAccess("range/api", ["jason", "boo"]);
+  const provider = mockProvider("m");
+  const seen: string[][] = [];
+  provider.run = async (req) => { seen.push((req.tools ?? []).map((x) => x.name)); return { text: "ok", provider: "m", modelId: "m", inputTokens: 1, outputTokens: 1, costUsd: 0, durationMs: 1 }; };
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [provider], grok: [provider] } }) });
+  jarvis.addConnector(g, GithubConnector.promptHint());
+  assert.ok(!CHARTERS.boo?.tools?.includes("github_file"));
+  await jarvis.runAgent(getAgent("boo")!, "What changed on the site?", { direct: true });
+  assert.ok(seen.at(-1)!.includes("github_file") && seen.at(-1)!.includes("github_repos"), seen.at(-1)!.join(","));
+  await jarvis.runAgent(getAgent("munger")!, "Net worth", { direct: true });
+  assert.ok(!seen.at(-1)!.includes("github_file"), "no repo, no GitHub tools");
+  // Phil asks Jarvis: a card, then the change.
+  const card = await jarvis.requestApproval({ agentId: "jason", kind: "other", title: "GitHub: Paul ← range/api", body: "Paul reviews the API", payload: { action: "github.access", repo: "RANGE/api", add: ["paul"] } });
+  assert.equal(card.status, "pending", "who reads code waits for Phil");
+  assert.match(card.effect ?? "", /Changes which agents can read RANGE\/api.*adds paul\. Nothing in GitHub changes\./);
+  assert.match((await jarvis.decide(card.id, "approved"))?.note ?? "", /range\/api is now read by jason, boo, paul\./);
+  const bad = await jarvis.requestApproval({ agentId: "jason", kind: "other", title: "x", body: "x", payload: { action: "github.access", repo: "someone/else", add: ["paul"] } });
+  assert.match((await jarvis.decide(bad.id, "approved"))?.note ?? "", /^Failed to execute github\.access: someone\/else isn't one the GitHub key can read/);
 });

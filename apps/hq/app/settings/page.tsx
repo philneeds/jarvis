@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { DisplayCard } from "@/components/DisplayCard";
+import { GithubRepos } from "@/components/GithubRepos";
 import { startRegistration } from "@simplewebauthn/browser";
 import { Shell } from "@/components/Shell";
 import { useLive } from "@/lib/live";
@@ -291,12 +292,13 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="GitHub">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.github?.lastFetch?.ok ? "dot-working" : conn?.github?.lastFetch ? "dot-error" : "dot-idle"}`} />
-              <span><b>GitHub</b> · Jason, the dev team, Paul and Ansem read the repos you share, read-only{conn?.github?.repos?.length ? ` (${conn.github.repos.join(", ")})` : ""}.</span>
+              <span><b>GitHub</b> · agents read your repos, read-only: you choose which agent reads which repo below{conn?.github?.repos?.length ? ` (the key is limited to ${conn.github.repos.join(", ")})` : ""}.</span>
               {conn?.github?.configured
                 ? <><span style={{ color: "var(--dim)" }}>{conn.github.lastFetch ? `${conn.github.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.github.lastFetch.at)}` : "not read yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testSimple("/api/connectors/github/test", setGhMsg)}>Check now</button></>
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GITHUB_READ_TOKEN (fine-grained, read-only) and optionally GITHUB_REPOS</span>}
             </div>
             {(ghMsg || (conn?.github?.lastFetch && !conn.github.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: ghMsg && !/refused|error|limit|isn't set|not found/i.test(ghMsg) ? "var(--ink)" : "var(--red)" }}>{ghMsg ?? conn?.github?.lastFetch?.error}</p>}
+            {conn?.github?.configured && <GithubRepos />}
           </div>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Einstein's workshop">
             <div className="flex flex-wrap items-center gap-3">

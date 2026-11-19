@@ -371,3 +371,29 @@ test("Done for you over the API: the list, Undo, and Phil's switch", async () =>
   assert.equal((await json<{ on: boolean }>(send("/api/autodone", "GET"))).on, false);
   await send("/api/autonomy", "POST", { reversible: true });
 });
+
+test("Settings › GitHub: lists the repos the key reads and sets which agents read each one", async () => {
+  const { GithubConnector } = await import("@jarvis/core");
+  const s = memoryStore(); await s.init();
+  const j = new Jarvis({ store: s });
+  const f = (async (url: string | URL | Request) => {
+    const u = new URL(String(url));
+    if (u.pathname === "/user/repos") return Response.json([{ full_name: "range/app", private: true, description: "App", language: "TypeScript", pushed_at: "2026-11-05T00:00:00Z" }]);
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  const github = new GithubConnector(s, { token: "ghp", fetch: f });
+  const a = createApp(j, { github });
+  const req = (path: string, init: RequestInit & { cookie?: string } = {}) => { const h = new Headers(init.headers); if (init.cookie) h.set("cookie", init.cookie); if (init.body) h.set("content-type", "application/json"); return a.request(`http://hq${path}`, { ...init, headers: h }); };
+  const ok = await req("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  assert.equal((await req("/api/github/repos")).status, 401, "behind the login");
+  const list = (await (await req("/api/github/repos", { cookie })).json()) as { repos: { name: string; private: boolean }[]; access: Record<string, string[]>; agents: { id: string }[] };
+  assert.deepEqual(list.repos.map((r) => [r.name, r.private]), [["range/app", true]]);
+  assert.deepEqual(list.access, {});
+  assert.ok(list.agents.some((x) => x.id === "jason") && !list.agents.some((x) => x.id === "jarvis"));
+  const put = await req("/api/github/access", { method: "PUT", cookie, body: JSON.stringify({ repo: "range/app", agents: ["jason", "paul"] }) });
+  assert.equal(put.status, 200);
+  assert.deepEqual(((await put.json()) as { access: Record<string, string[]> }).access, { "range/app": ["jason", "paul"] });
+  assert.equal(await github.reposFor("paul").then((r) => r?.join()), "range/app");
+  assert.equal((await req("/api/github/access", { method: "PUT", cookie, body: JSON.stringify({ repo: "range/app", agents: ["nobody-real"] }) })).status, 400, "only real agents");
+});

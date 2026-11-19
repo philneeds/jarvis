@@ -529,6 +529,24 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     if (!connectors.discord) return c.json({ error: "DISCORD_BOT_TOKEN and DISCORD_CHANNELS aren't set" }, 400);
     try { return c.json({ ok: true, summary: await connectors.discord.check() }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
   });
+  // Settings › GitHub: every repo the key reads, and which agents read each one.
+  api.get("/github/repos", async (c) => {
+    if (!connectors.github) return c.json({ error: "GITHUB_READ_TOKEN isn't set" }, 400);
+    try {
+      const repos = (await connectors.github.repos()).map((r) => ({ name: r.full_name, description: r.description ?? "", private: !!r.private, language: r.language ?? "", pushed: r.pushed_at ?? "" }));
+      return c.json({ repos, access: await connectors.github.access(), agents: AGENTS.filter((a) => a.id !== "jarvis").map((a) => ({ id: a.id, name: a.name, venture: a.venture })) });
+    } catch (e) { return c.json({ error: (e as Error).message }, 502); }
+  });
+  api.put("/github/access", async (c) => {
+    if (!connectors.github) return c.json({ error: "GITHUB_READ_TOKEN isn't set" }, 400);
+    const { repo, agents } = (await c.req.json().catch(() => ({}))) as { repo?: unknown; agents?: unknown };
+    if (typeof repo !== "string" || !Array.isArray(agents) || agents.some((a) => typeof a !== "string" || (a !== "*" && !AGENTS.some((x) => x.id === a)))) return c.json({ error: "repo and a list of agent ids" }, 400);
+    try {
+      const access = await connectors.github.setAccess(repo, agents as string[]);
+      await jarvis.router.log("jarvis", "system", `Phil set who reads ${repo} on GitHub: ${(agents as string[]).join(", ") || "nobody"}`);
+      return c.json({ access });
+    } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
   api.post("/connectors/github/test", async (c) => {
     if (!connectors.github) return c.json({ error: "GITHUB_READ_TOKEN isn't set" }, 400);
     try { return c.json({ ok: true, summary: await connectors.github.check() }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
