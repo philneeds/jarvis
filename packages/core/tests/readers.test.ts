@@ -110,3 +110,27 @@ test("GitHub: Phil assigns repos to agents; each agent reads only its own, and g
   const bad = await jarvis.requestApproval({ agentId: "jason", kind: "other", title: "x", body: "x", payload: { action: "github.access", repo: "someone/else", add: ["paul"] } });
   assert.match((await jarvis.decide(bad.id, "approved"))?.note ?? "", /^Failed to execute github\.access: someone\/else isn't one the GitHub key can read/);
 });
+
+test("GitHub digest: a Grok agent (Ansem) gets his assigned repos' README, latest commits and open issues before each run", async () => {
+  const { prefetchTools } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = new URL(String(url)); const h = init?.headers as Record<string, string>;
+    if (u.pathname === "/repos/philneeds/papermeme") return Response.json({ full_name: "philneeds/Papermeme", description: "Memecoin backtests from Discord calls", language: "Python", pushed_at: "2026-10-26T15:00:00Z", default_branch: "main" });
+    if (u.pathname === "/repos/philneeds/papermeme/commits") return Response.json([{ sha: "1234567abc", commit: { message: "Add backtest for call outcomes", author: { name: "Jason", date: "2026-10-25T12:00:00Z" } } }]);
+    if (u.pathname === "/repos/philneeds/papermeme/issues") return Response.json([{ number: 3, title: "Win rate by caller", state: "open", user: { login: "phil" }, updated_at: "2026-10-24T00:00:00Z" }]);
+    if (u.pathname === "/repos/philneeds/papermeme/readme") { assert.match(h.accept, /raw/); return new Response("# Papermeme\nPaper-trades memecoin calls from Discord and backtests them."); }
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  const g = new GithubConnector(store, { token: "ghp", fetch: f });
+  const digest = g.tools().find((x) => x.name === "github_digest")!;
+  assert.match(await digest.handler({}, { store, agentId: "ansem" }), /No repos chosen/);
+  await g.setAccess("philneeds/Papermeme", ["ansem", "jason"]);
+  assert.match(await digest.handler({}, { store, agentId: "munger" }), /No repos are assigned to you yet/);
+  const pre = await prefetchTools([digest], { store, agentId: "ansem" });
+  assert.match(pre, /### github_digest\n## philneeds\/Papermeme — Memecoin backtests from Discord calls \(Python\), last push Oct 26, 2026/);
+  assert.match(pre, /README \(start\):\n# Papermeme\nPaper-trades memecoin calls/);
+  assert.match(pre, /Latest commits:\n- 1234567 · Jason · Oct 25, 2026 · Add backtest for call outcomes/);
+  assert.match(pre, /Open issues and pull requests:\n- #3 issue · Win rate by caller · phil/);
+  assert.ok(CHARTERS.ansem!.tools!.includes("github_digest"));
+});
