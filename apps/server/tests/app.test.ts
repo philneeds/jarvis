@@ -413,3 +413,36 @@ test("Settings › Hyperliquid: public addresses only; a private key is refused 
   assert.deepEqual(((await saved.json()) as { accounts: unknown }).accounts, [{ label: "Main", address: addr }, { label: "Account 2", address: "0x2222222222222222222222222222222222222222" }]);
   assert.equal((await call("/api/hyperliquid/accounts")).status, 401, "behind the login");
 });
+
+test("glasses: a pairing key made in Settings (only its hash kept) asks Jarvis and reads the replies; nothing else accepts it", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const dev = (path: string, key?: string, init: RequestInit = {}) => app.request(`http://hq${path}`, { ...init, headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), ...(init.body ? { "content-type": "application/json" } : {}), origin: "https://somewhere-else.example" } });
+  assert.equal((await dev("/api/glasses/device/ping", "nope")).status, 401, "no pairing yet");
+  assert.equal((await call("/api/glasses/pair", { method: "POST" })).status, 401, "pairing needs the login");
+  const paired = (await (await call("/api/glasses/pair", { method: "POST", cookie })).json()) as { key: string; paired: boolean };
+  assert.ok(paired.paired && paired.key.length >= 30);
+  assert.ok(!JSON.stringify(await store.settings.get("glasses.pairing", null)).includes(paired.key), "the key itself isn't stored");
+  assert.equal((await dev("/api/glasses/device/ping", paired.key)).status, 200);
+  assert.equal((await dev("/api/glasses/device/ask", "wrong", { method: "POST", body: JSON.stringify({ text: "hi" }) })).status, 401);
+  // The device endpoints work from the phone's own engine (any or no Origin); the key opens nothing else.
+  assert.equal((await dev("/api/state", paired.key)).status, 401);
+  const asked = await dev("/api/glasses/device/ask", paired.key, { method: "POST", body: JSON.stringify({ text: "What's on my plate today?" }) });
+  assert.equal(asked.status, 200);
+  const { id } = (await asked.json()) as { id: string };
+  const mine = (await store.chat.list(50)).find((m) => m.id === id)!;
+  assert.equal(mine.channel, "glasses");
+  let got: { replies: { who: string; text: string }[]; done: boolean } = { replies: [], done: false };
+  for (let i = 0, seen = 0; i < 40 && !got.done; i++) { const r = (await (await dev(`/api/glasses/device/replies?to=${id}&seen=${seen}&wait=2`, paired.key)).json()) as typeof got; got = { replies: [...got.replies, ...r.replies], done: r.done }; seen = got.replies.length; }
+  assert.ok(got.done && got.replies.length >= 1, JSON.stringify(got));
+  assert.equal(got.replies[0]!.who, "Jarvis");
+  assert.doesNotMatch(got.replies.map((r) => r.text).join("\n"), /\*\*|^#|\]\(/m, "plain text for the display");
+  assert.equal((await dev("/api/glasses/device/ask", paired.key, { method: "POST", body: JSON.stringify({ text: "" }) })).status, 400);
+  // Pairing again replaces the key; unpairing ends it.
+  const again = (await (await call("/api/glasses/pair", { method: "POST", cookie })).json()) as { key: string };
+  assert.equal((await dev("/api/glasses/device/ping", paired.key)).status, 401, "the old key stopped working");
+  assert.equal((await dev("/api/glasses/device/ping", again.key)).status, 200);
+  assert.equal(((await (await call("/api/glasses", { cookie })).json()) as { paired: boolean; seenAt?: string }).paired, true);
+  await call("/api/glasses/pair", { method: "DELETE", cookie });
+  assert.equal((await dev("/api/glasses/device/ping", again.key)).status, 401);
+});

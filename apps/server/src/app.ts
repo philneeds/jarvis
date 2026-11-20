@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
+import { glassesKeyOk, glassesReplies, glassesStatus, pairGlasses, unpairGlasses } from "@jarvis/core";
 import { hlAccounts, isHlAddress, accountText, HL_ACCOUNTS_KEY, polyAccounts, polyPositionsText, POLY_ACCOUNTS_KEY, lighterAccounts, lighterAccountText, LIGHTER_ACCOUNTS_KEY } from "@jarvis/core";
 import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type LeadPerfectionConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type EagleViewConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
@@ -18,6 +19,9 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   // A page on another site must not be able to act as Phil with his cookie. CORS only hides the answer; the request
   // still runs. So anything that changes state is refused when the browser says it came from somewhere else.
   app.use("/api/*", async (c, next) => {
+    // The glasses app's own endpoints carry a pairing key, never the login cookie, so the cross-site check (which
+    // protects the cookie) doesn't apply to them.
+    if (c.req.path.startsWith("/api/glasses/device/")) return next();
     if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method) && !fromHq(c.req.header("origin"), origins, c.req.header("x-forwarded-host") ?? c.req.header("host"))) return c.json({ error: "this request came from another site" }, 403);
     await next();
   });
@@ -37,6 +41,34 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   app.post("/api/logout", (c) => { logout(c); return c.json({ ok: true }); });
   app.get("/api/me", (c) => c.json({ authed: isAuthed(c), auth: authEnabled }));
   app.route("/api/passkeys", passkeyRoutes(jarvis.store));
+  // Phil's smart glasses (apps/glasses, a MentraOS miniapp on his phone). Its own pairing key, made in Settings: the
+  // key can ask Jarvis something and read the replies to it, nothing else.
+  const glassesAsks = new Map<string, { done: boolean; at: number }>();
+  const glassesKey = async (c: { req: { header(n: string): string | undefined } }) => glassesKeyOk(jarvis.store, (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "") || undefined);
+  app.get("/api/glasses/device/ping", async (c) => ((await glassesKey(c)) ? c.json({ ok: true, name: "Jarvis HQ" }) : c.json({ error: "bad or missing pairing key" }, 401)));
+  app.post("/api/glasses/device/ask", async (c) => {
+    if (!(await glassesKey(c))) return c.json({ error: "bad or missing pairing key" }, 401);
+    const b = z.object({ text: z.string().trim().min(1).max(2000), spoken: z.boolean().optional() }).safeParse(await c.req.json().catch(() => ({})));
+    if (!b.success) return c.json({ error: "text required (up to 2000 characters)" }, 400);
+    const { message, done } = await jarvis.submit(b.data.text, { channel: "glasses", voice: b.data.spoken !== false });
+    for (const [id, v] of glassesAsks) if (Date.now() - v.at > 60 * 60_000) glassesAsks.delete(id);
+    glassesAsks.set(message.id, { done: false, at: Date.now() });
+    void done.catch(() => undefined).then(() => { const e = glassesAsks.get(message.id); if (e) e.done = true; });
+    return c.json({ id: message.id });
+  });
+  // The replies to one ask, after the first `seen` of them; waits up to `wait` seconds for something new (long poll).
+  app.get("/api/glasses/device/replies", async (c) => {
+    if (!(await glassesKey(c))) return c.json({ error: "bad or missing pairing key" }, 401);
+    const to = c.req.query("to") ?? "", seen = Math.max(0, Number(c.req.query("seen")) || 0), wait = Math.min(Math.max(Number(c.req.query("wait")) || 0, 0), 25);
+    const until = Date.now() + wait * 1000;
+    for (;;) {
+      const all = glassesReplies(await jarvis.store.chat.list(200), to, (id) => findAgent(id ?? "")?.name ?? id ?? "Agent");
+      // An ask HQ no longer remembers (a restart) has nothing more coming.
+      const finished = glassesAsks.get(to)?.done ?? true;
+      if (all.length > seen || finished || Date.now() >= until) return c.json({ replies: all.slice(seen), done: finished });
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  });
   // Apple Health from Phil's iPhone (Health Auto Export). Its own key, not the HQ login, since the app can't sign in.
   app.post("/api/apple-health/ingest", async (c) => {
     const auth = c.req.header("authorization") ?? "";
@@ -529,6 +561,18 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.post("/connectors/discord/test", async (c) => {
     if (!connectors.discord) return c.json({ error: "DISCORD_BOT_TOKEN and DISCORD_CHANNELS aren't set" }, 400);
     try { return c.json({ ok: true, summary: await connectors.discord.check() }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
+  });
+  // Settings › Glasses: pair (the key is shown once), see when they were last heard from, unpair.
+  api.get("/glasses", async (c) => c.json(await glassesStatus(jarvis.store)));
+  api.post("/glasses/pair", async (c) => {
+    const key = await pairGlasses(jarvis.store);
+    await jarvis.router.log("jarvis", "system", "Phil paired his glasses (a new pairing key; any earlier one stopped working)");
+    return c.json({ key, ...(await glassesStatus(jarvis.store)) });
+  });
+  api.delete("/glasses/pair", async (c) => {
+    await unpairGlasses(jarvis.store);
+    await jarvis.router.log("jarvis", "system", "Phil unpaired his glasses");
+    return c.json(await glassesStatus(jarvis.store));
   });
   // Settings › Hyperliquid and › Polymarket: wallets agents read by public address (never a key), and a check that reads them.
   const wallets = [

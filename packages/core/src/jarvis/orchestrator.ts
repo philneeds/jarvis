@@ -23,6 +23,7 @@ import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { PREDICTION_TOOLS } from "../predictions.js";
 import { LIGHTER_TOOLS } from "../lighter.js";
+import { GLASSES_HINT } from "../glasses.js";
 import { LOOKUP_TOOLS } from "../lookup.js";
 import { INSTAGRAM_LINE, VideoAnalyzer, videoCaps, videoLogLine, videoRefs, videoText, videoTools, withoutInstagramLinks, type VideoDeps, type VideoRef } from "../video.js";
 import { Secrets } from "../secrets.js";
@@ -655,7 +656,8 @@ export class Jarvis {
     const system = jarvisSystemPrompt(memory, `${status.text}\n${await this.liveWorkText()}`, await this.attentionText(), reportsText(await recentReports(this.store, 48))) + await this.connectionsText() + await this.pendingText("jarvis");
 
     const imageIds = this.convo.getStore()?.images ?? [];
-    const byVoice = this.convo.getStore()?.voice ? "\n\n(Phil said this as a voice note; it was transcribed, so an odd word may be a mishearing. Don't say you can't tell how it arrived.)" : "";
+    // Through the glasses the answer must fit a few lines in his view; that hint also covers mishearing.
+    const byVoice = this.convo.getStore()?.channel === "glasses" ? GLASSES_HINT : this.convo.getStore()?.voice ? "\n\n(Phil said this as a voice note; it was transcribed, so an odd word may be a mishearing. Don't say you can't tell how it arrived.)" : "";
     const planText = (imageIds.length ? `${userText}\n\n(Phil attached ${imageIds.length} image${imageIds.length > 1 ? "s" : ""}. Anything about how something looks goes to Joi; the image goes with the task.)` : userText) + byVoice;
     // "pull the last 25 posts from @x into House's brain", "have Lucas file @x's tweets in House's memory": the pull is
     // HQ's own, decided here rather than by the planner, so no model can route it to a research run that may not finish.

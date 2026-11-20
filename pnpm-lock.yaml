@@ -12,6 +12,25 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
 
+  apps/glasses:
+    dependencies:
+      '@mentra/miniapp':
+        specifier: 3.4.0
+        version: 3.4.0(react@19.3.1)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.0
+        version: 22.20.5
+      esbuild:
+        specifier: ^0.25.12
+        version: 0.25.12
+      tsx:
+        specifier: ^4.20.6
+        version: 4.23.15
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   apps/hq:
     dependencies:
       '@jarvis/core':
@@ -852,6 +871,17 @@ packages:
 
   '@levischuck/tiny-cbor@0.2.11':
     resolution: {integrity: sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow==}
+
+  '@mentra/cloud-protocol@3.4.0':
+    resolution: {integrity: sha512-9ki2vzOg8KEixPXI1z+M/XBecL+t7l9iY0/u2Sw0lPwpwDd5vSzGC2oi+frn9O/VWNzc8IMwA65+AmqlfC+b9w==}
+
+  '@mentra/miniapp@3.4.0':
+    resolution: {integrity: sha512-hhmEPMn5yGamAidmB9hPHON5RlUD59aloBFET0HRsD0SYphC5Lg5s1UmlrFXIUGuhODkoH3UN+lcBv2Ey2+a3w==}
+    peerDependencies:
+      react: '>=18.0.0'
+    peerDependenciesMeta:
+      react:
+        optional: true
 
   '@modelcontextprotocol/sdk@1.32.2':
     resolution: {integrity: sha512-SWsVtH/0vULSQStoZ6xxH2K09Li8fXYTMC64ZeogCdpZ3XSi1eCPOByV1OpuJxuI3OcmHhosDWYyii07tpPsLw==}
@@ -2367,6 +2397,13 @@ packages:
     resolution: {integrity: sha512-ujeqbceABgwMZxEJnk2HDY2DlnUZ+9oEcb1KzTVfYHio0UE6dG71n60d8D2I4qNvleWrrXpmjpt7vZeF1LnMZQ==}
     engines: {node: '>=6'}
 
+  tldts-core@7.5.5:
+    resolution: {integrity: sha512-rEJz/8cJFY/bdF354gl14yxavbrIbvM+FcbkYVQ6CSCMQTJdUFUIm39TTWSiGPvcpQh7/F6qHrD3SkwwdgtDCw==}
+
+  tldts@7.4.19:
+    resolution: {integrity: sha512-48dH6aSpQnpbzDUc4vIQZ1VjB8tkK+e8c1yx05/SZK+rkssgjEOlxDd/yU8/a4vGYQ9vRgJr9dwMq9TJ0b3X2Q==}
+    hasBin: true
+
   tmp@0.2.7:
     resolution: {integrity: sha512-e0votIpp4Uo2AJYSzVHV6xCcawuiez3DzqDAbrTc3YxBkplN6e+dM13ZeIcZnDg/QpSuU2zfZ3rzwY8ukEnaXw==}
     engines: {node: '>=14.14'}
@@ -2542,6 +2579,9 @@ packages:
     resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
     peerDependencies:
       zod: ^3.25.28 || ^4
+
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
@@ -3001,6 +3041,18 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.6.0
 
   '@levischuck/tiny-cbor@0.2.11': {}
+
+  '@mentra/cloud-protocol@3.4.0':
+    dependencies:
+      tldts: 7.4.19
+      zod: 3.25.76
+
+  '@mentra/miniapp@3.4.0(react@19.3.1)':
+    dependencies:
+      '@mentra/cloud-protocol': 3.4.0
+      eventemitter3: 5.0.1
+    optionalDependencies:
+      react: 19.3.1
 
   '@modelcontextprotocol/sdk@1.32.2(zod@4.6.7)':
     dependencies:
@@ -4711,6 +4763,12 @@ snapshots:
       inherits: 2.0.4
       readable-stream: 3.6.2
 
+  tldts-core@7.5.5: {}
+
+  tldts@7.4.19:
+    dependencies:
+      tldts-core: 7.5.5
+
   tmp@0.2.7: {}
 
   toidentifier@1.0.1: {}
@@ -4907,5 +4965,7 @@ snapshots:
   zod-to-json-schema@3.25.2(zod@4.6.7):
     dependencies:
       zod: 4.6.7
+
+  zod@3.25.76: {}
 
   zod@4.6.7: {}

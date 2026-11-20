@@ -1,0 +1,21 @@
+{
+  "packageName": "com.philneeds.jarvis",
+  "version": "0.1.0",
+  "name": "Jarvis",
+  "description": "Talk to Jarvis and the HQ team through your glasses: hold to speak, read the answer in your view.",
+  "icon": "icon.png",
+  "type": "standard",
+  "sdkVersion": "3.4.0",
+  "entry": {
+    "background": "background/index.js",
+    "ui": "ui/index.html"
+  },
+  "permissions": [
+    {"type": "MICROPHONE", "description": "Hears your question when you hold to talk, so it can be sent to your own Jarvis HQ."}
+  ],
+  "hardwareRequirements": [
+    {"type": "DISPLAY", "level": "REQUIRED", "description": "Shows Jarvis's answer in your view"},
+    {"type": "MICROPHONE", "level": "REQUIRED", "description": "Hears your question"},
+    {"type": "BUTTON", "level": "OPTIONAL", "description": "A button press starts a question on glasses that have one"}
+  ]
+}

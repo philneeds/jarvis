@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Jarvis</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Jarvis</h1>
+      <p id="status" class="status" role="status">Starting…</p>
+
+      <section aria-label="Ask Jarvis">
+        <form id="ask">
+          <input id="question" placeholder="Ask Jarvis something" autocomplete="off" />
+          <button>Ask</button>
+        </form>
+        <div class="row">
+          <button id="talk" type="button">Talk through the glasses</button>
+          <button id="dismiss" type="button" class="quiet">Clear the glasses</button>
+        </div>
+        <p id="you" class="you"></p>
+        <p id="reply" class="reply"></p>
+      </section>
+
+      <section aria-label="Pair with HQ">
+        <h2>Pair with HQ</h2>
+        <p class="hint">In HQ, open Settings › Glasses and press Pair. Enter the address and the key it shows.</p>
+        <form id="pair">
+          <label>HQ address <input id="url" placeholder="https://hq.example.com" autocomplete="off" autocapitalize="off" spellcheck="false" /></label>
+          <label>Pairing key <input id="key" type="password" placeholder="from HQ › Settings › Glasses" autocomplete="off" /></label>
+          <div class="row">
+            <button>Save</button>
+            <button id="test" type="button" class="quiet">Test</button>
+          </div>
+        </form>
+      </section>
+
+      <p class="hint">On the glasses: hold to talk, tap for the next page, double tap to clear.</p>
+    </main>
+    <script src="./main.js"></script>
+  </body>
+</html>

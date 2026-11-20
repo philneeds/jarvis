@@ -108,7 +108,7 @@ export interface ChatMessage {
   /** Which agents contributed, for the chat card. */
   via?: string[];
   /** Where the conversation came from; replies inherit it so Telegram answers go back to Telegram. */
-  channel?: "hq" | "telegram" | "voice" | "schedule";
+  channel?: "hq" | "telegram" | "voice" | "schedule" | "glasses";
   /** The Phil message this answers. */
   replyTo?: string;
   /** ack = "on it" within seconds; progress = someone finished late; final = the answer. */

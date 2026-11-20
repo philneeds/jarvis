@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { DisplayCard } from "@/components/DisplayCard";
 import { GithubRepos } from "@/components/GithubRepos";
+import { GlassesPairing } from "@/components/GlassesPairing";
 import { HyperliquidAccounts, LighterAccounts, PolymarketAccounts } from "@/components/WalletAccounts";
 import { startRegistration } from "@simplewebauthn/browser";
 import { Shell } from "@/components/Shell";
@@ -240,6 +241,7 @@ export default function SettingsPage() {
             )}
             {(rhMsg || (conn?.robinhood?.lastFetch && !conn.robinhood.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: rhMsg && !/refused|error|expired|isn't connected|failed/i.test(rhMsg) ? "var(--ink)" : "var(--red)" }}>{rhMsg ?? conn?.robinhood?.lastFetch?.error}</p>}
           </div>
+          <GlassesPairing />
           <HyperliquidAccounts />
           <LighterAccounts />
           <PolymarketAccounts />
