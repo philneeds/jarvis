@@ -299,7 +299,7 @@ export default function SettingsPage() {
               <span><b>GitHub</b> · agents read your repos, read-only: you choose which agent reads which repo below{conn?.github?.repos?.length ? ` (the key is limited to ${conn.github.repos.join(", ")})` : ""}.</span>
               {conn?.github?.configured
                 ? <><span style={{ color: "var(--dim)" }}>{conn.github.lastFetch ? `${conn.github.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.github.lastFetch.at)}` : "not read yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testSimple("/api/connectors/github/test", setGhMsg)}>Check now</button></>
-                : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GITHUB_READ_TOKEN (fine-grained, read-only) and optionally GITHUB_REPOS</span>}
+                : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GITHUB_READ_TOKEN, or widen Einstein's GitHub key to all repos</span>}
             </div>
             {(ghMsg || (conn?.github?.lastFetch && !conn.github.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: ghMsg && !/refused|error|limit|isn't set|not found/i.test(ghMsg) ? "var(--ink)" : "var(--red)" }}>{ghMsg ?? conn?.github?.lastFetch?.error}</p>}
             {conn?.github?.configured && <GithubRepos />}

@@ -7,7 +7,9 @@ import type { Executor } from "../jarvis/orchestrator.js";
  * GitHub, read-only, for Jason, the dev team, Paul and Ansem: the repos Phil shares, their files, commits, issues
  * and pull requests. A fine-grained token with read-only Contents, Metadata, Issues and Pull requests on the chosen
  * repos. Nothing here writes to GitHub.
- *   GITHUB_READ_TOKEN   the token (separate from any token the installer used)
+ *   GITHUB_READ_TOKEN   the token (separate from any token the installer used); without one, Einstein's GITHUB_PUSH_TOKEN
+ *                       is used to read, so one key can cover both (Phil, Nov 20: no token per agent). HQ only ever
+ *                       reads through it here; who reads which repo is Phil's choice in Settings, not the key's.
  *   GITHUB_REPOS        optional: "owner/repo,owner/other" to limit what agents see; otherwise everything the token can read
  * Which agent sees which repo is Phil's choice in Settings › GitHub (or an approved github.access card): once any repo
  * is assigned, every agent sees only the repos assigned to it (or to everyone, "*"), and an agent given a repo gets
@@ -37,7 +39,8 @@ export class GithubConnector {
   constructor(private store: Store, private opts: GithubOptions) { this.f = opts.fetch ?? fetch; this.now = opts.now ?? (() => Date.now()); }
 
   static fromEnv(store: Store): GithubConnector | undefined {
-    const { GITHUB_READ_TOKEN, GITHUB_REPOS } = process.env;
+    const { GITHUB_REPOS } = process.env;
+    const GITHUB_READ_TOKEN = process.env.GITHUB_READ_TOKEN?.trim() || process.env.GITHUB_PUSH_TOKEN?.trim();
     const repos = (GITHUB_REPOS ?? "").split(",").map((s) => s.trim()).filter((s) => REPO.test(s));
     // GITHUB_API_URL: GitHub Enterprise, or a stand-in when testing HQ.
     return GITHUB_READ_TOKEN ? new GithubConnector(store, { token: GITHUB_READ_TOKEN.trim(), repos: repos.length ? repos : undefined, baseUrl: process.env.GITHUB_API_URL?.trim() || undefined }) : undefined;
@@ -48,7 +51,7 @@ export class GithubConnector {
     const c = this.cache.get(key);
     if (c && this.now() - c.at < CACHE_MS) return c.v as T;
     const res = await this.f(`${this.opts.baseUrl ?? "https://api.github.com"}${path}`, { headers: { authorization: `Bearer ${this.opts.token}`, accept: raw ? "application/vnd.github.raw+json" : "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "JarvisHQ" } });
-    if (res.status === 401) { await this.mark(false, "GitHub refused the token"); throw new Error("GitHub refused the token. Check GITHUB_READ_TOKEN."); }
+    if (res.status === 401) { await this.mark(false, "GitHub refused the token"); throw new Error("GitHub refused the token. Check GITHUB_READ_TOKEN (or, without one, Einstein's GITHUB_PUSH_TOKEN)."); }
     if (res.status === 403 || res.status === 404) { throw new Error(res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0" ? "GitHub rate limit hit; try again later." : "Not found, or the token can't see it. Phil chooses which repos the token can read."); }
     if (!res.ok) { await this.mark(false, `GitHub error ${res.status}`); throw new Error(`GitHub error ${res.status}`); }
     const v = (raw ? await res.text() : await res.json()) as T;

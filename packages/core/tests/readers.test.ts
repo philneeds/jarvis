@@ -134,3 +134,19 @@ test("GitHub digest: a Grok agent (Ansem) gets his assigned repos' README, lates
   assert.match(pre, /Open issues and pull requests:\n- #3 issue · Win rate by caller · phil/);
   assert.ok(CHARTERS.ansem!.tools!.includes("github_digest"));
 });
+
+test("GitHub: one key covers it; without a read key, Einstein's push key is used to read", async () => {
+  const store = memoryStore(); await store.init();
+  const saved = { r: process.env.GITHUB_READ_TOKEN, p: process.env.GITHUB_PUSH_TOKEN };
+  try {
+    delete process.env.GITHUB_READ_TOKEN; delete process.env.GITHUB_PUSH_TOKEN;
+    assert.equal(GithubConnector.fromEnv(store), undefined);
+    process.env.GITHUB_PUSH_TOKEN = "push";
+    assert.equal((GithubConnector.fromEnv(store) as unknown as { opts: { token: string } }).opts.token, "push");
+    process.env.GITHUB_READ_TOKEN = "read";
+    assert.equal((GithubConnector.fromEnv(store) as unknown as { opts: { token: string } }).opts.token, "read", "a separate read key wins when there is one");
+  } finally {
+    if (saved.r === undefined) delete process.env.GITHUB_READ_TOKEN; else process.env.GITHUB_READ_TOKEN = saved.r;
+    if (saved.p === undefined) delete process.env.GITHUB_PUSH_TOKEN; else process.env.GITHUB_PUSH_TOKEN = saved.p;
+  }
+});
