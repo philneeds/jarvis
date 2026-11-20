@@ -1,5 +1,6 @@
 import type { Approval } from "../events.js";
 import { PERSONAL_CALENDARS } from "../connectors/google.js";
+import { BATCH_ACTION, batchSteps } from "./batch.js";
 
 /** Actions that reach another person. */
 const OUTBOUND_ACTIONS = new Set(["gmail.send", "x.post", "x.reply", "x.dm", "ghl.message"]);
@@ -11,7 +12,10 @@ const OUTBOUND_ACTIONS = new Set(["gmail.send", "x.post", "x.reply", "x.dm", "gh
 const NEVER_AUTO = /^(trade\.|strategy\.|robinhood\.|hyperliquid\.|payment\.|invoice\.|transfer\.|wallet\.|order\.|eagleview\.order$|lp\.|github\.access$|code\.ship$|hq\.update$)/;
 export function alwaysWaits(a: Pick<Approval, "kind" | "payload">): boolean {
   const action = (a.payload as { action?: unknown } | undefined)?.action;
-  return a.kind === "money" || a.kind === "strategy" || (typeof action === "string" && NEVER_AUTO.test(action));
+  if (a.kind === "money" || a.kind === "strategy") return true;
+  // A batch waits if any one of its steps would (or if it has none HQ can read).
+  if (action === BATCH_ACTION) { const steps = batchSteps(a.payload); return !steps || steps.some((s) => alwaysWaits({ kind: a.kind, payload: s })); }
+  return typeof action === "string" && NEVER_AUTO.test(action);
 }
 
 /** Work that stays inside Phil's own tools and HQ: the only actions the "only outbound waits" rule lets through. */
@@ -44,6 +48,8 @@ export function isOutbound(a: Pick<Approval, "kind" | "payload">): boolean {
   if (Array.isArray(p.guests) && p.guests.length) return true;
   // No action: approving only records Phil's decision, nothing runs.
   if (typeof p.action !== "string") return false;
+  // A batch reaches out if any step does; one HQ can't read counts as outbound.
+  if (p.action === BATCH_ACTION) { const steps = batchSteps(a.payload); return !steps || steps.some((s) => isOutbound({ kind: a.kind, payload: s })); }
   if (p.action === "calendar.create") return !(typeof p.account === "string" && PERSONAL_CALENDARS.includes(p.account.toLowerCase()));
   return !INTERNAL_ACTIONS.test(p.action);
 }

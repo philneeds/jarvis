@@ -11,6 +11,7 @@ import { extractBlocks, parsePlan } from "./blocks.js";
 import { agentSystemPrompt, briefPrompt, condensePrompt, dayStart, jarvisSystemPrompt, leadBriefTask, planPrompt, synthesisPrompt } from "./prompts.js";
 import { memoryLine } from "./readable.js";
 import { supersedes } from "./overlap.js";
+import { BATCH_ACTION, MAX_BATCH_STEPS, asBatch, batchSteps, editBatch, resolveStep, stepApproval, stepBody, stepForDisplay, stepResult, type Step } from "./batch.js";
 import { getAgentConfig } from "../config.js";
 import { VENTURES, type VentureId } from "../registry/ventures.js";
 import { VENTURE_DASH, recordKind } from "../ventures/dashboards.js";
@@ -233,6 +234,37 @@ export class Jarvis {
       for (const m of current) if (!staying.has(`${m.scope}\u0000${m.key}`)) await this.store.memory.remove(m.scope, m.key);
       return `Memory condensed: ${current.length} → ${keep.length} items.`;
     });
+    // One card, several actions (Phil, Nov 19: "we should be able to have multiple pushes in one card"). Steps run in
+    // order and each is reported on the card and in Activity. The first failure stops the card; the report says what
+    // went through and what never ran, so nothing after a broken step acts on a half-done job.
+    this.executors.set(BATCH_ACTION, async (a) => {
+      const steps = batchSteps(a.payload);
+      if (!steps) throw new Error(`a batch card needs "steps": a list of actions, each with its own "action"`);
+      const made: Record<string, string>[] = [];
+      const lines: string[] = [];
+      for (const [i, raw] of steps.entries()) {
+        try {
+          if (raw.action === BATCH_ACTION) throw new Error("a batch inside a batch");
+          const exec = this.executors.get(raw.action);
+          if (!exec) throw new Error(`no connector handles "${raw.action}"`);
+          const sa = stepApproval(a, resolveStep(raw, made, i));
+          const out = await exec(sa, this);
+          made[i] = stepResult(sa);
+          lines.push(`${i + 1}. Done: ${out || raw.action}`);
+          await this.router.log(a.agentId, "system", `"${a.title}" step ${lines[i]}`, a.runId, { approvalId: a.id, action: raw.action, step: i + 1 });
+        } catch (e) {
+          lines.push(`${i + 1}. FAILED (${raw.action}): ${(e as Error).message}`);
+          await this.router.log(a.agentId, "error", `"${a.title}" step ${lines[i]}`, a.runId, { approvalId: a.id, action: raw.action, step: i + 1 });
+          const rest = steps.slice(i + 1).map((s, j) => `${i + j + 2}. Not run: ${s.action}`);
+          throw new Error(`stopped at step ${i + 1} of ${steps.length}: ${i} went through, ${steps.length - i - 1} not run. Fix step ${i + 1} and file it and the rest again.\n${[...lines, ...rest].join("\n")}`);
+        }
+      }
+      return `All ${steps.length} steps done.\n${lines.join("\n")}`;
+    });
+    this.describers.set(BATCH_ACTION, (p, a) => {
+      const steps = batchSteps(p) ?? [];
+      return `Runs ${steps.length} step${steps.length === 1 ? "" : "s"} in order, each reported; it stops at the first one that fails:\n${steps.map((s, i) => `${i + 1}. ${this.effectOf({ ...a, payload: stepForDisplay(s) })}`).join("\n")}`;
+    });
     // Phil's goals for the month, as agreed with Adam: add the new ones, retire the finished or dropped ones.
     this.executors.set("goals.set", async (a) => {
       const p = (a.payload ?? {}) as { add?: { name?: unknown; deadline?: unknown; pct?: unknown; primary?: unknown; horizon?: unknown; venture?: unknown; parent?: unknown; benchmarks?: unknown }[]; retire?: unknown[] };
@@ -393,6 +425,9 @@ export class Jarvis {
   /** Phil's edit on the card changes the thing that goes out, not just the description. */
   private applyEdit(a: Pick<Approval, "payload" | "body">, body: string): { body: string; payload?: Record<string, unknown> } {
     const action = (a.payload as { action?: unknown } | undefined)?.action;
+    // A batch card: Phil's edit goes to the one step that carries text (the note, the message), or, pasted as JSON,
+    // replaces the steps. With several text steps and plain text, only the card's body changes.
+    if (action === BATCH_ACTION && a.payload) return { body, payload: editBatch(a.payload, body) };
     const field = typeof action === "string" ? (TEXT_FIELD[action] ?? (action.startsWith("x.") ? "text" : undefined)) : undefined;
     return { body, payload: field && a.payload ? { ...a.payload, [field]: body } : a.payload };
   }
@@ -2005,9 +2040,29 @@ export class Jarvis {
   }
 
   async requestApproval(a: Omit<Approval, "id" | "at" | "status">, opts: { replaces?: string[] } = {}): Promise<Approval> {
+    if (a.payload) { const b = asBatch(a.payload); if (b) a = { ...a, payload: b }; }
     const payload0 = a.payload;
     if (payload0) for (const n of this.normalizers) { try { const p = await n(a.payload ?? payload0, a.agentId); if (p) a = { ...a, payload: p }; } catch { /* a connector that can't help leaves the payload as it was */ } }
-    for (const pf of this.preflights) {
+    // A batch card: each step is filled in and checked the way a card of its own would be.
+    const steps0 = a.payload?.action === BATCH_ACTION ? batchSteps(a.payload) : undefined;
+    let batchProblem: string | undefined = a.payload?.action === BATCH_ACTION && !steps0 ? `a batch card needs "steps": a list of actions, each with its own "action"` : undefined;
+    if (steps0) {
+      const steps: Step[] = [];
+      for (const s0 of steps0) {
+        let s = s0;
+        for (const n of this.normalizers) { try { const p = await n(s, a.agentId); if (p && typeof p.action === "string") s = p as Step; } catch { /* left as it was */ } }
+        steps.push(s);
+      }
+      a = { ...a, payload: { ...a.payload, action: BATCH_ACTION, steps, actions: undefined } };
+      if (steps.length > MAX_BATCH_STEPS) batchProblem = `a batch card holds at most ${MAX_BATCH_STEPS} steps; it has ${steps.length}. Split it`;
+      for (const [i, s] of steps.entries()) {
+        if (batchProblem) break;
+        if (s.action === BATCH_ACTION) batchProblem = `step ${i + 1} is a batch inside a batch`;
+        else if (!this.executors.has(s.action)) batchProblem = `step ${i + 1}: no connector handles "${s.action}"`;
+        else for (const pf of this.preflights) { const r = await pf({ ...a, payload: s, body: stepBody(s) }); if (r) { batchProblem = `step ${i + 1}: ${r}`; break; } }
+      }
+    }
+    for (const pf of [...(batchProblem ? [async () => batchProblem] : []), ...this.preflights]) {
       const reason = await pf(a);
       if (reason) {
         const refused: Approval = { id: randomUUID(), at: new Date().toISOString(), status: "rejected", decidedAt: new Date().toISOString(), note: `refused: ${reason}`, ...a };
