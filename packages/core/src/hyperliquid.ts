@@ -58,8 +58,9 @@ export const HL_ACCOUNTS_KEY = "hyperliquid.accounts";
 export const isHlAddress = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a.trim());
 /** The accounts Phil set in Settings, else HYPERLIQUID_ADDRESS ("0x…" or "Main=0x…,Sub=0x…"). */
 export async function hlAccounts(store: Pick<Store, "settings">, env: NodeJS.ProcessEnv = process.env): Promise<HlAccount[]> {
-  const saved = await store.settings.get<HlAccount[]>(HL_ACCOUNTS_KEY, []);
-  if (saved.length) return saved;
+  const saved = await store.settings.get<HlAccount[] | null>(HL_ACCOUNTS_KEY, null);
+  // Once Phil has saved a list in Settings (even an empty one), it's the answer; the environment is only a first default.
+  if (saved) return saved;
   return (env.HYPERLIQUID_ADDRESS ?? "").split(",").map((x, i) => { const [l, a] = x.includes("=") ? x.split("=") : [`Account ${i + 1}`, x]; return { label: l!.trim(), address: (a ?? "").trim() }; }).filter((x) => isHlAddress(x.address));
 }
 

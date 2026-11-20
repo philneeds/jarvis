@@ -404,7 +404,9 @@ test("Settings › Hyperliquid: public addresses only; a private key is refused 
   const key = `0x${"ab".repeat(32)}`;
   const refused = await call("/api/hyperliquid/accounts", { method: "PUT", cookie, body: JSON.stringify({ accounts: [{ label: "Main", address: key }] }) });
   assert.equal(refused.status, 400);
-  assert.match(((await refused.json()) as { error: string }).error, /never a private key/);
+  const err = ((await refused.json()) as { error: string }).error;
+  assert.match(err, /looks like a private key, so it wasn't saved anywhere/);
+  assert.doesNotMatch(err, /abab/, "none of the key is echoed back");
   assert.equal(JSON.stringify(await store.settings.get("hyperliquid.accounts", [])).includes("abab"), false);
   const addr = "0x1111111111111111111111111111111111111111";
   const saved = await call("/api/hyperliquid/accounts", { method: "PUT", cookie, body: JSON.stringify({ accounts: [{ label: " Main ", address: addr }, { address: "0x2222222222222222222222222222222222222222" }] }) });

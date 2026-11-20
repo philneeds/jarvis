@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent, saveImage, addDataFile, setTemplate, deckFile, readDocument, saveDoc, docsContext } from "@jarvis/core";
 import { transcribe as transcribeDefault, synthesize as synthesizeDefault, transcriptionProvider } from "./speech.js";
 
@@ -65,6 +66,9 @@ export class TelegramBot {
       }
       if (e.type === "report") void this.send(`${e.title} · ${e.agentId === "jarvis" ? "Jarvis" : getAgent(e.agentId)?.name ?? e.agentId}\n\n${e.text}`).then(() => this.sendFiles(e.files));
       if (e.type === "approval.new") void this.announce(e.approval);
+      // A card revised after it was sent (Phil asked about it, the agent changed it): the new version goes out too, and
+      // the old message's Approve no longer works (its fingerprint doesn't match).
+      if (e.type === "approval.updated" && e.approval.status === "pending" && this.sent.has(e.approval.id) && this.sent.get(e.approval.id) !== cardPrint(e.approval)) void this.announce(e.approval, "Updated");
       if (e.type === "attention" && e.change === "raised") void this.send(`Needs you · ${getAgent(e.item.agentId)?.name ?? e.item.agentId}\n${e.item.title}\n\n${e.item.why.slice(0, 800)}${e.item.due ? `\nDue ${e.item.due}` : ""}`, { reply_markup: { inline_keyboard: [[{ text: "✔ Done", callback_data: `att:${e.item.id}:done` }, { text: "💤 Snooze 3d", callback_data: `att:${e.item.id}:snoozed` }]] } });
     });
     void this.loop();
@@ -89,10 +93,14 @@ export class TelegramBot {
     return saveImage(data, mime);
   }
 
-  private async announce(a: Approval) {
+  /** Each card's fingerprint as last sent, so an older message's Approve can be told apart from the current card. */
+  private sent = new Map<string, string>();
+  private async announce(a: Approval, prefix?: string) {
     const who = getAgent(a.agentId)?.name ?? a.agentId;
-    await this.send(`Approval · ${who} · ${a.kind}\n${a.title}\n\n${a.body.slice(0, 1500)}${a.context ? `\n\nContext: ${a.context.slice(0, 800)}` : ""}${a.effect ? `\n\nIf you approve: ${a.effect}` : ""}\n\nTo ask ${who} about it or edit the text, open Needs you in HQ.`, {
-      reply_markup: { inline_keyboard: [[{ text: "✅ Approve", callback_data: `apr:${a.id}:approved` }, { text: "❌ Reject", callback_data: `apr:${a.id}:rejected` }]] },
+    const print = cardPrint(a);
+    this.sent.set(a.id, print);
+    await this.send(`${prefix ? `${prefix} · ` : ""}Approval · ${who} · ${a.kind}\n${a.title}\n\n${a.body.slice(0, 1500)}${a.context ? `\n\nContext: ${a.context.slice(0, 800)}` : ""}${a.effect ? `\n\nIf you approve: ${a.effect}` : ""}\n\nTo ask ${who} about it or edit the text, open Needs you in HQ.`, {
+      reply_markup: { inline_keyboard: [[{ text: "✅ Approve", callback_data: `apr:${a.id}:approved:${print}` }, { text: "❌ Reject", callback_data: `apr:${a.id}:rejected` }]] },
     });
   }
 
@@ -122,8 +130,17 @@ export class TelegramBot {
         if (item && q.message) await this.api("editMessageText", { chat_id: q.message.chat.id, message_id: q.message.message_id, text: `${att[2] === "done" ? "✔ Done" : "💤 Snoozed 3 days"} · ${item.title}` }).catch(() => undefined);
         return;
       }
-      const m = q.data?.match(/^apr:([^:]+):(approved|rejected)$/);
+      const m = q.data?.match(/^apr:([^:]+):(approved|rejected)(?::([0-9a-f]{10}))?$/);
       if (m) {
+        // Approve runs exactly the card this message showed: if the card changed since (or the button is from before
+        // fingerprints), nothing runs and the current card is sent instead.
+        const now = await this.jarvis.store.approvals.get(m[1]!);
+        if (m[2] === "approved" && now?.status === "pending" && m[3] !== cardPrint(now)) {
+          await this.api("answerCallbackQuery", { callback_query_id: q.id, text: "This card changed since this message. Sending the current one." }).catch(() => undefined);
+          if (q.message) await this.api("editMessageText", { chat_id: q.message.chat.id, message_id: q.message.message_id, text: `↪ Changed since this message (nothing ran) · ${now.title}` }).catch(() => undefined);
+          await this.announce(now, "Updated");
+          return;
+        }
         // Read the card's state before deciding (a store may hand back the very object decide() then changes).
         const before = await this.jarvis.store.approvals.get(m[1]!);
         const was = before ? { status: before.status, note: before.note ?? "" } : undefined;
@@ -227,4 +244,9 @@ export interface Update {
   update_id: number;
   message?: { message_id: number; chat: { id: number }; from?: { id: number }; text?: string; caption?: string; photo?: { file_id: string; width: number; height: number; file_size?: number }[]; document?: { file_id: string; mime_type?: string; file_size?: number; file_name?: string }; voice?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; audio?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; video_note?: { file_id: string; mime_type?: string; duration?: number; file_size?: number }; sticker?: { file_id: string; emoji?: string }; video?: { file_id: string; mime_type?: string; duration?: number; file_size?: number; file_name?: string }; animation?: { file_id: string }; location?: { latitude: number; longitude: number }; contact?: { phone_number: string }; poll?: { id: string } };
   callback_query?: { id: string; from: { id: number }; data?: string; message?: { message_id: number; chat: { id: number } } };
+}
+
+/** A short fingerprint of what a card says and will do (title, text, effect, payload). */
+export function cardPrint(a: Pick<Approval, "title" | "body" | "payload" | "effect">): string {
+  return createHash("sha256").update(JSON.stringify([a.title, a.body, a.effect ?? "", a.payload ?? null])).digest("hex").slice(0, 10);
 }

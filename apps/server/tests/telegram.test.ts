@@ -42,7 +42,7 @@ test("approvals arrive with buttons and the button decides", async () => {
   const announce = sent.find((s) => s.method === "sendMessage" && /Reply to the Smiths/.test(String(s.body.text)));
   assert.ok(announce);
   const kb = (announce!.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard[0]!;
-  assert.equal(kb[0]!.callback_data, `apr:${a.id}:approved`);
+  assert.match(kb[0]!.callback_data, new RegExp(`^apr:${a.id}:approved:[0-9a-f]{10}$`), "Approve carries the card's fingerprint");
   await bot.handle({ update_id: 3, callback_query: { id: "cq", from: { id: 42 }, data: kb[1]!.callback_data, message: { message_id: 7, chat: { id: 42 } } } });
   assert.equal((await store.approvals.get(a.id))?.status, "rejected");
   assert.ok(sent.some((s) => s.method === "editMessageText" && /Rejected/.test(String(s.body.text))));
@@ -307,4 +307,34 @@ test("tapping Approve on a card a newer one replaced says so, and runs nothing",
   await bot.handle({ update_id: 9, callback_query: { id: "cq", from: { id: 42 }, data: `apr:${old.id}:approved`, message: { message_id: 8, chat: { id: 42 } } } });
   assert.equal((await store.approvals.get(old.id))?.status, "rejected", "still the replaced card, not approved");
   assert.ok(sent.some((s) => s.method === "editMessageText" && /Replaced by a newer card/.test(String(s.body.text))));
+});
+
+test("Approve on a Telegram message runs only the card it showed: a revised card is resent and the old button runs nothing", async () => {
+  const store = memoryStore();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });
+  const { f, sent } = fakeTelegram();
+  const bot = new TelegramBot(jarvis, { token: "t", chatId: "42", fetch: f, pollTimeout: 0 });
+  bot.start();
+  try {
+    const a = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Reply to Ana", body: "v1", payload: { action: "ghl.message", contactId: "ana", message: "small" } });
+    await new Promise((r) => setTimeout(r, 50));
+    const first = sent.find((s) => s.method === "sendMessage" && /Reply to Ana/.test(String(s.body.text)))!;
+    const oldApprove = (first.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard[0]![0]!.callback_data;
+    // The card changes after it was sent (as when an agent revises it).
+    const cur = (await store.approvals.get(a.id))!;
+    await store.approvals.update(a.id, { body: "v2", payload: { action: "ghl.message", contactId: "ana", message: "much bigger" } } as never);
+    void cur;
+    await bot.handle({ update_id: 11, callback_query: { id: "cq", from: { id: 42 }, data: oldApprove, message: { message_id: 7, chat: { id: 42 } } } });
+    assert.equal((await store.approvals.get(a.id))?.status, "pending", "nothing ran");
+    assert.ok(sent.some((s) => s.method === "editMessageText" && /Changed since this message \(nothing ran\)/.test(String(s.body.text))));
+    const again = sent.filter((s) => s.method === "sendMessage" && /^Updated · Approval/.test(String(s.body.text))).at(-1)!;
+    const newApprove = (again.body.reply_markup as { inline_keyboard: { callback_data: string }[][] }).inline_keyboard[0]![0]!.callback_data;
+    assert.notEqual(newApprove, oldApprove);
+    await bot.handle({ update_id: 12, callback_query: { id: "cq2", from: { id: 42 }, data: newApprove, message: { message_id: 8, chat: { id: 42 } } } });
+    assert.equal((await store.approvals.get(a.id))?.status, "approved", "the current card's own button works");
+    // A button from before fingerprints existed doesn't approve either.
+    const b = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Reply to Bo", body: "x", payload: { action: "ghl.message", contactId: "bo", message: "x" } });
+    await bot.handle({ update_id: 13, callback_query: { id: "cq3", from: { id: 42 }, data: `apr:${b.id}:approved`, message: { message_id: 9, chat: { id: 42 } } } });
+    assert.equal((await store.approvals.get(b.id))?.status, "pending");
+  } finally { bot.stop(); }
 });

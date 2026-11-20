@@ -544,7 +544,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
       const list: { label: string; address: string }[] = [];
       for (const a of accounts as { label?: unknown; address?: unknown }[]) {
         const address = typeof a?.address === "string" ? a.address.trim() : "";
-        if (!isHlAddress(address)) return c.json({ error: `"${address.slice(0, 12)}${address.length > 12 ? "…" : ""}" isn't a wallet address (0x and 40 letters or digits). Paste the public address, never a private key.` }, 400);
+        if (!isHlAddress(address)) return c.json({ error: `That isn't a wallet address (0x and 40 letters or digits)${/^(0x)?[0-9a-fA-F]{64}$/.test(address) ? "; it looks like a private key, so it wasn't saved anywhere. Never paste a private key here" : ""}. Paste the public address.` }, 400);
         list.push({ address, label: (typeof a.label === "string" && a.label.trim() ? a.label.trim() : `Account ${list.length + 1}`).slice(0, 40) });
       }
       await jarvis.store.settings.set(w.key, list);
@@ -557,6 +557,14 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
       try { return c.json({ ok: true, summary: (await Promise.all(all.map((x) => w.read(x)))).join("\n\n") }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
     });
   }
+  // Settings › Hyperliquid: Phil's own trading limits (a cap per trade and per day; empty switches one off).
+  api.put("/hyperliquid/limits", async (c) => {
+    if (!connectors.hlTrader) return c.json({ error: "Hyperliquid trading isn't set up (HYPERLIQUID_AGENT_KEY)" }, 400);
+    const b = (await c.req.json().catch(() => ({}))) as { maxTradeUsd?: unknown; maxDayUsd?: unknown };
+    const limits = await connectors.hlTrader.setLimits({ maxTradeUsd: Number(b.maxTradeUsd) || undefined, maxDayUsd: Number(b.maxDayUsd) || undefined });
+    await jarvis.router.log("jarvis", "system", `Phil set Hyperliquid limits: ${limits.maxTradeUsd ? `$${limits.maxTradeUsd} a trade` : "none a trade"}, ${limits.maxDayUsd ? `$${limits.maxDayUsd} a day` : "none a day"}`);
+    return c.json({ limits });
+  });
   // Settings › GitHub: every repo the key reads, and which agents read each one.
   api.get("/github/repos", async (c) => {
     if (!connectors.github) return c.json({ error: "GITHUB_READ_TOKEN isn't set" }, 400);

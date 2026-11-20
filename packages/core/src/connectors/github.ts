@@ -112,7 +112,11 @@ export class GithubConnector {
     const prefix = path.replace(/^\/+|\/+$/g, "");
     return t.tree.filter((e) => !prefix || e.path === prefix || e.path.startsWith(`${prefix}/`));
   }
-  async file(repo: string, path: string, agentId?: string): Promise<string> { return this.get<string>(`/repos/${await this.allowedFor(repo, agentId)}/contents/${path.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/")}`, true); }
+  async file(repo: string, path: string, agentId?: string): Promise<string> {
+    // "." and ".." would climb out of the repo once the URL is resolved (into another repo the key can read): refused.
+    if (path.split(/[\/\\]/).some((seg) => seg === "." || seg === ".." || /^(%2e|\.){1,2}$/i.test(seg))) throw new Error("a file path can't contain . or .. segments");
+    return this.get<string>(`/repos/${await this.allowedFor(repo, agentId)}/contents/${path.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/")}`, true);
+  }
   async commits(repo: string, n = 20, agentId?: string): Promise<Commit[]> { return this.get<Commit[]>(`/repos/${await this.allowedFor(repo, agentId)}/commits?per_page=${n}`); }
   async issues(repo: string, state: "open" | "closed" | "all" = "open", agentId?: string): Promise<Issue[]> { return this.get<Issue[]>(`/repos/${await this.allowedFor(repo, agentId)}/issues?state=${state}&per_page=50&sort=updated`); }
 
@@ -177,6 +181,9 @@ export class GithubConnector {
         if (!real) throw new Error(`${repo || "that repo"} isn't one the GitHub key can read${known.length ? `; it reads ${known.join(", ")}` : ""}`);
         const now = (await this.access())[real.toLowerCase()] ?? [];
         const next = Array.isArray(p.agents) ? list(p.agents) : [...new Set([...now, ...list(p.add)])].filter((x) => !list(p.remove).includes(x));
+        const { getAgent } = await import("../registry/index.js");
+        const unknown = next.filter((x) => x !== "*" && !getAgent(x));
+        if (unknown.length) throw new Error(`no agent called ${unknown.join(", ")}`);
         await this.setAccess(real, next);
         return next.length ? `${real} is now read by ${next.join(", ")}.` : `${real} is now read by no agent.`;
       },

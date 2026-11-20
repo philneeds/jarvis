@@ -57,6 +57,19 @@ export function WalletAccounts({ name, blurb, api: base, hint }: { name: string;
               : `Trading off: ${trading.problem}.`}
           </p>
         )}
+        {trading?.trading && (
+          <form className="flex flex-wrap items-center gap-2" onSubmit={async (e) => {
+            e.preventDefault();
+            const f = new FormData(e.currentTarget);
+            try { const r = await put<{ limits: { maxTradeUsd?: number; maxDayUsd?: number } }>(`/api/${base}/limits`, { maxTradeUsd: Number(f.get("trade")) || 0, maxDayUsd: Number(f.get("day")) || 0 }); setTrading({ ...trading, limits: r.limits }); setBad(false); setMsg("Limits saved."); }
+            catch (err) { setBad(true); setMsg((err as Error).message); }
+          }}>
+            <span style={{ color: "var(--muted)" }}>Limits ($, empty = none):</span>
+            <input name="trade" className="input h-8 w-28" inputMode="numeric" placeholder="per trade" aria-label="Limit per trade in dollars" defaultValue={trading.limits?.maxTradeUsd ?? ""} />
+            <input name="day" className="input h-8 w-28" inputMode="numeric" placeholder="per day" aria-label="Limit per day in dollars" defaultValue={trading.limits?.maxDayUsd ?? ""} />
+            <button className="btn btn-sm h-8">Save limits</button>
+          </form>
+        )}
         {hint && !list?.length && <p className="m-0" style={{ color: "var(--muted)" }}>{hint}</p>}
         {looksPrivate && <p className="m-0" style={{ color: "var(--red)" }}>That looks like a private key, not an address. Don&apos;t paste it anywhere: clear it, and copy your wallet&apos;s public address (0x and 40 characters) instead.</p>}
         {msg && <p className="m-0 whitespace-pre-wrap" style={{ color: bad ? "var(--red)" : "var(--ink)" }}>{msg}</p>}

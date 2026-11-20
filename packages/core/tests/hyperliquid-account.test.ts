@@ -56,3 +56,14 @@ test("accounts come from Settings (else HYPERLIQUID_ADDRESS); Pentoshi has the t
     assert.match(pre, /### hyperliquid_account\nMain \(0x1111…1111\): perps account value \$10,000/);
   } finally { globalThis.fetch = real; }
 });
+
+test("an empty list saved in Settings stays empty: removing the last account doesn't bring back the environment's", async () => {
+  const { lighterAccounts, LIGHTER_ACCOUNTS_KEY, polyAccounts, POLY_ACCOUNTS_KEY } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const env = { HYPERLIQUID_ADDRESS: ME, LIGHTER_ADDRESS: ME, POLYMARKET_ADDRESS: ME };
+  assert.equal((await hlAccounts(store, env)).length, 1, "the environment is the first default");
+  await store.settings.set(HL_ACCOUNTS_KEY, []); await store.settings.set(LIGHTER_ACCOUNTS_KEY, []); await store.settings.set(POLY_ACCOUNTS_KEY, []);
+  assert.deepEqual(await hlAccounts(store, env), []);
+  assert.deepEqual(await lighterAccounts(store, env), []);
+  assert.deepEqual(await polyAccounts(store, env), []);
+});

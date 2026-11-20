@@ -76,8 +76,9 @@ export function lighterText(rows: LighterRow[], coins?: string[]): string {
 export interface LighterAccount { address: string; label: string }
 export const LIGHTER_ACCOUNTS_KEY = "lighter.accounts";
 export async function lighterAccounts(store: Pick<Store, "settings">, env: NodeJS.ProcessEnv = process.env): Promise<LighterAccount[]> {
-  const saved = await store.settings.get<LighterAccount[]>(LIGHTER_ACCOUNTS_KEY, []);
-  if (saved.length) return saved;
+  const saved = await store.settings.get<LighterAccount[] | null>(LIGHTER_ACCOUNTS_KEY, null);
+  // Once Phil has saved a list in Settings (even an empty one), it's the answer; the environment is only a first default.
+  if (saved) return saved;
   return (env.LIGHTER_ADDRESS ?? "").split(",").map((x, i) => { const [l, a] = x.includes("=") ? x.split("=") : [`Account ${i + 1}`, x]; return { label: l!.trim(), address: (a ?? "").trim() }; }).filter((x) => /^0x[0-9a-fA-F]{40}$/.test(x.address));
 }
 

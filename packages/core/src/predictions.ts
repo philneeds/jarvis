@@ -123,8 +123,9 @@ export interface PolyAccount { address: string; label: string }
 export const POLY_ACCOUNTS_KEY = "polymarket.accounts";
 export const isEvmAddress = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a.trim());
 export async function polyAccounts(store: Pick<Store, "settings">, env: NodeJS.ProcessEnv = process.env): Promise<PolyAccount[]> {
-  const saved = await store.settings.get<PolyAccount[]>(POLY_ACCOUNTS_KEY, []);
-  if (saved.length) return saved;
+  const saved = await store.settings.get<PolyAccount[] | null>(POLY_ACCOUNTS_KEY, null);
+  // Once Phil has saved a list in Settings (even an empty one), it's the answer; the environment is only a first default.
+  if (saved) return saved;
   return (env.POLYMARKET_ADDRESS ?? "").split(",").map((x, i) => { const [l, a] = x.includes("=") ? x.split("=") : [`Account ${i + 1}`, x]; return { label: l!.trim(), address: (a ?? "").trim() }; }).filter((x) => isEvmAddress(x.address));
 }
 

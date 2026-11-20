@@ -26,3 +26,15 @@ test("goals Phil states go in as one card with their benchmarks, no relay throug
   assert.deepEqual(ran, ["david"]);
   assert.match(CHARTERS.david!.owns.join(" "), /Goals Phil states himself.*never a hand-off to Adam first/);
 });
+
+test("benchmarks on a new goal land on that goal, even when an older goal has the same name", async () => {
+  const store = memoryStore(); await store.init();
+  const jarvis = new Jarvis({ store });
+  const old = await jarvis.addGoal({ name: "Income" });
+  const card = await jarvis.requestApproval({ agentId: "david", kind: "record", title: "Set", body: "x", payload: { action: "goals.set", add: [{ name: "Income", benchmarks: [{ text: "New one's benchmark", weight: 100 }] }] } });
+  await jarvis.decide(card.id, "approved");
+  const all = (await jarvis.goals()).filter((g) => g.name === "Income");
+  assert.equal(all.length, 2);
+  assert.equal(all.find((g) => g.id === old.id)!.benchmarks?.length ?? 0, 0, "the older goal is untouched");
+  assert.deepEqual(all.find((g) => g.id !== old.id)!.benchmarks?.map((b) => b.text), ["New one's benchmark"]);
+});

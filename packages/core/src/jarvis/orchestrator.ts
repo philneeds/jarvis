@@ -248,12 +248,9 @@ export class Jarvis {
         // Benchmarks can come on the same card (Phil, Nov 20: his goals set in one approval, not a relay through Adam).
         const marks = (Array.isArray(g.benchmarks) ? g.benchmarks : []).filter((b): b is { text: string; weight?: unknown } => !!b && typeof (b as { text?: unknown }).text === "string" && !!(b as { text: string }).text.trim()).slice(0, 12).map((b) => ({ text: b.text.trim(), weight: Number(b.weight) }));
         const deadline = typeof g.deadline === "string" && /^\d{4}-\d{2}-\d{2}$/.test(g.deadline) ? g.deadline : undefined;
-        await this.addGoal({ name: g.name, deadline, pct: typeof g.pct === "number" ? g.pct : 0, primary: g.primary === true, horizon: HORIZONS.find((h) => h === g.horizon), venture: typeof g.venture === "string" ? g.venture : undefined, parent: typeof g.parent === "string" ? g.parent : undefined });
+        const made = await this.addGoal({ name: g.name, deadline, pct: typeof g.pct === "number" ? g.pct : 0, primary: g.primary === true, horizon: HORIZONS.find((h) => h === g.horizon), venture: typeof g.venture === "string" ? g.venture : undefined, parent: typeof g.parent === "string" ? g.parent : undefined });
         added.push(g.name.trim());
-        if (marks.length) {
-          const made = (await this.goals()).find((x) => x.name === g.name!.toString().trim());
-          if (made) { await this.updateGoal(made.id, { benchmarks: marks }, a.agentId); benchmarked.push(g.name.trim()); }
-        }
+        if (marks.length && made?.id) { await this.updateGoal(made.id, { benchmarks: marks }, a.agentId); benchmarked.push(g.name.trim()); }
       }
       if (!added.length && !retired.length) throw new Error("the proposal had no goals to add or retire");
       // David's job: benchmarks for every new goal, so the bar moves on evidence. In the background, after this approval.

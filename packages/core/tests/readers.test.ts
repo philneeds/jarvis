@@ -150,3 +150,27 @@ test("GitHub: one key covers it; without a read key, Einstein's push key is used
     if (saved.p === undefined) delete process.env.GITHUB_PUSH_TOKEN; else process.env.GITHUB_PUSH_TOKEN = saved.p;
   }
 });
+
+test("GitHub: a file path can't climb out of an agent's repo; repo access cards always wait and name real agents", async () => {
+  const { Jarvis } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const asked: string[] = [];
+  const f = (async (url: string | URL | Request) => {
+    const u = new URL(String(url)); asked.push(u.pathname);
+    if (u.pathname === "/user/repos") return Response.json([{ full_name: "a/b" }, { full_name: "other/secret" }]);
+    return new Response("code", { status: 200 });
+  }) as typeof fetch;
+  const g = new GithubConnector(store, { token: "ghp", fetch: f });
+  await g.setAccess("a/b", ["jason"]);
+  const file = g.tools().find((x) => x.name === "github_file")!;
+  for (const path of ["../../../other/secret/contents/x", "src/../../x", "./x", "%2e%2e/x", "src\\..\\x"]) {
+    assert.match(await file.handler({ repo: "a/b", path }, { store, agentId: "jason" }), /can't contain \. or \.\. segments/, path);
+  }
+  assert.ok(!asked.some((p) => p.includes("other/secret")), "nothing outside a/b was asked for");
+  const jarvis = new Jarvis({ store });
+  jarvis.addConnector(g);
+  const card = await jarvis.requestApproval({ agentId: "jason", kind: "other", title: "x", body: "x", payload: { action: "github.access", repo: "other/secret", add: ["jason"] } });
+  assert.equal(card.status, "pending", "who reads code always waits for Phil");
+  const bad = await jarvis.requestApproval({ agentId: "jason", kind: "other", title: "y", body: "y", payload: { action: "github.access", repo: "a/b", add: ["ghost"] } });
+  assert.match((await jarvis.decide(bad.id, "approved"))?.note ?? "", /no agent called ghost/);
+});

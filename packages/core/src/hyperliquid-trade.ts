@@ -1,7 +1,6 @@
 import type { Store } from "./store/types.js";
 import type { Approval } from "./events.js";
 import type { Describer, Executor } from "./jarvis/orchestrator.js";
-import { hlAccounts } from "./hyperliquid.js";
 import { defineTool, type ToolDef } from "./tools/index.js";
 
 /**
@@ -12,7 +11,10 @@ import { defineTool, type ToolDef } from "./tools/index.js";
  * only, and an agent's own transfers must go back to the same account ("Destination must match the source address").
  * HQ also wires in nothing but order, close, cancel and leverage: no transfer of any kind exists in this file.
  *   HYPERLIQUID_AGENT_KEY       the API wallet's private key (never the main wallet's: that is refused)
- *   HYPERLIQUID_TRADE_ADDRESS   the account it trades for (default: the first Hyperliquid account in Settings)
+ *   HYPERLIQUID_TRADE_ADDRESS   optional: the account Phil expects it to trade for; HQ refuses to trade if Hyperliquid says
+ *                               the key belongs to another one
+ * Which account the key trades for is asked of Hyperliquid itself (userRole), never guessed: an API wallet answers
+ * "agent" with its owner; a main wallet's own key answers "user" and is refused.
  * Limits are optional and off until Phil sets them (settings "hyperliquid.limits": { maxTradeUsd, maxDayUsd }).
  */
 const INFO = "https://api.hyperliquid.xyz/info";
@@ -32,6 +34,8 @@ const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 const px = (n: number) => (n < 1 ? n.toPrecision(4) : n.toLocaleString("en-US", { maximumFractionDigits: 2 }));
 const day = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+/** How much of a position a close card means: 1 to 100 percent, whole numbers; anything else is the whole position. */
+export const closePct = (v: unknown) => { const n = Math.round(num(v)); return n >= 1 && n <= 100 ? n : 100; };
 
 /** What a card asks for, read loosely: buy/long, sell/short; size in coins or dollars; market unless a price is given. */
 export interface OrderAsk { coin: string; buy: boolean; size?: number; usd?: number; price?: number; market: boolean; reduceOnly: boolean; leverage?: number; cross: boolean; slippagePct: number }
@@ -51,7 +55,18 @@ export function readOrder(p: Record<string, unknown>): OrderAsk {
 export class HyperliquidTrader {
   readonly id = "hyperliquid-trade";
   private meta?: { at: number; markets: Map<string, HlMarket> };
+  private role?: { at: number; v: { role: string; owner?: string } };
+  private queue: Promise<unknown> = Promise.resolve();
   constructor(private store: Store, private opts: { exchange: HlExchange; account: () => Promise<string | undefined>; agentAddress: string; fetch?: typeof fetch }) {}
+
+  /** What Hyperliquid says the signing key is: an API wallet ("agent", with the account it trades for) or not. */
+  private async whoAmI(): Promise<{ role: string; owner?: string }> {
+    if (this.role && Date.now() - this.role.at < 5 * 60_000) return this.role.v;
+    const r = await this.info<{ role?: string; data?: { user?: string } }>({ type: "userRole", user: this.opts.agentAddress });
+    const v = { role: String(r.role ?? "missing"), owner: r.data?.user };
+    this.role = { at: Date.now(), v };
+    return v;
+  }
 
   /** From the environment: an API wallet key, refused when it is the traded account's own key. */
   static async fromEnv(store: Store): Promise<HyperliquidTrader | undefined> {
@@ -63,17 +78,32 @@ export class HyperliquidTrader {
     const { ExchangeClient, HttpTransport } = await import("@nktkas/hyperliquid");
     const wallet = privateKeyToAccount(pk);
     const exchange = new ExchangeClient({ transport: new HttpTransport(), wallet }) as unknown as HlExchange;
-    const account = async () => process.env.HYPERLIQUID_TRADE_ADDRESS?.trim() || (await hlAccounts(store))[0]?.address;
+    const account = async () => process.env.HYPERLIQUID_TRADE_ADDRESS?.trim() || undefined;
     return new HyperliquidTrader(store, { exchange, account, agentAddress: wallet.address });
   }
 
   async status() {
-    const acct = await this.opts.account();
-    const mainKey = !!acct && acct.toLowerCase() === this.opts.agentAddress.toLowerCase();
-    return { trading: !!acct && !mainKey, agent: this.opts.agentAddress, account: acct, problem: !acct ? "no Hyperliquid account to trade for: add its address in Settings › Hyperliquid" : mainKey ? "HYPERLIQUID_AGENT_KEY is the main wallet's own key; use an API wallet's key (Hyperliquid › More › API)" : undefined, limits: await this.limits() };
+    const limits = await this.limits();
+    const base = { agent: this.opts.agentAddress, limits };
+    let me: { role: string; owner?: string };
+    try { me = await this.whoAmI(); } catch (e) { return { ...base, trading: false, account: undefined as string | undefined, problem: `couldn't ask Hyperliquid what this key is (${(e as Error).message})` }; }
+    const expected = (await this.opts.account())?.toLowerCase();
+    const problem =
+      me.role === "user" || me.role === "vault" || me.role === "subAccount" ? "HYPERLIQUID_AGENT_KEY is a main wallet's own key (it could withdraw); use an API wallet's key (Hyperliquid › More › API)"
+      : me.role !== "agent" || !me.owner ? "Hyperliquid doesn't know this key as an API wallet yet: approve it on Hyperliquid (More › API), or it expired"
+      : expected && expected !== me.owner.toLowerCase() ? `this API wallet trades for ${me.owner}, not ${expected} (HYPERLIQUID_TRADE_ADDRESS); fix one of them`
+      : undefined;
+    return { ...base, trading: !problem, account: me.owner, problem };
   }
 
   async limits(): Promise<HlLimits> { return this.store.settings.get<HlLimits>(LIMITS_KEY, {}); }
+  /** Phil's limits from Settings: a dollar cap per trade and per day; 0 or empty switches one off. */
+  async setLimits(l: HlLimits): Promise<HlLimits> {
+    const clean = (v: unknown) => { const n = Math.round(num(v)); return n > 0 ? n : undefined; };
+    const next = { maxTradeUsd: clean(l.maxTradeUsd), maxDayUsd: clean(l.maxDayUsd) };
+    await this.store.settings.set(LIMITS_KEY, next);
+    return next;
+  }
 
   private async info<T>(body: unknown): Promise<T> {
     const res = await (this.opts.fetch ?? fetch)(INFO, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -93,8 +123,9 @@ export class HyperliquidTrader {
   }
 
   /** The order as it would go out: size in coins, the price sent, and what it's worth. */
-  async plan(ask: OrderAsk) {
+  async plan(ask: OrderAsk, fresh = false) {
     const { formatPrice, formatSize } = await import("@nktkas/hyperliquid/utils");
+    if (fresh) this.meta = undefined;
     const m = await this.market(ask.coin);
     if (!m.mark) throw new Error(`no mark price for ${m.coin} right now`);
     if (ask.leverage && ask.leverage > m.maxLeverage) throw new Error(`${m.coin} allows up to ${m.maxLeverage}x, not ${ask.leverage}x`);
@@ -102,6 +133,8 @@ export class HyperliquidTrader {
     // A market order is an immediate-or-cancel limit a little past the mark, so it can't fill at any price.
     const raw = ask.market ? m.mark * (ask.buy ? 1 + ask.slippagePct / 100 : 1 - ask.slippagePct / 100) : ask.price!;
     const price = formatPrice(raw, m.szDecimals);
+    // A limit price goes out exactly as the card shows it, or not at all.
+    if (!ask.market && Number(price) !== ask.price) throw new Error(`${m.coin} prices go in steps here: ${px(ask.price!)} would be sent as ${price}; put ${price} (or the next step) on the card`);
     const notional = num(size) * (ask.market ? m.mark : num(price));
     return { m, size, price, notional };
   }
@@ -111,7 +144,10 @@ export class HyperliquidTrader {
     const p = (a.payload ?? {}) as Record<string, unknown>;
     if (p.action !== "hyperliquid.order") return undefined;
     try {
-      const q = await this.plan(readOrder(p));
+      const ask = readOrder(p);
+      const q = await this.plan(ask);
+      // Closing or shrinking a position is never blocked by the limits (they cap new risk, not getting out of it).
+      if (ask.reduceOnly) return undefined;
       const l = await this.limits();
       if (l.maxTradeUsd && q.notional > l.maxTradeUsd) return `${usd(q.notional)} is over the ${usd(l.maxTradeUsd)} per-trade limit.`;
       const spent = await this.store.settings.get<{ day: string; usd: number }>(SPENT_KEY, { day: day(), usd: 0 });
@@ -131,10 +167,16 @@ export class HyperliquidTrader {
   }
 
   /** One order, as approved: checked against the limits again at the moment it runs. */
-  private async placeOrder(payload: Record<string, unknown>, a: Approval): Promise<string> {
+  private placeOrder(payload: Record<string, unknown>, a: Approval): Promise<string> {
+    // One at a time, so two cards approved together can't both slip under the daily limit before either is counted.
+    const run = this.queue.then(() => this.placeOrderNow(payload, a), () => this.placeOrderNow(payload, a));
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+  private async placeOrderNow(payload: Record<string, unknown>, a: Approval): Promise<string> {
     await this.ready();
     const ask = readOrder(payload);
-    const q = await this.plan(ask);
+    const q = await this.plan(ask, true);
     // Limits are checked again at the moment it runs: the day may have filled up since the card was made.
     const blocked = await this.preflight({ ...a, payload });
     if (blocked) throw new Error(blocked);
@@ -144,10 +186,10 @@ export class HyperliquidTrader {
     if (!st) throw new Error("Hyperliquid sent no status back; check the account");
     if ("error" in st) throw new Error(`Hyperliquid refused it: ${st.error}`);
     if ("filled" in st) {
-      await this.tally(num(st.filled.totalSz) * num(st.filled.avgPx));
+      if (!ask.reduceOnly) await this.tally(num(st.filled.totalSz) * num(st.filled.avgPx));
       return `Hyperliquid: ${ask.buy ? "bought" : "sold"} ${st.filled.totalSz} ${q.m.coin} at ${px(num(st.filled.avgPx))} (${usd(num(st.filled.totalSz) * num(st.filled.avgPx))})${num(st.filled.totalSz) < num(q.size) ? `, ${num(q.size) - num(st.filled.totalSz)} of the ${q.size} didn't fill within ${ask.slippagePct}% of the mark and was cancelled` : ""}${ask.reduceOnly ? ", reducing the position" : ""}. Order ${st.filled.oid}.`;
     }
-    await this.tally(q.notional);
+    if (!ask.reduceOnly) await this.tally(q.notional);
     return `Hyperliquid: ${ask.buy ? "buy" : "sell"} order for ${q.size} ${q.m.coin} at ${px(num(q.price))} is resting on the book (order ${st.resting.oid}); cancel it with a hyperliquid.cancel card.`;
   }
 
@@ -173,7 +215,7 @@ export class HyperliquidTrader {
         const account = await this.ready();
         const p = (a.payload ?? {}) as Record<string, unknown>;
         const coin = String(p.coin ?? "").toUpperCase();
-        const pct = Math.min(Math.max(num(p.pct) || 100, 1), 100);
+        const pct = closePct(p.pct);
         const st = await this.info<{ assetPositions?: { position: { coin: string; szi: string } }[] }>({ type: "clearinghouseState", user: account });
         const pos = (st.assetPositions ?? []).map((x) => x.position).find((x) => x.coin.toUpperCase() === coin && num(x.szi) !== 0);
         if (!pos) throw new Error(`there's no open ${coin} position to close`);
@@ -215,7 +257,7 @@ export class HyperliquidTrader {
           return `${a.market ? "Market" : "Limit"} ${a.buy ? "BUY (long)" : "SELL (short)"} ${what}${a.market ? `, filling within ${a.slippagePct}% of the mark or not at all` : ` at ${px(a.price!)}, resting until filled or cancelled`}${a.reduceOnly ? ", reduce-only (it can only shrink a position)" : ""}${a.leverage ? `, at ${a.leverage}x ${a.cross ? "cross" : "isolated"}: margin about ${a.usd ? usd(a.usd / a.leverage) : "size ÷ leverage"}` : ""}. ${real}`;
         } catch (e) { return `This order can't be read: ${(e as Error).message}.`; }
       },
-      "hyperliquid.close": (p) => `Closes ${num(p.pct) && num(p.pct) < 100 ? `${num(p.pct)}% of ` : ""}your ${String(p.coin ?? "?").toUpperCase()} position at market (reduce-only, within ${num(p.slippagePct) || 2}% of the mark). ${real}`,
+      "hyperliquid.close": (p) => `Closes ${closePct(p.pct) < 100 ? `${closePct(p.pct)}% of ` : ""}your ${String(p.coin ?? "?").toUpperCase()} position at market (reduce-only, within ${num(p.slippagePct) || 2}% of the mark). ${real}`,
       "hyperliquid.cancel": (p) => `Cancels ${p.oid !== undefined ? `order ${String(p.oid)}` : "every open order"} on ${String(p.coin ?? "?").toUpperCase()} on Hyperliquid.`,
       "hyperliquid.leverage": (p) => `Sets ${String(p.coin ?? "?").toUpperCase()} leverage to ${num(p.leverage)}x ${p.cross === false ? "isolated" : "cross"} on Hyperliquid. Higher leverage moves the liquidation price closer.`,
     };
