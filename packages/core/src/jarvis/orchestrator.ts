@@ -28,7 +28,8 @@ import { LOOKUP_TOOLS } from "../lookup.js";
 import { INSTAGRAM_LINE, VideoAnalyzer, videoCaps, videoLogLine, videoRefs, videoText, videoTools, withoutInstagramLinks, type VideoDeps, type VideoRef } from "../video.js";
 import { Secrets } from "../secrets.js";
 import { DECK_HINT, makeDeck, fillTemplate, normalizeFill, normalizeDeck, deckFolderName, type Deck } from "../decks.js";
-import { GUARDRAIL_FILES, WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
+import { GUARDRAIL_FILES, HELD_FOR_UPDATE, WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
+import { HeldJobs, deployPending, heldLine, type HeldJob } from "../deployhold.js";
 /** Settings keys for Phil's auto-ship switch and the day's auto-ships. */
 export const AUTO_SHIP_KEY = "workshop.autoShip";
 const AUTO_SHIP_LOG_KEY = "workshop.autoShipLog";
@@ -222,6 +223,7 @@ export class Jarvis {
     this.notify = opts.notify;
     // Keys Phil pastes into Settings (sealed in the store); the server reads them in with secrets.load() at boot.
     this.secrets = new Secrets(this.store);
+    this.heldJobs = new HeldJobs(this.store);
     this.useVideo();
     this.pulses.set("health", async () => healthSummary(this.store, 3));
     this.pulses.set("memory", async () => (await this.store.memory.list()).filter((m) => !/^(watch|handoff):/.test(m.key)).map((m) => `${m.scope}|${m.key}|${m.value}`).sort().join("\n"));
@@ -547,6 +549,47 @@ export class Jarvis {
     return undefined;
   }
 
+  /** Jobs for the workshop that haven't started: held for an update, or queued behind the job in it (deployhold.ts). */
+  readonly heldJobs: HeldJobs;
+  /** An approved update is waiting to restart HQ: the job stays on the list and Phil is told once; nothing ran. */
+  private async holdJob(agent: AgentDef, job: HeldJob, save = true): Promise<Awaited<ReturnType<ModelRouter["run"]>>> {
+    const none = { runId: job.id, agentId: agent.id, text: "", provider: "", modelId: "", inputTokens: 0, outputTokens: 0, costUsd: 0, durationMs: 0 };
+    if (!save) { await this.heldJobs.drop(job.id); return { ...none, blocked: "an HQ update is going in and HQ is about to restart; ask again in a few minutes" }; }
+    const was = await this.heldJobs.keep({ ...job, why: "update" }, false);
+    const line = heldLine(agent.name, job.task);
+    if (was?.why !== "update") {
+      await this.router.log(agent.id, "system", line);
+      await this.say({ role: "agent", agentId: agent.id, text: line, kind: "progress" });
+    }
+    return { ...none, blocked: "held until the HQ update is in; it is saved and starts right after the restart" };
+  }
+  /**
+   * Start the workshop jobs nothing is waiting on, oldest first, one after the other: the ones held for an update, and
+   * the ones a restart left queued (before this, a queued job lived only in memory and was lost without a word). The
+   * answer goes to chat, in the conversation the job was asked in. Called on boot once the last ship is settled, and
+   * by the scheduler when no update is waiting (for an update that never restarted HQ). Returns how many started.
+   */
+  async resumeHeldJobs(): Promise<number> {
+    const jobs = await this.heldJobs.take();
+    let started = 0;
+    for (const [i, j] of jobs.entries()) {
+      const agent = getAgent(j.agentId);
+      if (!agent || !CHARTERS[agent.id]?.workshop || !this.workshop) { await this.heldJobs.drop(j.id); continue; }
+      // Another update came in first: this one and the rest stay on the list for the next time.
+      if (await deployPending(this.store)) { this.heldJobs.giveBack(jobs.slice(i).map((x) => x.id)); break; }
+      const run = async () => {
+        await this.say({ role: "agent", agentId: agent.id, text: `Starting the job that was waiting${j.why === "update" ? " for the HQ update" : " for the workshop when HQ restarted"}: "${j.task.replace(/\s+/g, " ").slice(0, 140)}"`, kind: "ack" });
+        const r = await this.runAgent(agent, j.task, { direct: j.direct, from: j.from, heldId: j.id });
+        if (r.blocked && (await this.heldJobs.list()).some((x) => x.id === j.id)) return; // held again; it keeps its place
+        await this.say({ role: "agent", agentId: agent.id, text: r.blocked ? `(${agent.name} did not run: ${r.blocked})` : r.text, ...(r.blocked ? {} : { runId: r.runId }), kind: "final" });
+      };
+      started++;
+      try { await (j.convo ? this.convo.run(j.convo, run) : run()); }
+      catch (e) { await this.heldJobs.drop(j.id); await this.router.log(agent.id, "error", `${agent.name}'s waiting job couldn't be started: ${(e as Error).message.slice(0, 200)}`).catch(() => undefined); }
+    }
+    return started;
+  }
+
   /** On boot: report how the last ship went, if one was in flight when HQ restarted. */
   async finishShip(opts: { wait?: boolean } = {}): Promise<string | undefined> {
     if (!this.workshop) return undefined;
@@ -736,7 +779,7 @@ export class Jarvis {
   }
 
   /** Run one agent on a task with its persona, memory and safety rules; queue approvals and memories it emits. */
-  async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string; depth?: number; noBlocks?: boolean } = {}) {
+  async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string; depth?: number; noBlocks?: boolean; /** A held job being started again (resumeHeldJobs). */ heldId?: string } = {}) {
     if (agent.venture === "money") await this.refreshHoldings();
     const memory = [...(await this.store.memory.list("phil")), ...(await this.store.memory.list(`venture:${agent.venture}`)), ...(await this.store.memory.list(`agent:${agent.id}`))];
     const cfg = await getAgentConfig(this.store, agent.id);
@@ -748,16 +791,29 @@ export class Jarvis {
     let workshopHint = "";
     let workshopClaim: string | undefined;
     if (CHARTERS[agent.id]?.workshop && this.workshop) {
+      // A job that can't start yet is kept in the store, so a restart doesn't lose it (resumeHeldJobs starts it again).
+      const ctx = this.convo.getStore();
+      const job: HeldJob = { id: opts.heldId ?? randomUUID(), agentId: agent.id, task, from: opts.from, direct: opts.direct, at: new Date().toISOString(), why: "queued", ...(ctx ? { convo: { channel: ctx.channel, replyTo: ctx.replyTo } } : {}) };
       try {
         // Queue behind a code task already in the workshop rather than run without it; the Working strip says so.
-        const w = await this.workshop.prepareWhenFree(task, { onWait: (b) => this.router.setStatus(agent.id, "working", `queued for the workshop behind "${b.task.replace(/\s+/g, " ").slice(0, 60)}"`) });
+        // While an approved update is waiting to restart HQ the job doesn't start at all: it would hold the update up.
+        const w = await this.workshop.prepareWhenFree(task, {
+          hold: async () => !!(await deployPending(this.store)),
+          onWait: async (b) => { await this.heldJobs.keep(job, true); await this.router.setStatus(agent.id, "working", `queued for the workshop behind "${b.task.replace(/\s+/g, " ").slice(0, 60)}"`); },
+        });
+        await this.heldJobs.drop(job.id);
         workshopClaim = w.claim;
         // Every file and shell call checks the claim first: a run that lost the workshop (its claim went stale and
         // another run took over) can no longer write into the other run's branch.
         const base = workshopGuard(w.dir, process.cwd()), ws = this.workshop;
         workspace = { dir: w.dir, guard: (tool, input) => (ws.holds(w.claim) || !/^(Edit|Write|MultiEdit|NotebookEdit|Bash)$/.test(tool) ? base(tool, input) : "this run no longer holds the workshop (its claim expired and another run took over); stop changing files and say what you got done") };
         workshopHint = `\n\n${WORKSHOP_HINT(w.dir, w.branch, w.base)}`;
-      } catch (e) { workshopHint = `\n\nYour workshop couldn't be opened (${(e as Error).message.slice(0, 200)}), so you can't change code this run; say so and diagnose with the tools you have.`; }
+      } catch (e) {
+        // A question on a card is answered on the card or not at all: it isn't kept for later.
+        if ((e as Error).message === HELD_FOR_UPDATE) return this.holdJob(agent, job, !opts.noBlocks);
+        await this.heldJobs.drop(job.id);
+        workshopHint = `\n\nYour workshop couldn't be opened (${(e as Error).message.slice(0, 200)}), so you can't change code this run; say so and diagnose with the tools you have.`;
+      }
     }
     const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "") + workshopHint + await this.connectionsText() + await this.pendingText(agent.id);
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
@@ -2304,7 +2360,8 @@ export class Jarvis {
   // ---- Status -------------------------------------------------------------
 
   /**
-   * What is actually running right now, from the runs table, plus Einstein's workshop queue and any deploy in flight.
+   * What is actually running right now, from the runs table, plus Einstein's workshop queue, the jobs held for an
+   * update, and any deploy in flight.
    * Jarvis answers "how's Einstein doing?" from this, not from older chat: a run that isn't listed has ended.
    */
   async liveWorkText(now = Date.now()): Promise<string> {
@@ -2313,17 +2370,22 @@ export class Jarvis {
     const lines = runs.map((r) => `- ${getAgent(r.agentId)?.name ?? r.agentId}: working for ${mins(r.startedAt)} min on "${r.prompt.replace(/^[^:]{0,40}?asks:\s*/i, "").replace(/\s+/g, " ").slice(0, 110)}"`);
     const queued = (await this.store.agentState.all()).filter((s) => s.status === "working" && /^queued for the workshop/.test(s.detail ?? "") && !runs.some((r) => r.agentId === s.id));
     for (const q of queued) lines.push(`- ${getAgent(q.id)?.name ?? q.id}: ${q.detail}`);
+    // Workshop jobs held for an update: saved, not running, and started again once HQ is back.
+    const held = (await this.heldJobs.list()).filter((h) => h.why === "update");
+    for (const h of held) lines.push(`- ${getAgent(h.agentId)?.name ?? h.agentId}: NOT started, held for the HQ update: "${h.task.replace(/\s+/g, " ").slice(0, 110)}" (asked ${mins(h.at)} min ago${h.from ? ` by ${h.from.replace(/\s*\(.*$/, "")}` : ""}). It is saved and starts right after the update; nothing is lost and nobody needs to ask again.`);
     const { SHIP_KEY } = await import("../workshop.js");
     const ship = await this.store.settings.get<{ status?: string; title?: string; at?: string } | null>(SHIP_KEY, null);
     if (ship?.status === "shipping" && ship.at) {
-      // A deploy never cuts an agent off mid-run: it waits for every run in progress (and a job queued for the workshop
-      // that starts meanwhile), up to 65 minutes from approval, then takes two or three minutes. Say which it is, so a
-      // long wait isn't reported as a slow restart.
-      const waitingOn = [...new Set([...runs.map((r) => getAgent(r.agentId)?.name ?? r.agentId), ...queued.map((q) => getAgent(q.id)?.name ?? q.id)])];
+      // A deploy never cuts an agent off mid-run: it waits for the runs in progress, up to 65 minutes from approval,
+      // then takes two or three minutes. Nothing new starts in the background meanwhile (routines and watchers wait,
+      // workshop jobs are held), so the wait is for what was already going. Say which it is, so a long wait isn't
+      // reported as a slow restart.
+      const waitingOn = [...new Set(runs.map((r) => getAgent(r.agentId)?.name ?? r.agentId))];
       const left = Math.max(0, 65 - mins(ship.at));
+      const heldText = held.length ? `, and ${held.length === 1 ? "the workshop job held above starts" : `the ${held.length} workshop jobs held above start`} right after the restart` : "";
       lines.push(waitingOn.length
-        ? `- Update approved ${mins(ship.at)} min ago for "${ship.title}": not started yet, on purpose. It is waiting for ${waitingOn.join(" and ")} to finish (a restart would cut the run off)${queued.length ? ", including the job queued for the workshop" : ""}; it goes ahead when they finish, or in ${left} min at the latest, and then takes two or three minutes. This is normal, not stuck.`
-        : `- Update approved ${mins(ship.at)} min ago for "${ship.title}": nothing is running, so HQ is rebuilding and restarting now (two or three minutes).${mins(ship.at) > 75 ? " It is well past the longest it should take: something is wrong; Einstein should look at the deploy log." : ""}`);
+        ? `- Update approved ${mins(ship.at)} min ago for "${ship.title}": not started yet, on purpose. It is waiting for ${waitingOn.join(" and ")} to finish (a restart would cut the run off). Nothing new starts in the background meanwhile: routines and watchers wait and run after the update${heldText}. It goes ahead when ${waitingOn.length === 1 ? "that run finishes" : "those runs finish"}, or in ${left} min at the latest, and then takes two or three minutes. This is normal, not stuck.`
+        : `- Update approved ${mins(ship.at)} min ago for "${ship.title}": nothing is running, so HQ is rebuilding and restarting now (two or three minutes)${held.length ? `; ${held.length === 1 ? "the held workshop job starts" : "the held workshop jobs start"} once it is back` : ""}.${mins(ship.at) > 75 ? " It is well past the longest it should take: something is wrong; Einstein should look at the deploy log." : ""}`);
     }
     return lines.length ? `Working right now (live; anything not listed has finished or stopped, so don't call it "building" or "in progress"):\n${lines.join("\n")}` : "Working right now: nothing. No agent run is in progress; anything earlier has finished or stopped.";
   }

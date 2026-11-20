@@ -154,7 +154,10 @@ if (retired.length) console.log(`Dropped state rows of retired agents: ${retired
   const settle = async (tries: number): Promise<void> => {
     const last = tries >= 12;
     const said = await jarvis.finishShip({ wait: !last }).catch((e) => { console.warn("[workshop] finish:", (e as Error).message); return "error"; });
-    if (said === undefined && !last && (await store.settings.get<{ status?: string } | null>(SHIP_KEY, null))?.status === "shipping") setTimeout(() => void settle(tries + 1), 20_000).unref();
+    if (said === undefined && !last && (await store.settings.get<{ status?: string } | null>(SHIP_KEY, null))?.status === "shipping") { setTimeout(() => void settle(tries + 1), 20_000).unref(); return; }
+    // HQ is back and the ship is settled (or none was in flight): start the workshop jobs that were held for the
+    // update, and the ones the restart left queued, oldest first.
+    void jarvis.resumeHeldJobs().then((n) => { if (n) console.log(`[workshop] started ${n} job${n === 1 ? "" : "s"} that waited for the restart`); }).catch((e) => console.warn("[workshop] held jobs:", (e as Error).message));
   };
   void settle(0);
 }

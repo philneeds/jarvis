@@ -5,6 +5,7 @@ import { AGENTS, getAgent, type AgentDef } from "./registry/index.js";
 import { getAgentConfig } from "./config.js";
 import { listDecks } from "./decks.js";
 import { listDataFiles } from "./salesdata.js";
+import { deployPending } from "./deployhold.js";
 
 export interface Schedule {
   id: string;
@@ -66,6 +67,8 @@ export const SCHEDULES: Schedule[] = [
 ];
 
 const LAST_RUN_KEY = "schedule.lastRun";
+/** Routines that came due while an approved update was waiting to restart HQ; they run on the first tick after it. */
+export const DEFERRED_KEY = "schedule.deferred";
 
 /** The built-in routines plus each agent's own schedule from its settings. */
 export async function withCustom(store: Store, schedules: Schedule[] = SCHEDULES): Promise<Schedule[]> {
@@ -308,9 +311,27 @@ export class Scheduler {
     if (!this.loaded) { this.loaded = true; for (const [k, v] of Object.entries(await this.jarvis.store.settings.get<Record<string, number>>(LAST_RUN_KEY, {}))) if (!this.lastRun.has(k)) this.lastRun.set(k, v); }
     // Reports for the same lead from this tick are handed over together, so Munger gets one message from five scouts.
     const batches = new Map<string, RoutineReport[]>();
-    for (const s of this.due(now, phase, await this.allSchedules())) {
+    const all = await this.allSchedules();
+    const store = this.jarvis.store;
+    // An approved update is waiting to restart HQ: start nothing, or the update would wait for it too. What comes due
+    // is noted, not marked as run (a daily routine's ten-minute window may be gone by then), and runs after the update.
+    if (await deployPending(store, now.getTime())) {
+      const waiting = await store.settings.get<string[]>(DEFERRED_KEY, []);
+      const fresh = this.due(now, phase, all).filter((s) => !waiting.includes(s.id));
+      if (fresh.length) {
+        await store.settings.set(DEFERRED_KEY, [...waiting, ...fresh.map((s) => s.id)]);
+        await this.jarvis.router.log("jarvis", "schedule", `Scheduled: ${fresh.map((s) => s.id).join(", ")} · waiting for the HQ update to go in; ${fresh.length === 1 ? "it runs" : "they run"} right after`);
+      }
+      return;
+    }
+    const deferred = new Set(await store.settings.get<string[]>(DEFERRED_KEY, []));
+    if (deferred.size) await store.settings.set(DEFERRED_KEY, []);
+    // No update waiting: a workshop job held for one that never restarted HQ starts now (after a restart, boot does it).
+    void this.jarvis.resumeHeldJobs().catch((e) => console.warn("[workshop] held jobs:", (e as Error).message));
+    const dueNow = new Set(this.due(now, phase, all).map((s) => s.id));
+    for (const s of all.filter((x) => dueNow.has(x.id) || (deferred.has(x.id) && x.phase <= phase))) {
       // A long routine can span ticks: skip what's still running, and re-check since the snapshot was taken.
-      if (this.running.has(s.id) || !this.due(now, phase, [s]).length) continue;
+      if (this.running.has(s.id) || (!deferred.has(s.id) && !this.due(now, phase, [s]).length)) continue;
       if ((this.lastRun.get(s.id) ?? 0) < now.getTime()) this.lastRun.set(s.id, now.getTime());
       await this.jarvis.store.settings.set(LAST_RUN_KEY, Object.fromEntries(this.lastRun));
       const agent = getAgent(s.agentId);

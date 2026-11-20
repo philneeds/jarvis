@@ -3,6 +3,7 @@ import { getAgent } from "./registry/index.js";
 import { deliverReports, type RoutineReport } from "./scheduler.js";
 import type { GoHighLevelConnector } from "./connectors/gohighlevel.js";
 import { hyperliquidPerps, perpsText, type PerpRow } from "./hyperliquid.js";
+import { deployPending } from "./deployhold.js";
 
 /**
  * Watchers: how a lead is "always on" without a model running all day. Each watcher looks at one source on a short
@@ -145,6 +146,9 @@ export class Watchers {
   }
 
   async tick(now = new Date()) {
+    // An approved update is waiting to restart HQ: no look, no wake (the update would wait for the agent's run). The
+    // cursors and last-look times stay as they are, so each watcher looks, and wakes its agent, right after the update.
+    if (await deployPending(this.jarvis.store, now.getTime())) return;
     const phase = await this.jarvis.store.settings.get("phase", 0);
     const state = await this.jarvis.store.settings.get<Record<string, WatchState>>(WATCH_STATE_KEY, {});
     for (const w of this.due(now, phase, state)) {

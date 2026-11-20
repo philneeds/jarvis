@@ -70,6 +70,8 @@ export interface PendingUpdate { branch: string; live: string; tip: string; comm
 export interface DeployOutcome { at: string; ok: boolean; sha?: string; previous?: string; rolledBackTo?: string; error?: string }
 export interface DeployStatus { last: DeployOutcome | null; live: { sha: string; branch: string } | null }
 export const SHIP_KEY = "workshop.ship";
+/** What prepareWhenFree throws when its `hold` check says an approved update is waiting: the job is held, not failed. */
+export const HELD_FOR_UPDATE = "held: an HQ update is waiting to go in";
 const SLUG = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "change";
 
 export class Workshop {
@@ -140,13 +142,22 @@ export class Workshop {
    * Wait for the workshop instead of working without it: a second code task queues behind the one in the workshop
    * (polling, up to waitMs; default WORKSHOP_WAIT_MS, 45 minutes), then prepares as usual. Runs end within
    * WORKSHOP_RUN_TIMEOUT_MS, so the wait is bounded. onWait is told once, with what the workshop is busy with.
+   * `hold` is asked before each try and once more when the workshop is ready: while it says yes (an approved update
+   * is waiting to restart HQ) the job doesn't start, queued or not, and HELD_FOR_UPDATE is thrown for the caller to
+   * keep the job for after the restart. Before this, a queued job started the moment the one ahead of it ended and
+   * the update waited for that one too.
    */
-  async prepareWhenFree(task: string, opts: { waitMs?: number; pollMs?: number; onWait?: (busy: { task: string; at: string }) => unknown } = {}): Promise<WorkshopState & { claim: string }> {
+  async prepareWhenFree(task: string, opts: { waitMs?: number; pollMs?: number; onWait?: (busy: { task: string; at: string }) => unknown; hold?: () => Promise<boolean> } = {}): Promise<WorkshopState & { claim: string }> {
     const deadline = Date.now() + (opts.waitMs ?? this.opts.queueWaitMs ?? Number(process.env.WORKSHOP_WAIT_MS ?? 45 * 60_000));
     let told = false;
     for (;;) {
-      try { return await this.prepare(task); }
-      catch (e) {
+      if (await opts.hold?.()) throw new Error(HELD_FOR_UPDATE);
+      try {
+        const w = await this.prepare(task);
+        // Preparing can take minutes (a fresh install): an update approved meanwhile still comes first.
+        if (await opts.hold?.()) { this.release(w.claim); throw new Error(HELD_FOR_UPDATE); }
+        return w;
+      } catch (e) {
         if (!/in use by another run/.test((e as Error).message) || Date.now() >= deadline) throw e;
         if (!told && this.busy) { told = true; await opts.onWait?.(this.busy); }
         await new Promise((r) => setTimeout(r, opts.pollMs ?? this.opts.pollMs ?? 10_000));
@@ -336,7 +347,9 @@ export class Workshop {
     // Detached: the deploy restarts this very process.
     const start = () => { const p = spawn(bin!, args, { cwd: this.opts.appDir, detached: true, stdio: "ignore", env: { ...process.env, JARVIS_SHIP_SHA: sha } }); p.on("error", () => undefined); p.unref(); };
     // The restart would cut off any agent mid-run (Einstein's other task, a lead's routine), so wait for them first,
-    // up to WAIT_FOR_RUNS_MS; the ship record already says this commit is going out.
+    // up to WAIT_FOR_RUNS_MS; the ship record already says this commit is going out. While that record says
+    // "shipping", routines, watchers and new workshop jobs don't start (deployhold.ts), so the wait is only for runs
+    // that were already going, plus anything Phil asks for himself meanwhile.
     const busy = (await store.agentState.all()).filter((s) => s.status === "working").map((s) => s.id);
     if (!busy.length || this.opts.waitForRunsMs === 0) { start(); return `${lead}; HQ is rebuilding and will restart in two or three minutes. If it doesn't come back up, the deploy rolls back to ${previous.slice(0, 7)} on its own and I'll say so.`; }
     const limit = Date.now() + (this.opts.waitForRunsMs ?? Workshop.WAIT_FOR_RUNS_MS);
@@ -345,7 +358,7 @@ export class Workshop {
       if (!still.length || Date.now() >= limit) start(); else setTimeout(() => void poll(), this.opts.pollMs ?? 15_000);
     };
     setTimeout(() => void poll(), this.opts.pollMs ?? 15_000);
-    return `${lead}. ${busy.length === 1 ? `${busy[0]} is` : `${busy.join(", ")} are`} mid-run, so the restart waits for that to finish (up to ${Math.round((this.opts.waitForRunsMs ?? Workshop.WAIT_FOR_RUNS_MS) / 60_000)} minutes); then HQ rebuilds and restarts, and rolls back to ${previous.slice(0, 7)} on its own if it doesn't come back up.`;
+    return `${lead}. ${busy.length === 1 ? `${busy[0]} is` : `${busy.join(", ")} are`} mid-run, so the restart waits for that to finish (up to ${Math.round((this.opts.waitForRunsMs ?? Workshop.WAIT_FOR_RUNS_MS) / 60_000)} minutes) and nothing new starts in the background meanwhile; then HQ rebuilds and restarts, and rolls back to ${previous.slice(0, 7)} on its own if it doesn't come back up.`;
   }
   /**
    * Longer than the longest run HQ allows (a workshop job may take 60 minutes, anything else 20), so a restart never
