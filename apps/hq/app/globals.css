@@ -179,6 +179,13 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; a
 .node.off .st { opacity: 0.6; }
 .link { fill: none; stroke: rgba(124, 196, 255, 0.35); stroke-width: 1.4; }
 .link.inner { stroke: rgba(124, 196, 255, 0.2); stroke-width: 1; }
+.link.skill-link { stroke-width: 1; stroke-dasharray: 1.5 3; stroke-linecap: round; }
+.node.skill .bub { stroke-width: 1.3; }
+.node.skill text { font-family: var(--font-mono); font-weight: 600; letter-spacing: 0.02em; }
+.node.skill:hover .bub, .node.skill:focus-visible .bub { stroke-width: 2.2; }
+.node.skill.off .bub { fill: #08173D; }
+.node.skill.off text { opacity: 0.6; }
+.skill-chip { font-family: var(--font-mono); border: 1px solid; border-radius: 3px; background: rgba(124,196,255,0.06); }
 .xlink { fill: none; stroke: rgba(124, 196, 255, 0.22); stroke-width: 1.2; stroke-dasharray: 5 5; }
 .hull { stroke-width: 1.2; }
 .hull-label { font-family: var(--font-mono); font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; text-anchor: middle; pointer-events: none; }

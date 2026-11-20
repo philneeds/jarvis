@@ -19,11 +19,12 @@ export interface LayoutOpts {
 
 export const NAME_FONT = (fs: number) => `700 ${fs}px "Chakra Petch", system-ui, sans-serif`;
 export const SUB_FONT = (fs: number) => `500 ${fs}px "IBM Plex Mono", ui-monospace, monospace`;
+export const SKILL_FONT = (fs: number) => `600 ${fs}px "IBM Plex Mono", ui-monospace, monospace`;
 export const LABEL_FONT = (fs: number) => `600 ${fs}px "IBM Plex Mono", ui-monospace, monospace`;
 
 const SIZES = {
-  wide: { jarvisFs: 22, jarvisH: 56, headFs: 15, headH: 42, leafFs: 13, leafH: 27, subFs: 10, padX: 12, gapX: 8, gapY: 10, pad: 10, labelH: 19, labelFs: 11, gap: 16 },
-  compact: { jarvisFs: 17, jarvisH: 34, headFs: 13.5, headH: 26, leafFs: 12.5, leafH: 23, subFs: 9, padX: 8, gapX: 5, gapY: 6, pad: 6, labelH: 15, labelFs: 10.5, gap: 9 },
+  wide: { jarvisFs: 22, jarvisH: 56, headFs: 15, headH: 42, leafFs: 13, leafH: 27, skillFs: 10.5, skillH: 20, subFs: 10, padX: 12, gapX: 8, gapY: 10, pad: 10, labelH: 19, labelFs: 11, gap: 16 },
+  compact: { jarvisFs: 17, jarvisH: 34, headFs: 13.5, headH: 26, leafFs: 12.5, leafH: 23, skillFs: 9.5, skillH: 17, subFs: 9, padX: 8, gapX: 5, gapY: 6, pad: 6, labelH: 15, labelFs: 10.5, gap: 9 },
 };
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
@@ -49,6 +50,12 @@ export function layoutWeb(agents: AgentLive[], opts: LayoutOpts): WebLayout {
       pos[a.id] = { x: 0, y: 0, w: Math.max(w, opts.compact ? 104 : 150), h: S.jarvisH, fs: S.jarvisFs, sub, subFs: S.subFs };
       continue;
     }
+    if (a.skillOf) {
+      // A skill: a small angled tag, its pointed ends taking h / 2 on each side.
+      const h = S.skillH;
+      pos[a.id] = { x: 0, y: 0, w: Math.ceil(opts.measure(a.name, SKILL_FONT(S.skillFs)) + h + S.padX), h, fs: S.skillFs, subFs: S.subFs };
+      continue;
+    }
     const head = a.layer <= 1;
     const fs = head ? S.headFs : S.leafFs;
     const sub = head && !opts.compact ? clip(a.short, 24) : undefined;
@@ -72,9 +79,10 @@ export function layoutWeb(agents: AgentLive[], opts: LayoutOpts): WebLayout {
   const build = (venture: VentureId, members: AgentLive[], aspect: number): Built => {
     const label = opts.ventureLabel(venture);
     const labelW = opts.measure(label, LABEL_FONT(S.labelFs)) + label.length * S.labelFs * 0.14 + 12;
-    const minLayer = Math.min(...members.map((m) => m.layer));
+    const minLayer = Math.min(...members.filter((m) => !m.skillOf).map((m) => m.layer), 9);
     const depths = new Map<number, AgentLive[]>();
-    for (const m of members) { const d = m.layer - minLayer; depths.set(d, [...(depths.get(d) ?? []), m]); }
+    // Skills sit in their own rows at the back of the district, after every agent.
+    for (const m of members) { const d = m.skillOf ? 100 : m.layer - minLayer; depths.set(d, [...(depths.get(d) ?? []), m]); }
     const widest = Math.max(...members.map((m) => pos[m.id]!.w));
     const total = members.reduce((s, m) => s + pos[m.id]!.w + S.gapX, 0);
     let best: Built | null = null; let bestScore = Infinity;

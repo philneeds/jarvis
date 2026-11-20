@@ -11,6 +11,8 @@ export type AgentLive = AgentDef & {
   detail?: string;
   /** The agent's own successful runs since midnight, Phil's time. */
   runsToday?: number;
+  /** Set on a skill drawn on the Agent Web: the agent that carries it. Skills are not agents. */
+  skillOf?: string;
 };
 
 export interface State {

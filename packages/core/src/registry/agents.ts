@@ -41,6 +41,8 @@ export interface AgentDef {
   /** Priority tier for the usage rationing rules. */
   priority: "always" | "room" | "pause-first";
   note?: string;
+  /** Skills this agent carries (a former agent folded in, or a playbook it runs), each kept as its memory note skill:<key>. Shown on the Agent Web as tags, not agents. */
+  skills?: { key: string; name: string }[];
 }
 
 const SECTOR = "Reviews current holdings in its sector and suggests changes to Buffett.";
@@ -92,6 +94,7 @@ export const AGENTS: AgentDef[] = [
   // one health agent. Metro is a normal HQ agent under Jarvis; sleep, fitness, nutrition and the daily read are his skills.
   {
     id: "metro", name: "Metro", short: "Health", layer: 1, parent: "jarvis", venture: "personal", model: "claude-sonnet", phase: 3, priority: "room",
+    skills: [{ key: "daily_health_read", name: "Daily read" }, { key: "sleep", name: "Sleep" }, { key: "fitness", name: "Fitness" }, { key: "nutrition", name: "Nutrition" }],
     desc: "Phil's one health agent: turns his Apple Health data into a plain daily read and one thing to focus on. Sleep and circadian rhythm, fitness and training, nutrition and hydration (with MyFitnessPal) are his skills, kept as playbooks in his memory.",
   },
 
@@ -170,7 +173,7 @@ export const AGENTS: AgentDef[] = [
   // Nov 15 2026: the Mindset Coach (mindset) followed, as his "mindset coaching" skill; Nov 17 2026: the Scheduler
   // (scheduler) too, as his "scheduling" skill: he reads LeadPerfection and files the day's lp.assign card himself.
   // Phil, Nov 9 2026: an accounting audit bot for ProEdge. That's the Auditor: reads only, moves no money.
-  { id: "stevon", name: "Stevon", short: "ProEdge", layer: 1, parent: "jarvis", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", desc: "Responsible for everything to do with ProEdge: sales coaching and mindset coaching for the team, the team's daily schedule in LeadPerfection, and Email AI and the Auditor under him." },
+  { id: "stevon", name: "Stevon", short: "ProEdge", layer: 1, parent: "jarvis", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", skills: [{ key: "sales_coaching", name: "Sales coaching" }, { key: "mindset_coaching", name: "Mindset coaching" }, { key: "scheduling", name: "Scheduling" }], desc: "Responsible for everything to do with ProEdge: sales coaching and mindset coaching for the team, the team's daily schedule in LeadPerfection, and Email AI and the Auditor under him." },
   { id: "emailai", name: "Email AI", short: "Email automation & info", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 2, priority: "room", desc: "Email automation and information." },
-  { id: "auditor", name: "Auditor", short: "Accounting audit", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", desc: "ProEdge's accounting auditor: checks the commissions and sales figures against LeadPerfection's reports and what was actually paid, and reports every gap to Stevon. Reads only; moves no money and changes nothing." },
+  { id: "auditor", name: "Auditor", short: "Accounting audit", layer: 2, parent: "stevon", venture: "proedge", model: "claude-sonnet", phase: 1, priority: "room", skills: [{ key: "commission_rules", name: "Commissions" }], desc: "ProEdge's accounting auditor: checks the commissions and sales figures against LeadPerfection's reports and what was actually paid, and reports every gap to Stevon. Reads only; moves no money and changes nothing." },
 ];

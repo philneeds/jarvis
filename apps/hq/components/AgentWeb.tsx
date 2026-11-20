@@ -85,7 +85,12 @@ export function AgentWeb({ initial }: { initial?: string }) {
 
   const agents = useMemo(() => (state?.agents ?? []).filter((a) => a.id !== "interface"), [state]);
   const byId = useMemo(() => Object.fromEntries(agents.map((a) => [a.id, a])), [agents]);
-  const shown = useMemo(() => agents.filter((a) => a.layer <= maxLayer), [agents, maxLayer]);
+  // Skills ride along with the whole web ("All"): each one a tag beside the agent that carries it, not an agent itself.
+  const shown = useMemo(() => {
+    const out = agents.filter((a) => a.layer <= maxLayer);
+    if (maxLayer < 3) return out;
+    return [...out, ...out.flatMap((o) => (o.skills ?? []).map((k): AgentLive => ({ ...o, id: `skill:${o.id}:${k.key}`, name: k.name, short: `${o.name}'s skill`, parent: o.id, links: [], alsoReportsTo: [], serves: [], skills: undefined, skillOf: o.id, layer: Math.min(3, o.layer + 1) as AgentLive["layer"] })))];
+  }, [agents, maxLayer]);
   // Positions depend only on who is shown and the space they get, not on status changes.
   const shape = shown.map((a) => `${a.id}:${a.parent}:${a.venture}`).join(",");
   const ventures = useMemo(() => (state ? Object.values(state.ventures).filter((v) => v.id !== "root") : []), [state]);
@@ -100,7 +105,7 @@ export function AgentWeb({ initial }: { initial?: string }) {
   const cross = useMemo(() => { const seen = new Set<string>(); const out: [string, string][] = []; shown.forEach((a) => [...(a.links ?? []), ...(a.alsoReportsTo ?? [])].forEach((o) => { if (!pos[o]) return; const k = [a.id, o].sort().join("|"); if (!seen.has(k)) { seen.add(k); out.push([a.id, o]); } })); return out; }, [shown, pos]);
   const ql = q.trim().toLowerCase();
   const match = (a: AgentLive) => !ql || a.name.toLowerCase().includes(ql) || a.short.toLowerCase().includes(ql) || a.id.includes(ql);
-  const hits = ql ? shown.filter(match) : [];
+  const hits = ql ? shown.filter((a) => !a.skillOf && match(a)) : [];
 
   const fitView = useCallback(() => {
     const b = web.bounds; const bw = b.x1 - b.x0, bh = b.y1 - b.y0;
@@ -205,7 +210,7 @@ export function AgentWeb({ initial }: { initial?: string }) {
 
   const curve = (a: { x: number; y: number }, b: { x: number; y: number }, bend: number) => { const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = b.x - a.x, dy = b.y - a.y; return `M${a.x},${a.y}Q${mx - dy * bend},${my + dx * bend} ${b.x},${b.y}`; };
   const near = new Set<string>();
-  if (sel && byId[sel]) { near.add(sel); const d = byId[sel]!; if (d.parent) near.add(d.parent); agents.filter((a) => a.parent === sel).forEach((k) => near.add(k.id)); cross.forEach(([a, b]) => { if (a === sel) near.add(b); if (b === sel) near.add(a); }); }
+  if (sel && byId[sel]) { near.add(sel); const d = byId[sel]!; if (d.parent) near.add(d.parent); shown.filter((a) => a.parent === sel).forEach((k) => near.add(k.id)); if (d.skillOf) near.add(d.skillOf); cross.forEach(([a, b]) => { if (a === sel) near.add(b); if (b === sel) near.add(a); }); }
 
   // A venture staffed from other teams (the Analyzer) gets a dashed ring around each member instead of a district.
   const owned = new Set(agents.map((x) => x.venture));
@@ -247,13 +252,24 @@ export function AgentWeb({ initial }: { initial?: string }) {
               </g>
             );
           })}
-          {links.map(([p, c]) => <path key={`${p}-${c}`} className={byId[p]?.venture === byId[c]?.venture && p !== "jarvis" ? "link inner" : "link"} d={curve(pos[p]!, pos[c]!, 0.06)} style={sel && (p === sel || c === sel) ? { stroke: "var(--accent)", strokeWidth: 2.2, opacity: 1 } : sel || ql ? { opacity: 0.2 } : undefined} />)}
+          {links.map(([p, c]) => <path key={`${p}-${c}`} className={c.startsWith("skill:") ? "link skill-link" : byId[p]?.venture === byId[c]?.venture && p !== "jarvis" ? "link inner" : "link"} d={curve(pos[p]!, pos[c]!, 0.06)} style={sel && (p === sel || c === sel) ? { stroke: "var(--accent)", strokeWidth: 2.2, opacity: 1 } : sel || ql ? { opacity: 0.2 } : undefined} />)}
           {cross.map(([p, c]) => <path key={`x${p}-${c}`} className="xlink" d={curve(pos[p]!, pos[c]!, 0.16)} style={sel && (p === sel || c === sel) ? { stroke: "var(--accent)", strokeWidth: 2, opacity: 1 } : sel || ql ? { opacity: 0.15 } : undefined} />)}
           {halos.map(({ v, a: m, p }) => <rect key={`${v.id}-${m.id}`} className="hull" x={p.x - p.w / 2 - 4} y={p.y - p.h / 2 - 4} width={p.w + 8} height={p.h + 8} rx={(p.h + 8) / 2} fill="none" stroke={v.color} strokeDasharray="4 3" opacity={ql ? 0.3 : 0.9}><title>{v.label}</title></rect>)}
           {shown.map((d) => {
             const p = pos[d.id]; if (!p) return null;
             const color = state!.ventures[d.venture]?.color ?? "var(--accent)";
             const dim = ql ? !match(d) : sel ? !near.has(d.id) : false;
+            if (d.skillOf) {
+              // A skill: a small angled tag in the owner's colour, no status light. Tapping it opens the agent that carries it.
+              const hw = p.w / 2, hh = p.h / 2, tip = hh * 0.8;
+              return (
+                <g key={d.id} className={`node skill ${!d.live ? "off" : ""}`} transform={`translate(${p.x},${p.y})`} opacity={dim ? 0.18 : 1} tabIndex={0} role="button" data-id={d.id} aria-label={`${d.name}, a skill of ${byId[d.skillOf]?.name ?? d.skillOf}`} onClick={(e) => { e.stopPropagation(); pick(d.skillOf!); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSel(d.skillOf!); } }}>
+                  <title>{d.name} · skill of {byId[d.skillOf]?.name}</title>
+                  <path className="bub" d={`M${-hw + tip},${-hh}H${hw - tip}L${hw},0L${hw - tip},${hh}H${-hw + tip}L${-hw},0Z`} stroke={color} style={d.live ? { fill: `color-mix(in srgb, ${color} 14%, #071430)` } : undefined} />
+                  <text y={p.fs * 0.36} fontSize={p.fs} style={{ fill: color }}>{d.name}</text>
+                </g>
+              );
+            }
             const nameY = p.sub ? -p.h * 0.1 : p.fs * 0.36;
             return (
               <g key={d.id} className={`node ${sel === d.id ? "sel" : ""} ${!d.live ? "off" : ""} ${d.id === "jarvis" ? "core-node" : ""}`} transform={`translate(${p.x},${p.y})`} opacity={dim ? 0.18 : 1} tabIndex={0} role="button" data-id={d.id} aria-label={`${d.name}, ${d.short}, ${d.status}${d.live ? "" : ", not live yet"}`} onClick={(e) => { e.stopPropagation(); pick(d.id); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSel(d.id); } }}>
@@ -273,6 +289,7 @@ export function AgentWeb({ initial }: { initial?: string }) {
             {ventures.map((v) => <span key={v.id} className="flex items-center gap-1.5"><i className={`inline-block w-2.5 h-2.5 rounded-full border-2 ${owned.has(v.id) ? "" : "border-dashed"}`} style={{ borderColor: v.color }} />{v.short}</span>)}
             <span className="flex items-center gap-1.5"><span className="dot dot-working" />working</span><span className="flex items-center gap-1.5"><span className="dot dot-waiting" />waiting on you</span><span className="flex items-center gap-1.5"><span className="dot dot-error" />error</span><span className="flex items-center gap-1.5"><span className="dot dot-paused" />paused</span>
             <span className="flex items-center gap-1.5"><i className="inline-block w-4 h-2.5 rounded-full border border-dashed opacity-60" style={{ borderColor: "var(--ink)" }} />not live yet</span>
+            <span className="flex items-center gap-1.5"><svg width="18" height="10" viewBox="0 0 18 10" aria-hidden><path d="M4,1H14L17,5L14,9H4L1,5Z" fill="none" stroke="var(--ink)" strokeWidth="1.2" /></svg>skill (shown in All)</span>
           </div>
           <button ref={keyRef} className="btn btn-sm md:hidden pointer-events-auto flex-none ml-auto" aria-expanded={keyOpen} onClick={() => setKeyOpen(!keyOpen)}>{keyOpen ? "Hide key" : "Key"}</button>
         </div>
@@ -304,6 +321,7 @@ export function AgentWeb({ initial }: { initial?: string }) {
             <dl className="m-0 grid gap-3">
               <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Last run</dt><dd className="m-0 text-[12px]">{timeAgo(a.lastRunAt)}</dd></div>
               {a.parent && <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Reports to</dt><dd className="m-0 flex flex-wrap gap-1.5">{[a.parent, ...(a.alsoReportsTo ?? [])].map((p) => <button key={p} className="btn btn-sm" onClick={() => choose(p)}>{byId[p]?.name}</button>)}</dd></div>}
+              {a.skills && a.skills.length > 0 && <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Skills ({a.skills.length})</dt><dd className="m-0 flex flex-wrap gap-1.5">{a.skills.map((k) => <span key={k.key} className="skill-chip text-[11px] px-2.5 py-0.5" title={`Playbook: memory note skill:${k.key}`} style={{ color: state?.ventures[a.venture]?.color, borderColor: state?.ventures[a.venture]?.color }}>{k.name}</span>)}</dd></div>}
               {team.length > 0 && <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Team ({team.length})</dt><dd className="m-0 flex flex-wrap gap-1.5">{team.map((t) => <button key={t.id} className="btn btn-sm" onClick={() => choose(t.id)}>{t.name}</button>)}</dd></div>}
               {ww.length > 0 && <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Also works with</dt><dd className="m-0 flex flex-wrap gap-1.5">{ww.map((t) => <button key={t} className="btn btn-sm" onClick={() => choose(t)}>{byId[t]?.name}</button>)}</dd></div>}
               {a.serves && a.serves.length > 0 && <div><dt className="label mb-1" style={{ color: "var(--muted)" }}>Also works for</dt><dd className="m-0 flex flex-wrap gap-1.5">{a.serves.map((v) => <span key={v} className="text-[11px] px-2 py-0.5 border rounded-full" style={{ color: state?.ventures[v]?.color, borderColor: state?.ventures[v]?.color }}>{state?.ventures[v]?.label}</span>)}</dd></div>}
