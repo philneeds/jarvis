@@ -16,6 +16,21 @@ export interface XOptions { clientId: string; clientSecret?: string; redirectUri
 
 export interface XAccount { handle: string; userId: string; name?: string; access_token: string; refresh_token?: string; expires_at: number; connectedAt: string }
 
+/**
+ * What X said when it refused, in words Phil can act on. X's 403s carry a reason in the body; the common one is an app
+ * that isn't enrolled for the v2 API (a standalone app, or one left on the old Free package): no code change fixes that.
+ */
+export async function xProblem(res: { status: number; text(): Promise<string> }, what: string): Promise<string> {
+  const raw = await res.text().catch(() => "");
+  let j: { reason?: string; detail?: string; title?: string; errors?: { message?: string; detail?: string }[] } = {};
+  try { j = JSON.parse(raw); } catch { /* not JSON */ }
+  const said = (j.detail || j.errors?.[0]?.message || j.errors?.[0]?.detail || j.title || raw).toString().replace(/\s+/g, " ").slice(0, 240);
+  if (j.reason === "client-not-enrolled" || /attached to a Project|client-not-enrolled/i.test(raw)) return `${what}: X's developer app isn't enrolled for its API (${res.status}). In the X developer console (console.x.com), put the app inside a Project on a current plan (pay-per-use), create new keys there if it gives you any, then connect again.`;
+  if (res.status === 402 || /credits?/i.test(said)) return `${what}: the X developer account is out of API credits (${res.status}${said ? `: ${said}` : ""}). Add credits in the X developer console, then try again.`;
+  if (res.status === 429) return `${what}: X's rate limit is hit (429); try again in a few minutes.`;
+  return `${what} (${res.status}${said ? `: ${said}` : ""})${res.status === 403 ? ". If it says no more than Forbidden: check in the X developer console that the app is inside a Project, has Read and write permissions, and that the client ID and secret in HQ are that app's." : ""}`;
+}
+
 export const X_SCOPES = ["tweet.read", "tweet.write", "users.read", "dm.read", "dm.write", "offline.access"];
 const ACCOUNTS_KEY = "x.accounts";
 const API = "https://api.x.com/2";
@@ -69,7 +84,7 @@ export class XConnector {
     if (!res.ok) throw new Error(`X token exchange failed: ${res.status} ${(await res.text()).slice(0, 200)}`);
     const j = (await res.json()) as { access_token: string; refresh_token?: string; expires_in: number };
     const me = await this.f(`${API}/users/me`, { headers: { authorization: `Bearer ${j.access_token}` } });
-    if (!me.ok) throw new Error(`X users/me failed: ${me.status}`);
+    if (!me.ok) throw new Error(await xProblem(me, "X signed you in, but wouldn't say which account it is"));
     const u = ((await me.json()) as { data: { id: string; username: string; name?: string } }).data;
     const acct: XAccount = { handle: u.username, userId: u.id, name: u.name, access_token: j.access_token, refresh_token: j.refresh_token, expires_at: this.now() + (j.expires_in - 60) * 1000, connectedAt: new Date().toISOString() };
     const all = await this.accounts();
@@ -99,7 +114,7 @@ export class XConnector {
 
   private async api<T>(acct: XAccount, path: string, init: RequestInit = {}): Promise<T> {
     const res = await this.f(`${API}${path}`, { ...init, headers: { ...(init.headers ?? {}), authorization: `Bearer ${acct.access_token}`, ...(init.body ? { "content-type": "application/json" } : {}) } });
-    if (!res.ok) throw new Error(`X API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    if (!res.ok) throw new Error(await xProblem(res, "X refused that"));
     return (await res.json()) as T;
   }
 

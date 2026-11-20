@@ -58,3 +58,12 @@ test("posting waits for Phil; the executor posts from the named account", async 
   await jarvis.decide(r.id, "approved");
   assert.ok(log.length >= 1 && (await store.activity.list({ agentId: "ncrypt" })).some((e) => /DM sent/.test(e.summary)));
 });
+
+test("X's refusals say what to fix: an app that isn't enrolled, no credits, a bare Forbidden", async () => {
+  const { xProblem } = await import("../src/index.js");
+  const res = (status: number, body: unknown) => ({ status, text: async () => (typeof body === "string" ? body : JSON.stringify(body)) });
+  assert.match(await xProblem(res(403, { title: "Client Forbidden", reason: "client-not-enrolled", detail: "When authenticating requests to the Twitter API v2 endpoints, you must use keys and tokens from a Twitter developer App that is attached to a Project." }), "X signed you in, but wouldn't say which account it is"), /app isn't enrolled for its API \(403\)\. In the X developer console.*inside a Project/);
+  assert.match(await xProblem(res(402, { title: "CreditsDepleted", detail: "Your enrolled account does not have any credits to fulfill this request." }), "X refused that"), /out of API credits \(402: Your enrolled account/);
+  assert.match(await xProblem(res(403, { title: "Forbidden", detail: "Forbidden" }), "X refused that"), /^X refused that \(403: Forbidden\)\. If it says no more than Forbidden: check/);
+  assert.match(await xProblem(res(500, "oops"), "X refused that"), /^X refused that \(500: oops\)$/);
+});

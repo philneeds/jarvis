@@ -1,5 +1,5 @@
 export { GoogleConnector, GOOGLE_SCOPES, PERSONAL_CALENDARS, BUSINESS_CALENDARS, bodyText, rawMail, type GoogleOptions } from "./google.js";
-export { XConnector, X_SCOPES, type XOptions, type XAccount } from "./x.js";
+export { XConnector, X_SCOPES, xProblem, type XOptions, type XAccount } from "./x.js";
 export { KuberaConnector, type KuberaOptions, type KuberaPortfolio, type KuberaItem } from "./kubera.js";
 export { DiscordConnector, parseChannels, type DiscordOptions } from "./discord.js";
 export { GithubConnector, type GithubOptions } from "./github.js";
