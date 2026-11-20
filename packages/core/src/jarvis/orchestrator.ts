@@ -235,25 +235,32 @@ export class Jarvis {
     });
     // Phil's goals for the month, as agreed with Adam: add the new ones, retire the finished or dropped ones.
     this.executors.set("goals.set", async (a) => {
-      const p = (a.payload ?? {}) as { add?: { name?: unknown; deadline?: unknown; pct?: unknown; primary?: unknown; horizon?: unknown; venture?: unknown; parent?: unknown }[]; retire?: unknown[] };
+      const p = (a.payload ?? {}) as { add?: { name?: unknown; deadline?: unknown; pct?: unknown; primary?: unknown; horizon?: unknown; venture?: unknown; parent?: unknown; benchmarks?: unknown }[]; retire?: unknown[] };
       const current = await this.goals();
       const retiring = (p.retire ?? []).map(String).filter((id) => current.some((g) => g.id === id)).length;
       const adding = (p.add ?? []).filter((g) => typeof g.name === "string" && g.name.trim()).length;
       if (current.length - retiring + adding > Jarvis.MAX_GOALS) throw new Error(`that would leave ${current.length - retiring + adding} goals; at most ${Jarvis.MAX_GOALS}. Retire more first.`);
       const retired: string[] = [];
       for (const id of (p.retire ?? []).map(String)) { const r = await this.deleteGoal(id); if (r) retired.push(r.goal.name); }
-      const added: string[] = [];
+      const added: string[] = [], benchmarked: string[] = [];
       for (const g of p.add ?? []) {
         if (typeof g.name !== "string" || !g.name.trim()) continue;
+        // Benchmarks can come on the same card (Phil, Nov 20: his goals set in one approval, not a relay through Adam).
+        const marks = (Array.isArray(g.benchmarks) ? g.benchmarks : []).filter((b): b is { text: string; weight?: unknown } => !!b && typeof (b as { text?: unknown }).text === "string" && !!(b as { text: string }).text.trim()).slice(0, 12).map((b) => ({ text: b.text.trim(), weight: Number(b.weight) }));
         const deadline = typeof g.deadline === "string" && /^\d{4}-\d{2}-\d{2}$/.test(g.deadline) ? g.deadline : undefined;
         await this.addGoal({ name: g.name, deadline, pct: typeof g.pct === "number" ? g.pct : 0, primary: g.primary === true, horizon: HORIZONS.find((h) => h === g.horizon), venture: typeof g.venture === "string" ? g.venture : undefined, parent: typeof g.parent === "string" ? g.parent : undefined });
         added.push(g.name.trim());
+        if (marks.length) {
+          const made = (await this.goals()).find((x) => x.name === g.name!.toString().trim());
+          if (made) { await this.updateGoal(made.id, { benchmarks: marks }, a.agentId); benchmarked.push(g.name.trim()); }
+        }
       }
       if (!added.length && !retired.length) throw new Error("the proposal had no goals to add or retire");
       // David's job: benchmarks for every new goal, so the bar moves on evidence. In the background, after this approval.
       const david = getAgent("david");
-      if (added.length && david) setTimeout(() => { void this.runAgent(david, `New goals were just set: ${added.join("; ")}. Call goals_list and set benchmarks for each new goal (goals.benchmarks): the 3 to 6 concrete, checkable things that, done, mean the goal is reached, weighted by how much each moves it.`, { from: "Jarvis" }).then((r) => (r.blocked ? undefined : this.say({ role: "agent", agentId: david.id, text: r.text, runId: r.runId }))).catch(() => undefined); }, 0);
-      return `Goals set${added.length ? `: ${added.join("; ")}` : ""}${retired.length ? `. Retired: ${retired.join("; ")}` : ""}.`;
+      const bare = added.filter((n) => !benchmarked.includes(n));
+      if (bare.length && david) setTimeout(() => { void this.runAgent(david, `New goals were just set: ${bare.join("; ")}. Call goals_list and set benchmarks for each new goal (goals.benchmarks): the 3 to 6 concrete, checkable things that, done, mean the goal is reached, weighted by how much each moves it.`, { from: "Jarvis" }).then((r) => (r.blocked ? undefined : this.say({ role: "agent", agentId: david.id, text: r.text, runId: r.runId }))).catch(() => undefined); }, 0);
+      return `Goals set${added.length ? `: ${added.join("; ")}` : ""}${benchmarked.length ? ` (with benchmarks: ${benchmarked.join("; ")})` : ""}${retired.length ? `. Retired: ${retired.join("; ")}` : ""}.`;
     });
     // David keeps percent-done honest: an internal change, so it goes through and is reported in chat.
     this.executors.set("goals.update", async (a) => {
@@ -298,9 +305,9 @@ export class Jarvis {
     this.describers.set("watchlist.add", (p) => `Adds ${String(p.symbol ?? "").toUpperCase()} to your stock watchlist on the Money board. Nothing is bought.`);
     this.describers.set("goals.update", (p) => Array.isArray(p.done) && p.done.length ? `Ticks ${p.done.length} benchmark${p.done.length > 1 ? "s" : ""} on a goal, which moves its bar on your home screen. Nothing leaves HQ.` : `Sets a goal's progress to ${Number(p.pct)}% on your home screen. Nothing leaves HQ.`);
     this.describers.set("goals.set", (p) => {
-      const add = (Array.isArray(p.add) ? p.add : []) as { name?: string; primary?: boolean; deadline?: string }[];
+      const add = (Array.isArray(p.add) ? p.add : []) as { name?: string; primary?: boolean; deadline?: string; benchmarks?: unknown[] }[];
       const retire = Array.isArray(p.retire) ? p.retire.length : 0;
-      return `Sets your goals on the home screen: ${add.map((g) => `${g.name}${g.primary ? " (primary)" : ""}${g.deadline ? `, by ${g.deadline}` : ""}`).join("; ") || "none new"}${retire ? `, and retires ${retire} old goal(s)` : ""}. Nothing leaves HQ.`;
+      return `Sets your goals on the home screen: ${add.map((g) => `${g.name}${g.primary ? " (primary)" : ""}${g.deadline ? `, by ${g.deadline}` : ""}${Array.isArray(g.benchmarks) && g.benchmarks.length ? `, with ${g.benchmarks.length} benchmarks` : ""}`).join("; ") || "none new"}${retire ? `, and retires ${retire} old goal(s)` : ""}. Nothing leaves HQ.`;
     });
     this.describers.set("memory.replace", (p) => `Jarvis's memory is replaced with the ${Array.isArray(p.keep) ? p.keep.length : "listed"} items above${typeof p.before === "number" ? `, dropping ${p.before - (Array.isArray(p.keep) ? p.keep.length : 0)}` : ""}. The old list is gone.`);
   }

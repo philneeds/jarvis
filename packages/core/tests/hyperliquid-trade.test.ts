@@ -40,10 +40,11 @@ test("a Hyperliquid order waits for Phil, shows exactly what goes out, and runs 
   // Even an "approve everything" rule can't let a trade through.
   const { setAgentConfig } = await import("../src/index.js");
   await setAgentConfig(store, "pentoshi", { rules: { autoApprove: ["money", "other"], maxAutoDollars: 1e9 } } as never);
-  const c2 = await card({ action: "hyperliquid.order", coin: "BTC", side: "buy", size: 0.001 });
+  // A different idea, so HQ's duplicate check (which folds a repeat of a waiting card into it) leaves both alone.
+  const c2 = await jarvis.requestApproval({ agentId: "pentoshi", kind: "money", title: "Short ETH", body: "another idea", payload: { action: "hyperliquid.order", coin: "ETH", side: "sell", size: 0.01 } });
   assert.equal(c2.status, "pending", "trades never auto-approve");
   const done = await jarvis.decide(c.id, "approved");
-  assert.deepEqual(calls.map((x) => x.method), ["updateLeverage", "order"]);
+  assert.deepEqual(calls.map((x) => x.method), ["updateLeverage", "order"], `note: ${done?.note} · status ${done?.status}`);
   assert.deepEqual(calls[0]!.args, { asset: 0, isCross: true, leverage: 5 });
   // $500 at mark 63,196.5 = 0.00791 BTC (5 decimals); an IOC limit 2% above the mark, 5 significant figures.
   assert.deepEqual(calls[1]!.args, { orders: [{ a: 0, b: true, p: "64460", s: "0.00791", r: false, t: { limit: { tif: "Ioc" } } }], grouping: "na" });
