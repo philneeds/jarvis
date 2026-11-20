@@ -11,7 +11,7 @@ import { authEnabled, clientIp, fromHq, isAuthed, login, loginFailed, loginWait,
 /** A count from the query string: a whole number from 1 to max, else the default ("abc" and -5 used to reach the store). */
 const count = (raw: string | undefined, fallback: number, max: number) => { const n = Math.floor(Number(raw)); return Number.isFinite(n) && n >= 1 ? Math.min(n, max) : fallback; };
 
-export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; spotify?: SpotifyConnector; kubera?: KuberaConnector; ghl?: GoHighLevelConnector; eagleview?: EagleViewConnector; leadperfection?: LeadPerfectionConnector; discord?: DiscordConnector; github?: GithubConnector; robinhood?: RobinhoodConnector; guard?: TradingGuard; workshop?: Workshop } = {}) {
+export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; spotify?: SpotifyConnector; kubera?: KuberaConnector; ghl?: GoHighLevelConnector; eagleview?: EagleViewConnector; leadperfection?: LeadPerfectionConnector; discord?: DiscordConnector; github?: GithubConnector; robinhood?: RobinhoodConnector; guard?: TradingGuard; workshop?: Workshop ; hlTrader?: import("@jarvis/core").HyperliquidTrader } = {}) {
   const app = new Hono();
   const origins = (process.env.HQ_ORIGIN ?? "http://localhost:3000").split(",").map((s) => s.trim());
   app.use("/api/*", cors({ origin: origins, credentials: true }));
@@ -537,7 +537,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     { base: "polymarket", key: POLY_ACCOUNTS_KEY, list: polyAccounts, read: polyPositionsText, who: "Cat" },
   ] as const;
   for (const w of wallets) {
-    api.get(`/${w.base}/accounts`, async (c) => c.json({ accounts: await w.list(jarvis.store) }));
+    api.get(`/${w.base}/accounts`, async (c) => c.json({ accounts: await w.list(jarvis.store), ...(w.base === "hyperliquid" ? { trading: connectors.hlTrader ? await connectors.hlTrader.status() : { trading: false, problem: "add an API wallet's key as HYPERLIQUID_AGENT_KEY on the server" } } : {}) }));
     api.put(`/${w.base}/accounts`, async (c) => {
       const { accounts } = (await c.req.json().catch(() => ({}))) as { accounts?: unknown };
       if (!Array.isArray(accounts) || accounts.length > 10) return c.json({ error: "a list of up to 10 accounts" }, 400);

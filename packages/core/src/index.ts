@@ -22,6 +22,7 @@ export * from "./decks.js";
 export * from "./hyperliquid.js";
 export * from "./predictions.js";
 export * from "./lighter.js";
+export * from "./hyperliquid-trade.js";
 export * from "./lookup.js";
 export * from "./xai.js";
 export * from "./workshop.js";
