@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, post, put } from "@/lib/api";
+import { BrandLogo } from "@/components/BrandLogo";
 
 interface Account { label: string; address: string }
 
@@ -34,7 +35,7 @@ export function WalletAccounts({ name, blurb, api: base, hint }: { name: string;
     <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label={name}>
       <div className="flex flex-wrap items-center gap-3">
         <span className={`dot ${list?.length ? "dot-working" : "dot-idle"}`} />
-        <span><b>{name}</b> · {blurb}</span>
+        <BrandLogo name={name} /><span className="flex-1 basis-64 min-w-0"><b>{name}</b> · {blurb}</span>
         {list?.length ? <button className="btn btn-sm ml-auto" onClick={() => void check()}>Check now</button> : null}
       </div>
       <div className="flex flex-col gap-1.5 pl-6">

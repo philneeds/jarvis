@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { DisplayCard } from "@/components/DisplayCard";
+import { BrandLogo } from "@/components/BrandLogo";
 import { GithubRepos } from "@/components/GithubRepos";
 import { GlassesPairing } from "@/components/GlassesPairing";
 import { HyperliquidAccounts, LighterAccounts, PolymarketAccounts } from "@/components/WalletAccounts";
@@ -188,7 +189,7 @@ export default function SettingsPage() {
 
         <section className="card flex flex-col gap-2" aria-label="Providers">
           <span className="label">Providers</span>
-          {state && Object.entries(state.providers).map(([id, s]) => <div key={id} className="flex items-center gap-2 text-[12px]"><span className={`dot ${s.ok ? "dot-working" : "dot-idle"}`} /><span>{id}</span><span style={{ color: "var(--muted)" }}>{s.ok ? "ready" : s.reason}</span></div>)}
+          {state && Object.entries(state.providers).map(([id, s]) => <div key={id} className="flex items-center gap-2 text-[12px]"><span className={`dot ${s.ok ? "dot-working" : "dot-idle"}`} /><BrandLogo name={id.split(":")[0] ?? id} size={18} /><span>{id}</span><span style={{ color: "var(--muted)" }}>{s.ok ? "ready" : s.reason}</span></div>)}
           <p className="m-0 text-[11px]" style={{ color: "var(--muted)" }}>Sign-ins and keys live in <code>.env</code> on the server; see the README.</p>
         </section>
 
@@ -196,7 +197,7 @@ export default function SettingsPage() {
           <span className="label">Connectors</span>
           <div className="flex flex-wrap items-center gap-3 text-[12px]">
             <span className={`dot ${conn?.google.connected ? "dot-working" : "dot-idle"}`} />
-            <span><b>Google</b> · calendars and mailboxes. Connect each account you want agents to see: yours, JD PM&apos;s, ProEdge&apos;s. The first is the default.</span>
+            <BrandLogo name="Google" /><span className="flex-1 basis-64 min-w-0"><b>Google</b> · calendars and mailboxes. Connect each account you want agents to see: yours, JD PM&apos;s, ProEdge&apos;s. The first is the default.</span>
             {conn?.google.configured ? <button className="btn btn-sm btn-primary ml-auto" onClick={connectGoogle}>{conn.google.accounts.length ? "Connect another account" : "Connect Google"}</button>
               : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET</span>}
           </div>
@@ -206,7 +207,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }}>
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.x.accounts.length ? "dot-working" : "dot-idle"}`} />
-              <span><b>X</b> · Block's team (Boo, ncrypt) runs @philneeds, Allmin runs Range.cool's account and Jeff runs Acres'. One connection per account.</span>
+              <BrandLogo name="X" /><span className="flex-1 basis-64 min-w-0"><b>X</b> · Block's team (Boo, ncrypt) runs @philneeds, Allmin runs Range.cool's account and Jeff runs Acres'. One connection per account.</span>
               {conn?.x.configured ? <button className="btn btn-sm btn-primary ml-auto" onClick={connectX}>Connect an X account</button> : <span className="ml-auto" style={{ color: "var(--muted)" }}>set X_CLIENT_ID and X_CLIENT_SECRET</span>}
             </div>
             {conn?.x.accounts.map((a) => <div key={a.handle} className="flex items-center gap-3 pl-6"><span>@{a.handle}{a.name ? ` · ${a.name}` : ""}</span><span style={{ color: "var(--dim)" }}>{fmtTime(a.connectedAt)}</span><button className="btn btn-sm btn-danger ml-auto" onClick={() => disconnectX(a.handle)}>Disconnect</button></div>)}
@@ -215,7 +216,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }}>
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.spotify?.connected ? "dot-working" : "dot-idle"}`} />
-              <span><b>Spotify</b> · Lip learns your taste from what you play and makes your playlists.</span>
+              <BrandLogo name="Spotify" /><span className="flex-1 basis-64 min-w-0"><b>Spotify</b> · Lip learns your taste from what you play and makes your playlists.</span>
               {conn?.spotify?.connected
                 ? <><span style={{ color: "var(--dim)" }}>{conn.spotify.name ?? "connected"}{conn.spotify.connectedAt ? ` · ${fmtTime(conn.spotify.connectedAt)}` : ""}</span><button className="btn btn-sm btn-danger ml-auto" onClick={disconnectSpotify}>Disconnect</button></>
                 : conn?.spotify?.configured ? <button className="btn btn-sm btn-primary ml-auto" onClick={connectSpotify}>Connect Spotify</button> : <span className="ml-auto" style={{ color: "var(--muted)" }}>set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET</span>}
@@ -225,7 +226,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Robinhood">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.robinhood?.connected ? (conn.robinhood.lastFetch && !conn.robinhood.lastFetch.ok ? "dot-error" : "dot-working") : "dot-idle"}`} />
-              <span><b>Robinhood</b> · Buffett and Munger read your positions, balances and orders through Robinhood's official agent access. Any order waits for your approval and can only run in your Robinhood Agentic account.</span>
+              <BrandLogo name="Robinhood" /><span className="flex-1 basis-64 min-w-0"><b>Robinhood</b> · Buffett and Munger read your positions, balances and orders through Robinhood's official agent access. Any order waits for your approval and can only run in your Robinhood Agentic account.</span>
               {conn?.robinhood?.connected
                 ? <><span style={{ color: "var(--dim)" }}>connected{conn.robinhood.connectedAt ? ` · ${fmtTime(conn.robinhood.connectedAt)}` : ""}</span><button className="btn btn-sm" onClick={() => void testSimple("/api/connectors/robinhood/test", setRhMsg)}>Check now</button><button className="btn btn-sm btn-danger ml-auto" onClick={disconnectRobinhood}>Disconnect</button></>
                 : <button className="btn btn-sm btn-primary ml-auto" onClick={connectRobinhood}>{rhPaste !== null ? "Open Robinhood again" : "Connect Robinhood"}</button>}
@@ -248,7 +249,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Kubera">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.kubera?.lastFetch?.ok ? "dot-working" : conn?.kubera?.lastFetch ? "dot-error" : "dot-idle"}`} />
-              <span><b>Kubera</b> · Munger reads your net worth, accounts and holdings, read-only.</span>
+              <BrandLogo name="Kubera" /><span className="flex-1 basis-64 min-w-0"><b>Kubera</b> · Munger reads your net worth, accounts and holdings, read-only.</span>
               {conn?.kubera?.configured
                 ? <><span style={{ color: "var(--dim)" }}>{conn.kubera.lastFetch ? `${conn.kubera.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.kubera.lastFetch.at)}` : "not read yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testKubera()}>Check now</button></>
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set KUBERA_API_KEY and KUBERA_SECRET</span>}
@@ -258,17 +259,17 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="GoHighLevel">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.ghl?.lastFetch?.ok ? "dot-working" : conn?.ghl?.lastFetch ? "dot-error" : "dot-idle"}`} />
-              <span><b>GoHighLevel</b> · Stella's team reads JD PM's contacts, conversations, pipeline, invoices and appointments; replies go out only after you approve them (add the conversations/message.write scope for that).</span>
+              <BrandLogo name="GoHighLevel" /><span className="flex-1 basis-64 min-w-0"><b>GoHighLevel</b> · Stella's team reads JD PM's contacts, conversations, pipeline, invoices and appointments; replies go out only after you approve them (add the conversations/message.write scope for that).</span>
               {conn?.ghl?.configured
                 ? <><span style={{ color: "var(--dim)" }}>{conn.ghl.lastFetch ? `${conn.ghl.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.ghl.lastFetch.at)}` : "not read yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testGhl()}>Check now</button></>
-                : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GHL_API_KEY (a read-only Private Integration token) and GHL_LOCATION_ID</span>}
+                : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GHL_API_KEY (a Private Integration token) and GHL_LOCATION_ID</span>}
             </div>
             {(ghlMsg || (conn?.ghl?.lastFetch && !conn.ghl.lastFetch.ok)) && <p className="m-0 pl-6 whitespace-pre-wrap" style={{ color: ghlMsg && !/refused|error|limit|aren't set|failed/i.test(ghlMsg) ? "var(--ink)" : "var(--red)" }}>{ghlMsg ?? conn?.ghl?.lastFetch?.error}</p>}
           </div>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="EagleView">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.eagleview?.lastFetch?.ok ? "dot-working" : conn?.eagleview?.lastFetch ? "dot-error" : "dot-idle"}`} />
-              <span><b>EagleView</b> · Stella, Jake and Bill read JD PM&apos;s roof measurement reports (squares, pitch, ridge/hip/valley/eave/rake) for estimates and material lists; a new report costs money and is ordered only after you approve the card{conn?.eagleview?.sandbox ? " (sandbox: test orders, nothing billed)" : ""}.</span>
+              <BrandLogo name="EagleView" /><span className="flex-1 basis-64 min-w-0"><b>EagleView</b> · Stella, Jake and Bill read JD PM&apos;s roof measurement reports (squares, pitch, ridge/hip/valley/eave/rake) for estimates and material lists; a new report costs money and is ordered only after you approve the card{conn?.eagleview?.sandbox ? " (sandbox: test orders, nothing billed)" : ""}.</span>
               {conn?.eagleview?.configured
                 ? <><span style={{ color: "var(--dim)" }}>{conn.eagleview.lastFetch ? `${conn.eagleview.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.eagleview.lastFetch.at)}` : "not read yet"}{conn.eagleview.orders ? ` · ${conn.eagleview.orders} ordered from HQ` : ""}</span><button className="btn btn-sm ml-auto" onClick={() => void testEagleView()}>Check now</button></>
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set EAGLEVIEW_CLIENT_ID and EAGLEVIEW_CLIENT_SECRET (a Client Credentials app on developer.eagleview.com, linked to JD PM&apos;s EagleView login)</span>}
@@ -278,7 +279,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="LeadPerfection">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.leadperfection?.lastFetch?.ok ? "dot-working" : conn?.leadperfection?.lastFetch ? "dot-error" : "dot-idle"}`} />
-              <span><b>LeadPerfection</b> · Stevon reads ProEdge&apos;s appointments and rep availability through a browser, since it has no API, and proposes each day&apos;s schedule as one card; the reps are entered only after you approve it. Issuing to the reps stays your step. The Auditor reads its reports to check commissions against what was paid.</span>
+              <BrandLogo name="LeadPerfection" /><span className="flex-1 basis-64 min-w-0"><b>LeadPerfection</b> · Stevon reads ProEdge&apos;s appointments and rep availability through a browser, since it has no API, and proposes each day&apos;s schedule as one card; the reps are entered only after you approve it. Issuing to the reps stays your step. The Auditor reads its reports to check commissions against what was paid.</span>
               {conn?.leadperfection?.configured
                 ? <><span style={{ color: "var(--dim)" }}>{conn.leadperfection.user ? `as ${conn.leadperfection.user} · ` : ""}{conn.leadperfection.lastFetch ? `${conn.leadperfection.lastFetch.ok ? "signed in" : "failed"} ${fmtTime(conn.leadperfection.lastFetch.at)}` : "not signed in yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testSimple("/api/connectors/leadperfection/test", setLpMsg)}>Check now</button></>
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set LP_USER and LP_PASSWORD (best: a LeadPerfection user made for HQ)</span>}
@@ -288,7 +289,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Discord">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.discord?.lastFetch?.ok ? "dot-working" : conn?.discord?.lastFetch ? "dot-error" : "dot-idle"}`} />
-              <span><b>Discord</b> · House reads the biotech server's channels, read-only{conn?.discord?.channels?.length ? ` (${conn.discord.channels.join(", ")})` : ""}.</span>
+              <BrandLogo name="Discord" /><span className="flex-1 basis-64 min-w-0"><b>Discord</b> · House reads the biotech server's channels, read-only{conn?.discord?.channels?.length ? ` (${conn.discord.channels.join(", ")})` : ""}.</span>
               {conn?.discord?.configured
                 ? <><span style={{ color: "var(--dim)" }}>{conn.discord.lastFetch ? `${conn.discord.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.discord.lastFetch.at)}` : "not read yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testSimple("/api/connectors/discord/test", setDcMsg)}>Check now</button></>
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set DISCORD_BOT_TOKEN and DISCORD_CHANNELS (label=channelId, comma-separated)</span>}
@@ -298,7 +299,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="GitHub">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.github?.lastFetch?.ok ? "dot-working" : conn?.github?.lastFetch ? "dot-error" : "dot-idle"}`} />
-              <span><b>GitHub</b> · agents read your repos, read-only: you choose which agent reads which repo below{conn?.github?.repos?.length ? ` (the key is limited to ${conn.github.repos.join(", ")})` : ""}.</span>
+              <BrandLogo name="GitHub" /><span className="flex-1 basis-64 min-w-0"><b>GitHub</b> · agents read your repos, read-only: you choose which agent reads which repo below{conn?.github?.repos?.length ? ` (the key is limited to ${conn.github.repos.join(", ")})` : ""}.</span>
               {conn?.github?.configured
                 ? <><span style={{ color: "var(--dim)" }}>{conn.github.lastFetch ? `${conn.github.lastFetch.ok ? "read" : "failed"} ${fmtTime(conn.github.lastFetch.at)}` : "not read yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void testSimple("/api/connectors/github/test", setGhMsg)}>Check now</button></>
                 : <span className="ml-auto" style={{ color: "var(--muted)" }}>set GITHUB_READ_TOKEN, or widen Einstein's GitHub key to all repos</span>}
@@ -309,7 +310,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Einstein's workshop">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.workshop?.canShip ? "dot-working" : conn?.workshop?.configured ? "dot-waiting" : "dot-idle"}`} />
-              <span><b>Einstein&apos;s workshop</b> · a copy of HQ&apos;s code he changes and tests; each change ships as a card under Needs you and HQ redeploys itself.{conn?.workshop?.dir ? ` (${conn.workshop.dir})` : ""}</span>
+              <BrandLogo name="Einstein's workshop" /><span className="flex-1 basis-64 min-w-0"><b>Einstein&apos;s workshop</b> · a copy of HQ&apos;s code he changes and tests; each change ships as a card under Needs you and HQ redeploys itself.{conn?.workshop?.dir ? ` (${conn.workshop.dir})` : ""}</span>
               {conn?.workshop?.canShip
                 ? <span className="ml-auto" style={{ color: "var(--dim)" }}>{conn.workshop.last ? `last: ${conn.workshop.last.title} · ${conn.workshop.last.status}` : "ready"}</span>
                 : <span className="ml-auto" style={{ color: "var(--amber)" }}>can prepare changes but not ship: add GITHUB_PUSH_TOKEN (fine-grained, Contents read and write on the jarvis repo) to .env and restart.</span>}
@@ -329,7 +330,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="X search">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.xsearch?.configured ? "dot-working" : "dot-idle"}`} />
-              <span><b>X search</b> · how every agent reads X: posts by account or topic through xAI&apos;s X search, costed per search under Usage.{conn?.xsearch?.grokMode === "api" ? " Grok agents run on the same credits." : ""}</span>
+              <BrandLogo name="X search" /><span className="flex-1 basis-64 min-w-0"><b>X search</b> · how every agent reads X: posts by account or topic through xAI&apos;s X search, costed per search under Usage.{conn?.xsearch?.grokMode === "api" ? " Grok agents run on the same credits." : ""}</span>
               {conn?.xsearch?.configured
                 ? <span className="ml-auto" style={{ color: "var(--dim)" }}>on · {conn.xsearch.model}</span>
                 : <span className="ml-auto" style={{ color: "var(--amber)" }}>off: nobody can read X. Add XAI_API_KEY (console.x.ai, prepaid credits) to .env and restart.</span>}
@@ -338,7 +339,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Video">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.video?.configured ? "dot-working" : "dot-idle"}`} />
-              <span><b>Video</b> · how every agent watches a YouTube link or a video you send on Telegram: read by {conn?.video?.backend ?? "Gemini"}, priced before it is sent, costed under Usage.</span>
+              <BrandLogo name="Video" /><span className="flex-1 basis-64 min-w-0"><b>Video</b> · how every agent watches a YouTube link or a video you send on Telegram: read by {conn?.video?.backend ?? "Gemini"}, priced before it is sent, costed under Usage.</span>
               {conn?.video?.configured
                 ? <span className="ml-auto" style={{ color: "var(--dim)" }}>on · {conn.video.model} · key {conn.video.key.source === "env" ? "from the server's .env" : `saved here${conn.video.key.savedAt ? ` ${fmtTime(conn.video.key.savedAt)}` : ""}`}</span>
                 : <span className="ml-auto" style={{ color: "var(--amber)" }}>off: nobody can watch videos.</span>}
@@ -361,7 +362,7 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Apple Health">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${health?.lastIngest ? "dot-working" : "dot-idle"}`} />
-              <span><b>Apple Health</b> · Metro reads your sleep, training and more, sent from your iPhone by the Health Auto Export app.</span>
+              <BrandLogo name="Apple Health" /><span className="flex-1 basis-64 min-w-0"><b>Apple Health</b> · Metro reads your sleep, training and more, sent from your iPhone by the Health Auto Export app.</span>
               {health?.lastIngest
                 ? <span className="ml-auto" style={{ color: "var(--dim)" }}>last sync {fmtTime(health.lastIngest.at)} · {health.days} day(s)</span>
                 : <button className="btn btn-sm btn-primary ml-auto" onClick={() => void makeHealthKey(false)}>Set up Apple Health</button>}
@@ -390,7 +391,7 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-3 text-[12px]"><span className={`dot ${conn?.telegram.configured ? "dot-working" : "dot-idle"}`} /><span><b>Telegram</b> · talk to Jarvis and approve from your phone</span><span className="ml-auto" style={{ color: "var(--muted)" }}>{conn?.telegram.configured ? "bot polling" : "set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"}</span></div>
+          <div className="flex items-center gap-3 text-[12px]"><span className={`dot ${conn?.telegram.configured ? "dot-working" : "dot-idle"}`} /><BrandLogo name="Telegram" /><span className="flex-1 basis-64 min-w-0"><b>Telegram</b> · talk to Jarvis and approve from your phone</span><span className="ml-auto" style={{ color: "var(--muted)" }}>{conn?.telegram.configured ? "bot polling" : "set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID"}</span></div>
           <div className="flex items-center gap-3 text-[12px]"><span className={`dot ${conn?.ntfy.configured ? "dot-working" : "dot-idle"}`} /><span><b>ntfy</b> · push alerts</span><span className="ml-auto" style={{ color: "var(--muted)" }}>{conn?.ntfy.configured ? "on" : "set NOTIFY_WEBHOOK_URL"}</span></div>
         </section>
       </div>

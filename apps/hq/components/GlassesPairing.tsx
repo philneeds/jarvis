@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, post, fmtTime } from "@/lib/api";
+import { BrandLogo } from "@/components/BrandLogo";
 
 interface Status { paired: boolean; pairedAt?: string; seenAt?: string }
 
@@ -31,7 +32,7 @@ export function GlassesPairing() {
     <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Glasses">
       <div className="flex flex-wrap items-center gap-3">
         <span className={`dot ${st?.paired ? (st.seenAt ? "dot-working" : "dot-idle") : "dot-idle"}`} />
-        <span><b>Glasses</b> · talk to Jarvis through your Even G2 (the Jarvis app on MentraOS): hold to speak, and the answer shows in your view. The glasses can only ask Jarvis and read the replies; approvals stay on your phone.</span>
+        <BrandLogo name="Glasses" /><span className="flex-1 basis-64 min-w-0"><b>Glasses</b> · talk to Jarvis through your Even G2 (the Jarvis app on MentraOS): hold to speak, and the answer shows in your view. The glasses can only ask Jarvis and read the replies; approvals stay on your phone.</span>
         {st?.paired
           ? <><span style={{ color: "var(--dim)" }}>{st.seenAt ? `last heard from ${fmtTime(st.seenAt)}` : "paired, not heard from yet"}</span><button className="btn btn-sm ml-auto" onClick={() => void pair()}>New key</button><button className="btn btn-sm btn-danger" onClick={() => void unpair()}>Unpair</button></>
           : <button className="btn btn-sm btn-primary ml-auto" onClick={() => void pair()}>Pair glasses</button>}
