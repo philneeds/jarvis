@@ -8,11 +8,14 @@ import { setStepResult } from "../jarvis/batch.js";
  * GoHighLevel for JD PM (read-only): contacts, conversations, the pipeline, invoices and appointments, from the
  * LeadConnector API v2. One sub-account (location).
  *   GHL_API_KEY       a Private Integration token (Sub-account Settings > Private Integrations), read-only scopes:
- *                     contacts, conversations, conversations/message, opportunities, invoices, calendars/events, locations
+ *                     contacts, conversations, conversations/message, opportunities, invoices, calendars, calendars/events, locations
  *   GHL_LOCATION_ID   the sub-account id (Settings > Business Profile)
  * Writes, each only after Phil approves it in Needs you (or a JD PM rule he set): a reply to a customer (needs
  * conversations/message.write), a contact (contacts.write), a note, a deal (opportunities.write), and an appointment on
  * a calendar (calendars.readonly to find the calendar, calendars/events.write to book it).
+ * Scopes are set on the integration in GoHighLevel (Settings > Private Integrations > ⋮ > Edit); editing them keeps the
+ * same token, so nothing changes in .env. A 401 "not authorized for this scope" means a scope is missing there, not that
+ * the key is wrong: it's reported as such and doesn't count as a lost connection.
  */
 export interface GhlOptions { apiKey: string; locationId: string; fetch?: typeof fetch; now?: () => number; baseUrl?: string }
 
@@ -22,7 +25,7 @@ type Message = { id: string; direction?: string; body?: string; messageType?: st
 type Opportunity = { id: string; name?: string; monetaryValue?: number; status?: string; pipelineStageId?: string; contact?: { name?: string; email?: string; phone?: string }; updatedAt?: string; createdAt?: string; source?: string };
 type Pipeline = { id: string; name: string; stages?: { id: string; name: string; position?: number }[] };
 type Invoice = { _id?: string; id?: string; invoiceNumber?: string | number; name?: string; title?: string; status?: string; total?: number; amountDue?: number; amountPaid?: number; dueDate?: string; issueDate?: string; currency?: string; contactDetails?: { name?: string; email?: string } };
-type Appointment = { id: string; title?: string; startTime?: string; endTime?: string; appointmentStatus?: string; contactId?: string; calendarId?: string; address?: string; notes?: string };
+type Appointment = { id: string; title?: string; startTime?: string; endTime?: string; appointmentStatus?: string; contactId?: string; calendarId?: string; calendarName?: string; address?: string; notes?: string };
 
 const STATUS_KEY = "ghl.status";
 /** The calendars API's version header. */
@@ -55,6 +58,22 @@ export function easternIso(date: string, time: string, plusMinutes = 0): string 
   return `${wall.getUTCFullYear()}-${p2(wall.getUTCMonth() + 1)}-${p2(wall.getUTCDate())}T${p2(wall.getUTCHours())}:${p2(wall.getUTCMinutes())}:00${sign}:${offMin}`;
 }
 const CACHE_MS = 60_000;
+/** The Private Integration scope each API path wants, so a 401 names the box to tick in GoHighLevel. */
+export function scopeFor(method: string, path: string): string {
+  const p = path.split("?")[0]!, w = method !== "GET";
+  if (p.startsWith("/conversations/messages")) return "conversations/message.write";
+  if (/^\/conversations\/[^/]+\/messages/.test(p)) return "conversations/message.readonly";
+  if (p.startsWith("/conversations")) return w ? "conversations.write" : "conversations.readonly";
+  if (/^\/contacts\/[^/]+\/notes/.test(p)) return w ? "contacts.write" : "contacts.readonly";
+  if (p.startsWith("/contacts")) return w ? "contacts.write" : "contacts.readonly";
+  if (p.startsWith("/opportunities")) return w ? "opportunities.write" : "opportunities.readonly";
+  if (p.startsWith("/invoices")) return w ? "invoices.write" : "invoices.readonly";
+  if (p.startsWith("/calendars/events")) return w ? "calendars/events.write" : "calendars/events.readonly";
+  if (p.startsWith("/calendars")) return w ? "calendars.write" : "calendars.readonly";
+  if (p.startsWith("/locations")) return w ? "locations.write" : "locations.readonly";
+  return w ? "a write scope" : "a read scope";
+}
+const scopeError = (path: string, status: number, msg: string | undefined, method = "GET") => `GoHighLevel's token lacks the ${scopeFor(method, path)} scope (${status}${msg ? `: ${msg}` : ""}). Add it in GoHighLevel under Settings › Private Integrations › ⋮ Edit; the token stays the same.`;
 const money = (n?: number) => (typeof n === "number" && Number.isFinite(n) ? `$${Math.round(n).toLocaleString("en-US")}` : "");
 const when = (v?: string | number) => { if (v === undefined || v === null || v === "") return ""; const d = new Date(typeof v === "number" && v < 1e12 ? v * 1000 : v); return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
 const clean = (s?: string, n = 240) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
@@ -83,6 +102,8 @@ export class GoHighLevelConnector {
     });
     const j = (await res.json().catch(() => ({}))) as T & { message?: string | string[] };
     const msg = Array.isArray(j.message) ? j.message.join("; ") : j.message;
+    // A token that lacks a scope is still a working token: say which call wants what, and don't call the connection lost.
+    if ((res.status === 401 || res.status === 403) && /scope/i.test(msg ?? "")) throw new Error(scopeError(path, res.status, msg));
     if (res.status === 401 || res.status === 403) { await this.mark(false, `GoHighLevel refused the key (${res.status}${msg ? `: ${msg}` : ""})`); throw new Error(`GoHighLevel refused the key${msg ? ` (${msg})` : ""}. Check GHL_API_KEY and its scopes, and GHL_LOCATION_ID.`); }
     if (res.status === 429) throw new Error("GoHighLevel's rate limit is hit; try again in a minute.");
     if (!res.ok) { await this.mark(false, `GoHighLevel error ${res.status}${msg ? `: ${msg}` : ""}`); throw new Error(`GoHighLevel error ${res.status}${msg ? `: ${msg}` : ""}`); }
@@ -144,10 +165,20 @@ export class GoHighLevelConnector {
     return j.invoices ?? [];
   }
 
+  /**
+   * Every appointment on the location's active calendars in the window. GoHighLevel answers /calendars/events only for
+   * one calendar (or user or group) at a time (422 "calendarId, userId or groupId is required" otherwise; Bill, Nov 19),
+   * so it's one call per calendar, merged, each event carrying its calendar's name.
+   */
   async appointments(days = 7, from = this.now()): Promise<Appointment[]> {
-    const q = new URLSearchParams({ locationId: this.opts.locationId, startTime: String(from), endTime: String(from + days * 86_400_000) });
-    const j = await this.call<{ events?: Appointment[] }>("GET", `/calendars/events?${q}`);
-    return j.events ?? [];
+    const cals = await this.calendars();
+    const lists = await Promise.all(cals.map(async (c) => {
+      const q = new URLSearchParams({ locationId: this.opts.locationId, calendarId: c.id, startTime: String(from), endTime: String(from + days * 86_400_000) });
+      const j = await this.call<{ events?: Appointment[] }>("GET", `/calendars/events?${q}`, undefined, CAL_VERSION);
+      return (j.events ?? []).map((e) => ({ ...e, calendarId: e.calendarId ?? c.id, calendarName: c.name }));
+    }));
+    const seen = new Set<string>();
+    return lists.flat().filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)));
   }
 
   /** The location's calendars (needs the calendars.readonly scope). */
@@ -232,7 +263,8 @@ export class GoHighLevelConnector {
 
   appointmentsText(as: Appointment[], days: number): string {
     if (!as.length) return `No appointments in the next ${days} days.`;
-    return [...as].sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? "")).map((a) => `${when(a.startTime)}–${when(a.endTime).split(", ").pop()} · ${clean(a.title, 80) || "(untitled)"}${a.appointmentStatus ? ` · ${a.appointmentStatus}` : ""}${a.address ? ` · ${clean(a.address, 80)}` : ""}${a.contactId ? ` · contact ${a.contactId}` : ""}`).join("\n");
+    const many = new Set(as.map((a) => a.calendarName).filter(Boolean)).size > 1;
+    return [...as].sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? "")).map((a) => `${when(a.startTime)}–${when(a.endTime).split(", ").pop()} · ${clean(a.title, 80) || "(untitled)"}${a.appointmentStatus ? ` · ${a.appointmentStatus}` : ""}${many && a.calendarName ? ` · ${a.calendarName}` : ""}${a.address ? ` · ${clean(a.address, 80)}` : ""}${a.contactId ? ` · contact ${a.contactId}` : ""}`).join("\n");
   }
 
   tools(): ToolDef[] {
@@ -258,7 +290,7 @@ export class GoHighLevelConnector {
     const res = await this.f(`${this.opts.baseUrl ?? "https://services.leadconnectorhq.com"}/conversations/messages`, { method: "POST", headers: { authorization: `Bearer ${this.opts.apiKey}`, version: "2021-04-15", accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body) });
     const j = (await res.json().catch(() => ({}))) as { conversationId?: string; messageId?: string; message?: string | string[] };
     const msg = Array.isArray(j.message) ? j.message.join("; ") : j.message;
-    if (res.status === 401 || res.status === 403) throw new Error(`GoHighLevel refused to send (${res.status}${msg ? `: ${msg}` : ""}). The token needs the conversations/message.write scope.`);
+    if (res.status === 401 || res.status === 403) throw new Error(`GoHighLevel refused to send: ${scopeError("/conversations/messages", res.status, msg, "POST")}`);
     if (!res.ok) throw new Error(`GoHighLevel couldn't send (${res.status}${msg ? `: ${msg}` : ""})`);
     this.cache.clear();
     return { conversationId: j.conversationId, messageId: j.messageId };
@@ -268,7 +300,7 @@ export class GoHighLevelConnector {
     const res = await this.f(`${this.opts.baseUrl ?? "https://services.leadconnectorhq.com"}${path}`, { method, headers: { authorization: `Bearer ${this.opts.apiKey}`, version, accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body) });
     const j = (await res.json().catch(() => ({}))) as T & { message?: string | string[]; meta?: { contactId?: string } };
     const msg = Array.isArray(j.message) ? j.message.join("; ") : j.message;
-    if (res.status === 401 || res.status === 403) throw new Error(`GoHighLevel refused (${res.status}${msg ? `: ${msg}` : ""}). The token needs the write scope for this.`);
+    if (res.status === 401 || res.status === 403) throw new Error(`GoHighLevel refused: ${scopeError(path, res.status, msg, method)}`);
     if (!res.ok) throw new Error(`GoHighLevel said no (${res.status}${msg ? `: ${msg}` : ""})${j.meta?.contactId ? `; existing contact ${j.meta.contactId}` : ""}`);
     this.cache.clear();
     return j;

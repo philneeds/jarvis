@@ -19,7 +19,13 @@ test("GoHighLevel: read-only calls with the v2 headers; contacts, conversations,
     if (u.pathname === "/opportunities/pipelines") return Response.json({ pipelines: [{ id: "p1", name: "Jobs", stages: [{ id: "s1", name: "New lead" }, { id: "s2", name: "Quoted" }] }] });
     if (u.pathname === "/opportunities/search") return Response.json({ opportunities: [{ id: "o1", name: "Lopez kitchen", monetaryValue: 4200, status: "open", pipelineStageId: "s2", contact: { name: "Ana Lopez" }, updatedAt: "2026-11-05T16:00:00Z" }, { id: "o2", name: "Smith bath", monetaryValue: 9000, status: "open", pipelineStageId: "s1", contact: { name: "Bob Smith" }, updatedAt: "2026-11-06T09:00:00Z" }] });
     if (u.pathname === "/invoices/") return Response.json({ invoices: [{ _id: "i1", invoiceNumber: 17, name: "Lopez kitchen", status: "sent", total: 4200, amountDue: 2100, dueDate: "2026-11-20T00:00:00Z", contactDetails: { name: "Ana Lopez" } }] });
-    if (u.pathname === "/calendars/events") return Response.json({ events: [{ id: "e1", title: "Install: Lopez kitchen", startTime: "2026-11-10T13:00:00Z", endTime: "2026-11-10T17:00:00Z", appointmentStatus: "confirmed", address: "12 Elm St" }] });
+    // GoHighLevel answers events for one calendar at a time (422 without calendarId, userId or groupId).
+    if (u.pathname === "/calendars/") return Response.json({ calendars: [{ id: "cal1", name: "Estimates" }, { id: "cal2", name: "Installs" }] });
+    if (u.pathname === "/calendars/events") {
+      const cal = u.searchParams.get("calendarId");
+      if (!cal) return Response.json({ statusCode: 422, message: ["Either of calendarId, userId or groupId is required"] }, { status: 422 });
+      return Response.json({ events: cal === "cal2" ? [{ id: "e1", title: "Install: Lopez kitchen", startTime: "2026-11-10T13:00:00Z", endTime: "2026-11-10T17:00:00Z", appointmentStatus: "confirmed", address: "12 Elm St" }] : [{ id: "e2", title: "Estimate: Smith bath", startTime: "2026-11-09T15:00:00Z", endTime: "2026-11-09T16:00:00Z", appointmentStatus: "confirmed" }] });
+    }
     return new Response("{}", { status: 404 });
   }) as typeof fetch;
   const g = new GoHighLevelConnector(store, { apiKey: "pit-abc", locationId: "loc1", fetch: f, now: () => now });
@@ -37,14 +43,56 @@ test("GoHighLevel: read-only calls with the v2 headers; contacts, conversations,
   assert.match(pipe, /2 open opportunities, \$13,200 in all\./);
   assert.match(pipe, /Jobs › New lead \(1, \$9,000\):\n  \[o2\] Smith bath · Bob Smith · \$9,000/);
   assert.match(await t("ghl_invoices").handler({ status: "sent" }, ctx), /1 invoice \(sent\), \$2,100 still due\.\n\[i1\] #17 Lopez kitchen · Ana Lopez · \$4,200 total, \$2,100 due · sent · due 2026-11-20/);
-  assert.match(await t("ghl_appointments").handler({ days: 7 }, ctx), /Nov 10, 8:00 AM–12:00 PM · Install: Lopez kitchen · confirmed · 12 Elm St/);
+  const appts = await t("ghl_appointments").handler({ days: 7 }, ctx);
+  assert.match(appts, /^Nov 9, 10:00 AM–11:00 AM · Estimate: Smith bath · confirmed · Estimates\nNov 10, 8:00 AM–12:00 PM · Install: Lopez kitchen · confirmed · Installs · 12 Elm St$/, "every calendar, merged and in order, each event naming its calendar");
+  const evCalls = calls.filter((c) => c.path.startsWith("/calendars/events"));
+  assert.deepEqual(evCalls.map((c) => new URL(`http://x${c.path}`).searchParams.get("calendarId")), ["cal1", "cal2"], "one events call per calendar, each with its calendarId");
+  assert.ok(evCalls.every((c) => c.headers.version === "2021-04-15"), "the calendars API's version");
   assert.ok(calls.every((c) => c.method === "GET" || c.path === "/contacts/search"), "nothing writes");
   assert.deepEqual(Object.keys(g.executors()), ["ghl.contact.create", "ghl.note", "ghl.deal.create", "ghl.deal.move", "ghl.appointment.create", "ghl.message"], "every write waits for approval");
   const n = calls.length; await t("ghl_pipeline").handler({}, ctx); assert.equal(calls.length, n, "cached for a minute");
   assert.equal((await g.status()).lastFetch?.ok, true);
   const bad = new GoHighLevelConnector(store, { apiKey: "wrong", locationId: "loc1", fetch: f, now: () => now });
   assert.match(await bad.tools()[0]!.handler({}, ctx), /GoHighLevel: GoHighLevel refused the key \(Invalid JWT\)/);
+  assert.equal((await bad.status()).lastFetch?.ok, false, "a bad key is a lost connection");
   for (const id of ["stella", "karol", "stephanie", "brian"]) assert.ok(CHARTERS[id]!.tools!.some((x) => x.startsWith("ghl_")), `${id} reads GoHighLevel`);
+});
+
+test("a token missing a scope names the scope to add in GoHighLevel and doesn't count as a lost connection (Nov 19: texts and a contact refused with 401 'not authorized for this scope' while a deal move went through)", async () => {
+  const store = memoryStore(); await store.init();
+  const { scopeFor } = await import("../src/connectors/gohighlevel.js");
+  assert.equal(scopeFor("POST", "/conversations/messages"), "conversations/message.write");
+  assert.equal(scopeFor("GET", "/conversations/v1/messages?limit=30"), "conversations/message.readonly");
+  assert.equal(scopeFor("POST", "/contacts/"), "contacts.write");
+  assert.equal(scopeFor("POST", "/contacts/c1/notes"), "contacts.write");
+  assert.equal(scopeFor("GET", "/calendars/?locationId=loc1"), "calendars.readonly");
+  assert.equal(scopeFor("GET", "/calendars/events?x=1"), "calendars/events.readonly");
+  assert.equal(scopeFor("POST", "/calendars/events/appointments"), "calendars/events.write");
+  assert.equal(scopeFor("PUT", "/opportunities/o1"), "opportunities.write");
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = new URL(String(url)); const m = init?.method ?? "GET";
+    if (u.pathname === "/locations/loc1") return Response.json({ location: { name: "JD PM Renovations" } });
+    if (u.pathname === "/contacts/c1") return Response.json({ contact: { id: "c1", contactName: "Ana Lopez", phone: "+1585" } });
+    if (u.pathname === "/contacts/c1/notes" && m === "GET") return Response.json({ notes: [] });
+    // The token has opportunities.write but not contacts.write, calendars.readonly or conversations/message.write.
+    if (u.pathname === "/opportunities/pipelines") return Response.json({ pipelines: [{ id: "p1", name: "Jobs", stages: [{ id: "s1", name: "New lead" }] }] });
+    if (u.pathname === "/opportunities/o1" && m === "PUT") return Response.json({ succeded: true });
+    return Response.json({ statusCode: 401, message: "The token is not authorized for this scope." }, { status: 401 });
+  }) as typeof fetch;
+  const { Jarvis } = await import("../src/index.js");
+  const jarvis = new Jarvis({ store });
+  const g = new GoHighLevelConnector(store, { apiKey: "pit-abc", locationId: "loc1", fetch: f });
+  jarvis.addConnector(g, GoHighLevelConnector.promptHint());
+  assert.equal(await g.check(), "Connected to JD PM Renovations.");
+  const ctx = { store, agentId: "bill" };
+  assert.match(await g.tools().find((x) => x.name === "ghl_appointments")!.handler({}, ctx), /^GoHighLevel: GoHighLevel's token lacks the calendars\.readonly scope \(401: The token is not authorized for this scope\.\)\. Add it in GoHighLevel under Settings › Private Integrations › ⋮ Edit; the token stays the same\.$/);
+  assert.equal((await g.status()).lastFetch?.ok, true, "a missing scope isn't a refused key: GoHighLevel stays connected");
+  const sms = await jarvis.requestApproval({ agentId: "karol", kind: "send", title: "First text to Ana", body: "Hi Ana", payload: { action: "ghl.message", contactId: "c1", type: "SMS", message: "Hi Ana" } });
+  assert.match((await jarvis.decide(sms.id, "approved"))?.note ?? "", /GoHighLevel refused to send: GoHighLevel's token lacks the conversations\/message\.write scope \(401/);
+  const made = await jarvis.requestApproval({ agentId: "karol", kind: "other", title: "New lead", body: "x", payload: { action: "ghl.contact.create", name: "Bob Smith", phone: "+15855550199" } });
+  assert.match(made.note ?? "", /GoHighLevel refused: GoHighLevel's token lacks the contacts\.write scope \(401/);
+  const mv = await jarvis.requestApproval({ agentId: "jake", kind: "other", title: "Won", body: "x", payload: { action: "ghl.deal.move", opportunityId: "o1", stage: "New lead", status: "won" } });
+  assert.match(mv.note ?? "", /Moved deal o1 to New lead \(won\)/, "the scope it does have still works");
 });
 
 test("a GoHighLevel reply waits for Phil, then goes out through the API on approval", async () => {
