@@ -118,3 +118,16 @@ test("Jarvis's live view lists only runs actually in progress, and says so when 
   assert.doesNotMatch(t, /Stella/);
   assert.match(t, /anything not listed has finished or stopped/);
 });
+
+test("an update that is waiting for an agent to finish is reported as waiting, with who and the latest it goes ahead", async () => {
+  const { store, jarvis } = make();
+  await store.settings.set("workshop.ship", { status: "shipping", title: "Update HQ: 3 new changes", at: new Date(Date.now() - 22 * 60_000).toISOString(), sha: "abc1234" });
+  await store.runs.add({ id: "r1", agentId: "einstein", prompt: "Jarvis asks: fix the JD PM texts", status: "running", startedAt: new Date(Date.now() - 31 * 60_000).toISOString() });
+  const waiting = await jarvis.liveWorkText();
+  assert.match(waiting, /Update approved 22 min ago for "Update HQ: 3 new changes": not started yet, on purpose\. It is waiting for Einstein to finish/);
+  assert.match(waiting, /or in 43 min at the latest, and then takes two or three minutes\. This is normal, not stuck\./);
+  await store.runs.update("r1", { status: "done" });
+  assert.match(await jarvis.liveWorkText(), /nothing is running, so HQ is rebuilding and restarting now \(two or three minutes\)\.$/m);
+  await store.settings.set("workshop.ship", { status: "shipping", title: "Update HQ", at: new Date(Date.now() - 80 * 60_000).toISOString(), sha: "abc1234" });
+  assert.match(await jarvis.liveWorkText(), /well past the longest it should take: something is wrong/);
+});

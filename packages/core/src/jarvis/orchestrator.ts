@@ -2315,7 +2315,16 @@ export class Jarvis {
     for (const q of queued) lines.push(`- ${getAgent(q.id)?.name ?? q.id}: ${q.detail}`);
     const { SHIP_KEY } = await import("../workshop.js");
     const ship = await this.store.settings.get<{ status?: string; title?: string; at?: string } | null>(SHIP_KEY, null);
-    if (ship?.status === "shipping" && ship.at) lines.push(`- Deploy in progress for "${ship.title}" (started ${mins(ship.at)} min ago; HQ restarts when it lands)`);
+    if (ship?.status === "shipping" && ship.at) {
+      // A deploy never cuts an agent off mid-run: it waits for every run in progress (and a job queued for the workshop
+      // that starts meanwhile), up to 65 minutes from approval, then takes two or three minutes. Say which it is, so a
+      // long wait isn't reported as a slow restart.
+      const waitingOn = [...new Set([...runs.map((r) => getAgent(r.agentId)?.name ?? r.agentId), ...queued.map((q) => getAgent(q.id)?.name ?? q.id)])];
+      const left = Math.max(0, 65 - mins(ship.at));
+      lines.push(waitingOn.length
+        ? `- Update approved ${mins(ship.at)} min ago for "${ship.title}": not started yet, on purpose. It is waiting for ${waitingOn.join(" and ")} to finish (a restart would cut the run off)${queued.length ? ", including the job queued for the workshop" : ""}; it goes ahead when they finish, or in ${left} min at the latest, and then takes two or three minutes. This is normal, not stuck.`
+        : `- Update approved ${mins(ship.at)} min ago for "${ship.title}": nothing is running, so HQ is rebuilding and restarting now (two or three minutes).${mins(ship.at) > 75 ? " It is well past the longest it should take: something is wrong; Einstein should look at the deploy log." : ""}`);
+    }
     return lines.length ? `Working right now (live; anything not listed has finished or stopped, so don't call it "building" or "in progress"):\n${lines.join("\n")}` : "Working right now: nothing. No agent run is in progress; anything earlier has finished or stopped.";
   }
 
