@@ -31,6 +31,11 @@ import { DECK_HINT, makeDeck, fillTemplate, normalizeFill, normalizeDeck, deckFo
 import { GUARDRAIL_FILES, HELD_FOR_UPDATE, WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
 import { HeldJobs, deployPending, heldLine, type HeldJob } from "../deployhold.js";
 import { NOT_PLACED } from "../hyperliquid-trade.js";
+/** A promise, or the fallback once ms have passed; the timer is cleared either way, so it never holds the process up. */
+async function within<T, F>(p: Promise<T>, ms: number, fallback: () => F): Promise<T | F> {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  try { return await Promise.race([p, new Promise<F>((res) => { t = setTimeout(() => res(fallback()), ms); })]); } finally { clearTimeout(t); }
+}
 /** Settings keys for Phil's auto-ship switch and the day's auto-ships. */
 export const AUTO_SHIP_KEY = "workshop.autoShip";
 const AUTO_SHIP_LOG_KEY = "workshop.autoShipLog";
@@ -760,7 +765,7 @@ export class Jarvis {
     // One agent asked: Phil reads its answer as it is, so it is told who it is answering.
     const solo = delegations.length === 1;
     const runs = delegations.map((d) => this.runAgent(d.agent, d.task, { direct: true, parentRunId: planRun.runId, from: solo ? "Phil (through Jarvis; your answer goes to him as written)" : "Jarvis" }).then((r) => ({ agent: d.agent, task: d.task, text: r.text, blocked: r.blocked, runId: r.runId }) as Report));
-    const reports: Report[] = await Promise.all(runs.map((pr, i) => Promise.race([pr, new Promise<Report>((res) => setTimeout(() => res({ agent: delegations[i]!.agent, task: delegations[i]!.task, text: "", blocked: "still working; their report will follow", late: true }), Jarvis.DELEGATE_TIMEOUT_MS))])));
+    const reports: Report[] = await Promise.all(runs.map((pr, i) => within(pr, Jarvis.DELEGATE_TIMEOUT_MS, (): Report => ({ agent: delegations[i]!.agent, task: delegations[i]!.task, text: "", blocked: "still working; their report will follow", late: true }))));
     reports.forEach((r, i) => { if (r.late) void runs[i]!.then(async (late) => { await this.say({ role: "agent", agentId: late.agent.id, text: late.blocked ? `(${late.agent.name} did not run: ${late.blocked})` : `Late report: ${late.text}`, kind: "progress", via: ["jarvis"] }); }).catch((e) => void this.router.log(delegations[i]!.agent.id, "error", `${delegations[i]!.agent.name}'s late report failed: ${(e as Error).message}`).catch(() => undefined)); });
 
     // A single agent that answered: its words go to Phil. Jarvis rewriting one report was a second full model call
@@ -1933,10 +1938,7 @@ export class Jarvis {
       if (q) settle.set(id, q.ran);
     }
     const reports = (await Promise.all(reporters.map(async (a) => {
-      const r = await Promise.race([
-        this.runAgent(a, leadBriefTask(now), { direct: true, from: "Jarvis" }),
-        new Promise<{ blocked: string; text: string }>((res) => setTimeout(() => res({ blocked: "took too long", text: "" }), Number(process.env.BRIEF_LEAD_TIMEOUT_MS ?? 180_000))),
-      ]);
+      const r = await within(this.runAgent(a, leadBriefTask(now), { direct: true, from: "Jarvis" }), Number(process.env.BRIEF_LEAD_TIMEOUT_MS ?? 180_000), () => ({ blocked: "took too long", text: "" }));
       if (!r.blocked) await settle.get(a.id)?.().catch(() => undefined);
       return r.blocked ? null : { name: a.name, text: r.text.slice(0, 1500) };
     }))).filter((r): r is { name: string; text: string } => !!r);

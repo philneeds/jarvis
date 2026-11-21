@@ -85,7 +85,7 @@ test("a routine due while an update is pending doesn't start, isn't marked as ru
   await s.tick(at(6, 51));
   await s.tick(at(6, 52));
   assert.deepEqual(seen, [], "nothing started while the update waits");
-  assert.deepEqual(await store.settings.get(DEFERRED_KEY, []), ["t-daily", "t-often"], "both are noted as due");
+  assert.deepEqual((await store.settings.get<{ id: string }[]>(DEFERRED_KEY, [])).map((d) => d.id), ["t-daily", "t-often"], "both are noted as due");
   assert.deepEqual(await store.settings.get("schedule.lastRun", {}), {}, "neither is marked as run");
   const noted = (await store.activity.list({ limit: 50 })).filter((e) => /waiting for the HQ update to go in/.test(e.summary));
   assert.equal(noted.length, 1, "said once, not on every tick");
@@ -227,7 +227,7 @@ test("Nov 20 again: the update waits for the run in progress, not for the job qu
   // A routine that comes due doesn't start either.
   const s = new Scheduler(jarvis, [{ id: "t-often", agentId: "stella", task: "Leads review", when: "every:30", phase: 1 }]);
   await s.tick();
-  assert.deepEqual(await store.settings.get(DEFERRED_KEY, []), ["t-often"]);
+  assert.deepEqual((await store.settings.get<{ id: string }[]>(DEFERRED_KEY, [])).map((d) => d.id), ["t-often"]);
   // The run in progress is never cut off: the deploy has not started.
   await new Promise((r) => setTimeout(r, 200));
   assert.equal(await exists(marker), false, "the deploy waits for the run that was already going");
