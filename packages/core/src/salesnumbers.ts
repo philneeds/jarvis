@@ -139,55 +139,99 @@ const findRep = (pull: SalesPull, name: string) => {
   return reps.length === 1 ? reps[0] : reps.find((r) => r.rep.toLowerCase() === w);
 };
 
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+/** "November 1 through 21" (or "October 28 through November 3" across two months). */
+const longSpan = (start: string, end: string) => {
+  const a = start.match(/^(\d{1,2})\/(\d{1,2})\/\d{4}$/), b = end.match(/^(\d{1,2})\/(\d{1,2})\/\d{4}$/);
+  if (!a || !b) return `${start} through ${end}`;
+  return a[1] === b[1] ? `${MONTHS[+a[1]! - 1]} ${+a[2]!} through ${+b[2]!}` : `${MONTHS[+a[1]! - 1]} ${+a[2]!} through ${MONTHS[+b[1]! - 1]} ${+b[2]!}`;
+};
+
+type Pulls = { week?: SalesPull; prior?: SalesPull };
+/** One code worked out: its text, and its number when it has one (a bar is drawn from it). */
+type Resolved = { text: string; num?: number } | { error: string };
+
 /**
- * Fill the {{...}} codes in a deck edit with the numbers:
- *   {{close}} {{demo}} {{gross}} ...           the team, the deck's period  {{prior.close}}   the comparison period
- *   {{rep:Marino.close}}                        one rep (last name is enough) {{prior.rep:Marino.close}}
- *   {{top.close.1.rep}} {{top.close.1}}         a leaderboard: the 1st rep by close, and their figure
- *   {{period}} {{prior.period}}                 the dates, "11/01–11/24" ({{week}} still reads the same)
- *   |0 after a percentage drops the decimal: {{demo|0}} is "73%".
- * Returns the text, or why a code can't be filled.
+ * What a code stands for:
+ *   close demo gross ...              the team over the deck's period      prior.close   the comparison period
+ *   rep:Marino.close                  one rep (last name is enough)
+ *   top.close.1.rep / top.close.1     a leaderboard: the 1st rep by close, and their figure; top.gross.1.sold is
+ *                                     another figure of that same rep; top5.close.1 ranks only reps with 5 or more
+ *                                     leads issued (so a rep on one lead doesn't head a board)
+ *   period, period_long, pulled       the dates ("11/01–11/24", "November 1 through 24") and the day it was pulled
+ *   reps                              how many reps ran appointments
+ *   trend.demo / change.demo          "rose" | "fell" | "held", and "up from" | "down from" | "level with", against
+ *                                     the comparison period (Trend / Change for a capital letter)
+ *   |0 after a percentage drops the decimal: demo|0 is "73%".
  */
-export function fillNumbers(text: string, pulls: { week?: SalesPull; prior?: SalesPull }): { text: string; errors: string[] } {
+function resolve(raw: string, pulls: Pulls): Resolved {
+  const whole = `{{${raw}}}`;
+  const [body, opt] = raw.split("|");
+  let code = body!.trim();
+  const decimals = opt !== undefined && /^\d$/.test(opt.trim()) ? Number(opt.trim()) : undefined;
+  const none = (m: string) => ({ error: `${whole}: no figure called "${m}" (there are: ${Object.keys(METRICS).join(", ")})` });
+  // Against the comparison period, in words.
+  const cmp = code.match(/^(trend|change)\.([a-z_]+)$/i);
+  if (cmp) {
+    const def = METRICS[cmp[2]!];
+    if (!def) return none(cmp[2]!);
+    if (!pulls.week?.team || !pulls.prior?.team) return { error: `${whole}: needs both periods' pulls (lp_deck_numbers)` };
+    const now = valueOf(def, pulls.week.team, pulls.week), was = valueOf(def, pulls.prior.team, pulls.prior);
+    if (now === undefined || was === undefined) return { text: "" };
+    const gap = def.kind === "pct" ? (now - was) * 100 : now - was, flat = def.kind === "pct" ? 0.5 : 0;
+    const way = gap > flat ? 1 : gap < -flat ? -1 : 0;
+    const word = /^trend$/i.test(cmp[1]!) ? ["fell", "held", "rose"][way + 1]! : ["down from", "level with", "up from"][way + 1]!;
+    return { text: /^[A-Z]/.test(cmp[1]!) ? word[0]!.toUpperCase() + word.slice(1) : word };
+  }
+  const isPrior = code.startsWith("prior.");
+  if (isPrior) code = code.slice(6);
+  const pull = isPrior ? pulls.prior : pulls.week;
+  if (!pull) return { error: `${whole}: there's no lp_report pull of Sales Efficiency for ${isPrior ? "the comparison period" : "the deck's period"}; run lp_report for those dates first` };
+  if (code === "week" || code === "period") return { text: `${short(pull.start)}–${short(pull.end)}` };
+  if (code === "period_long") return { text: longSpan(pull.start, pull.end) };
+  if (code === "pulled") { const d = new Date(pull.at); return { text: Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { timeZone: "America/New_York", month: "2-digit", day: "2-digit", year: "numeric" }) }; }
+  // How many reps ran appointments ("across 14 reps").
+  if (code === "reps") { const n = pull.reps.filter((r) => r.issued > 0).length; return { text: String(n), num: n }; }
+  let row: SalesRow | undefined = pull.team, metric = code;
+  let m = code.match(/^rep:(.+)\.([a-z_]+)$/);
+  if (m) { row = findRep(pull, m[1]!); metric = m[2]!; if (!row) return { error: `${whole}: no rep "${m[1]}" in the ${short(pull.start)}–${short(pull.end)} report (reps: ${pull.reps.map((r) => r.rep).join("; ")})` }; }
+  m = code.match(/^top(\d{0,3})\.([a-z_]+)\.(\d{1,2})(?:\.([a-z_]+))?$/);
+  if (m) {
+    const def = METRICS[m[2]!];
+    if (!def) return none(m[2]!);
+    const min = Math.max(1, Number(m[1] || 1));
+    const ranked = pull.reps.filter((r) => r.issued >= min).map((r) => ({ r, v: valueOf(def, r, pull) })).filter((x) => x.v !== undefined).sort((a, b) => b.v! - a.v! || b.r.issued - a.r.issued || a.r.rep.localeCompare(b.r.rep));
+    const hit = ranked[Number(m[3]) - 1];
+    if (!hit) return { text: "", num: 0 }; // past the end of the board: a blank row
+    if (m[4] === "rep") return { text: hit.r.rep };
+    if (m[4]) { const other = METRICS[m[4]]; if (!other) return none(m[4]); const v = valueOf(other, hit.r, pull); return { text: fmt(other.kind, v, decimals), num: v }; }
+    return { text: fmt(def.kind, hit.v, decimals), num: hit.v };
+  }
+  const def = METRICS[metric];
+  if (!def) return none(metric);
+  if (!row) return { error: `${whole}: the report has no team total row` };
+  const v = valueOf(def, row, pull);
+  return { text: fmt(def.kind, v, decimals), num: v };
+}
+
+/** Fill the {{...}} codes in a deck's text with the numbers. Returns the text, and why any code can't be filled. */
+export function fillNumbers(text: string, pulls: Pulls): { text: string; errors: string[] } {
   const errors: string[] = [];
   const out = text.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (whole, raw: string) => {
-    const [body, opt] = raw.split("|");
-    let code = body!.trim();
-    const isPrior = code.startsWith("prior.");
-    if (isPrior) code = code.slice(6);
-    const pull = isPrior ? pulls.prior : pulls.week;
-    if (!pull) { errors.push(`${whole}: there's no lp_report pull of Sales Efficiency for ${isPrior ? "the comparison period" : "the deck's period"}; run lp_report for those dates first`); return whole; }
-    const decimals = opt !== undefined && /^\d$/.test(opt.trim()) ? Number(opt.trim()) : undefined;
-    if (code === "week" || code === "period") return `${short(pull.start)}–${short(pull.end)}`;
-    // How many reps ran appointments that week ("across 14 reps").
-    if (code === "reps") return String(pull.reps.filter((r) => r.issued > 0).length);
-    let row: SalesRow | undefined = pull.team, metric = code;
-    let m = code.match(/^rep:(.+)\.([a-z_]+)$/);
-    if (m) { row = findRep(pull, m[1]!); metric = m[2]!; if (!row) { errors.push(`${whole}: no rep "${m[1]}" in the ${short(pull.start)}–${short(pull.end)} report (reps: ${pull.reps.map((r) => r.rep).join("; ")})`); return whole; } }
-    m = code.match(/^top\.([a-z_]+)\.(\d{1,2})(?:\.([a-z_]+))?$/);
-    if (m) {
-      const def = METRICS[m[1]!];
-      if (!def) { errors.push(`${whole}: no figure called "${m[1]}" (there are: ${Object.keys(METRICS).join(", ")})`); return whole; }
-      const ranked = pull.reps.filter((r) => r.issued > 0).map((r) => ({ r, v: valueOf(def, r, pull) })).filter((x) => x.v !== undefined).sort((a, b) => b.v! - a.v! || b.r.issued - a.r.issued);
-      const hit = ranked[Number(m[2]) - 1];
-      if (!hit) return "";
-      if (m[3] === "rep") return hit.r.rep;
-      if (m[3]) {
-        const other = METRICS[m[3]];
-        if (!other) { errors.push(`${whole}: no figure called "${m[3]}" (there are: ${Object.keys(METRICS).join(", ")})`); return whole; }
-        return fmt(other.kind, valueOf(other, hit.r, pull), decimals);
-      }
-      return fmt(def.kind, hit.v, decimals);
-    }
-    const def = METRICS[metric];
-    if (!def) { errors.push(`${whole}: no figure called "${metric}" (there are: ${Object.keys(METRICS).join(", ")})`); return whole; }
-    if (!row) { errors.push(`${whole}: the report has no team total row`); return whole; }
-    return fmt(def.kind, valueOf(def, row, pull), decimals);
+    const r = resolve(raw, pulls);
+    if ("error" in r) { errors.push(r.error); return whole; }
+    return r.text;
   });
   return { text: out, errors };
 }
 
+/** A code's number (a count, dollars, or a rate as a fraction), for drawing a bar from it. */
+export function numberOf(code: string, pulls: Pulls): number | undefined {
+  const r = resolve(code.replace(/^\{\{|\}\}$/g, ""), pulls);
+  return "error" in r ? undefined : r.num;
+}
+
 /** The codes, for the agent: every figure with its definition, and the reps in the newest pull. */
 export function numbersHint(): string {
-  return `Numbers on a deck are written by HQ, never typed: put a code where the figure goes and HQ fills it from the last lp_report pull of Sales Efficiency (deck_period gives the dates to pull: month to date and its comparison). Codes: {{close}} {{demo}} … for the team over the deck's period; {{prior.close}} for the comparison period; {{rep:Marino.close}} for one rep (last name is enough); {{top.close.1.rep}} and {{top.close.1}} for a leaderboard's first name and figure (2, 3, … down the board), and {{top.gross.1.gross_share}} for another figure of that same rep; {{period}} and {{prior.period}} for the dates; {{reps}} for how many reps ran appointments; add |0 to a percentage for no decimal ({{demo|0}}). Figures: ${Object.entries(METRICS).map(([k, v]) => `${k} (${v.says})`).join("; ")}. Text around a code is yours ("Close rate {{close}}"). When the template itself already has the codes in its cells (deck_template shows them), HQ fills them all with no edit from you: call lp_deck_numbers, then send a deckfill with the title, the numbers line and "edits" for words only ([] if none).`;
+  return `Numbers on a deck are written by HQ, never typed: put a code where the figure goes and HQ fills it from the last lp_report pull of Sales Efficiency (deck_period gives the dates to pull: month to date and its comparison). Codes: {{close}} {{demo}} … for the team over the deck's period; {{prior.close}} for the comparison period; {{rep:Marino.close}} for one rep (last name is enough); {{top.close.1.rep}} and {{top.close.1}} for a leaderboard's first name and figure (2, 3, … down the board), and {{top.gross.1.gross_share}} for another figure of that same rep; {{period}}, {{period_long}} ("November 1 through 24") and {{pulled}} for the dates; {{reps}} for how many reps ran appointments; {{top5.close.1}} ranks only reps with 5 or more leads issued; {{trend.demo}} is "rose", "fell" or "held" against the comparison period and {{change.demo}} is "up from", "down from" or "level with" (Trend / Change for a capital); add |0 to a percentage for no decimal ({{demo|0}}). Figures: ${Object.entries(METRICS).map(([k, v]) => `${k} (${v.says})`).join("; ")}. Text around a code is yours ("Close rate {{close}}"). When the template itself already has the codes in its cells (deck_template shows them), HQ fills them all with no edit from you: call lp_deck_numbers, then send a deckfill with the title, the numbers line and "edits" for words only ([] if none).`;
 }

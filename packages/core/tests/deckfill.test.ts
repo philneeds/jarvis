@@ -244,3 +244,52 @@ test("a template that carries its own codes is filled by HQ with no edits at all
   const xml = await (await JSZip.loadAsync((await deckFile(store, f.deck.id))!.data)).file("ppt/slides/slide1.xml")!.async("string");
   assert.match(xml, /<a:rPr lang="en-US" b="1"\/><a:t>Close rate: <\/a:t><\/a:r><a:r><a:rPr lang="en-US"\/><a:t>25\.0%<\/a:t>/);
 });
+
+test("bars are drawn from the numbers: a bar's width follows its figure, and the label sits at its end", async () => {
+  const { scaleBars } = await import("../src/index.js");
+  const row = (rep: string, issued: number, netIssued: number, demos: number, sold: number) => ({ rep, issued, netIssued, demos, sold, gross: 0, cancels: 0, declines: 0, preCount: 0, pre: 0, net: 0 });
+  const week = { start: "11/01/2026", end: "11/21/2026", at: "x", team: row("Team", 100, 80, 40, 20), reps: [row("Lane, Avery", 10, 10, 8, 5), row("Quill, Morgan", 20, 20, 10, 5), row("Solo, Sam", 1, 1, 1, 1)] };
+  const sp = (id: number, name: string, x: number, cx: number) => `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${x}" y="5"/><a:ext cx="${cx}" cy="9"/></a:xfrm></p:spPr></p:sp>`;
+  const xml = [
+    sp(1, "hq:bar code=top3.close.1 of=top3.close.1 max=1000", 100, 777), sp(2, "hq:after code=top3.close.1 of=top3.close.1 max=1000 x0=100 gap=10", 999, 50),
+    sp(3, "hq:bar code=top3.close.2 of=top3.close.1 max=1000", 100, 777), sp(4, "hq:after code=top3.close.2 of=top3.close.1 max=1000 x0=100 gap=10", 999, 50),
+    sp(5, "hq:bar code=top3.close.3 of=top3.close.1 max=1000", 100, 777),
+    sp(6, "hq:bar code=demos of=issued max=2000", 0, 5), sp(7, "hq:bar code=demo of=1 max=2000", 0, 5), sp(8, "Plain shape", 0, 5),
+  ].join("");
+  const out = scaleBars(xml, { week });
+  const cx = (id: number) => Number(out.xml.match(new RegExp(`id="${id}"[\\s\\S]*?<a:ext cx="(\\d+)"`))![1]);
+  const x = (id: number) => Number(out.xml.match(new RegExp(`id="${id}"[\\s\\S]*?<a:off x="(-?\\d+)"`))![1]);
+  // Lane 5 of 10 = 50% heads the board (the one-lead rep at 100% isn't ranked: under 3 leads); Quill 5 of 20 = 25% is half as long.
+  assert.deepEqual([cx(1), cx(3), cx(5)], [1000, 500, 0], "full width, half, and an empty third row");
+  assert.deepEqual([x(2), x(4)], [1110, 610], "each label starts just past its bar");
+  assert.equal(cx(6), 800, "a funnel bar: 40 demos of 100 issued");
+  assert.equal(cx(7), 1000, "a rate out of 100%: 40 of 80");
+  assert.equal(cx(8), 5, "any other shape is left alone");
+  assert.equal(out.bars, 5);
+});
+
+test("the words a deck needs from the numbers: the period in full, when it was pulled, and up or down against the period before", async () => {
+  const { fillNumbers } = await import("../src/index.js");
+  const row = (demos: number) => ({ rep: "Team", issued: 100, netIssued: 100, demos, sold: 20, gross: 500_000, cancels: 0, declines: 0, preCount: 0, pre: 0, net: 0 });
+  const week = { start: "11/01/2026", end: "11/21/2026", at: "2026-11-21T19:10:00Z", team: row(67), reps: [] };
+  const f = (s: string, was: number) => fillNumbers(s, { week, prior: { ...week, start: "10/01/2026", end: "10/21/2026", team: row(was) } }).text;
+  assert.equal(f("{{period_long}} · pulled {{pulled}} · {{prior.period}}", 78), "November 1 through 21 · pulled 11/21/2026 · 10/01–10/21");
+  assert.equal(f("Demo rate {{trend.demo}} this period. {{Change.demo}} {{prior.demo|0}}.", 78), "Demo rate fell this period. Down from 78%.");
+  assert.equal(f("Demo rate {{trend.demo}}; {{change.demo}} {{prior.demo|0}}", 60), "Demo rate rose; up from 60%");
+  assert.equal(f("{{trend.demo}} / {{change.demo}}", 67), "held / level with");
+});
+
+test("a template marked with codes isn't nagged about its plain text: a target and a rule's number are meant to stay", async () => {
+  const store = memoryStore(); await store.init();
+  const zip = new JSZip();
+  const run = (t: string) => `<a:r><a:rPr lang="en-US"/><a:t>${t}</a:t></a:r>`;
+  zip.file("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>');
+  zip.file("ppt/presentation.xml", '<p:presentation><p:sldSz cx="12192000" cy="6858000"/></p:presentation>');
+  zip.file("ppt/slides/slide1.xml", `<p:sld><p:cSld><p:spTree><p:sp><p:txBody><a:p>${run("{{sold}} sales")}</a:p><a:p>${run("80%")}</a:p><a:p>${run("Reps with 3 or more leads issued")}</a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`);
+  await setTemplate(store, "proedge", "Coded.pptx", await zip.generateAsync({ type: "nodebuffer" }));
+  const { saveSalesPull, fillProblems } = await import("../src/index.js");
+  await saveSalesPull(store, { start: "11/01/2026", end: "11/21/2026", at: "x", team: { rep: "Team", issued: 9, netIssued: 9, demos: 5, sold: 2, gross: 1, cancels: 0, declines: 0, preCount: 0, pre: 0, net: 0 }, reps: [] });
+  const f = await fillTemplate(store, { edits: [] }, { agentId: "stevon", venture: "proedge" });
+  assert.deepEqual(f.stale, []);
+  assert.equal(fillProblems(f), undefined, "a clean deck says nothing");
+});

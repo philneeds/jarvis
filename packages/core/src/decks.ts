@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Store } from "./store/types.js";
 import { saveFile, loadFile } from "./uploads.js";
 import { VENTURES } from "./registry/ventures.js";
-import { fillNumbers, numbersHint, pullsFor } from "./salesnumbers.js";
+import { fillNumbers, numberOf, numbersHint, pullsFor, type SalesPull } from "./salesnumbers.js";
 
 /**
  * Presentations agents make. An agent writes the deck as a fenced ```slides block of JSON (DeckSpec); HQ turns it
@@ -210,6 +210,32 @@ async function chartSlides(zip: JSZip, slides: string[]): Promise<number[]> {
   return out;
 }
 
+/**
+ * Bars drawn from the numbers. A bar on a leaderboard or a funnel is a plain rectangle, so it kept the template's
+ * length whatever the figure beside it said (Nov 21: a 40% bar nearly as long as the 47% one). A shape named
+ *   hq:bar code=<code> of=<code> max=<emu>
+ * gets the width max × (code's number ÷ of's number), and one named
+ *   hq:after code=<code> of=<code> max=<emu> x0=<emu> gap=<emu>
+ * (the figure's label) is moved to sit just past the end of that bar. The names are set once in the template.
+ */
+export function scaleBars(xml: string, pulls: { week?: SalesPull; prior?: SalesPull }): { xml: string; bars: number } {
+  let bars = 0;
+  const out = xml.replace(/<p:sp>[\s\S]*?<\/p:sp>/g, (sp) => {
+    const name = sp.match(/<p:cNvPr id="\d+" name="(hq:(bar|after) [^"]*)"/);
+    if (!name) return sp;
+    const arg = (k: string) => name[1]!.match(new RegExp(`(?:^| )${k}=(\\S+)`))?.[1];
+    const code = arg("code"), of = arg("of"), max = Number(arg("max"));
+    if (!code || !of || !(max > 0)) return sp;
+    // "of" is another code (the board's first row, the funnel's first bar) or a plain number (1 for a rate out of 100%).
+    const v = numberOf(code, pulls) ?? 0, top = /^\d+(\.\d+)?$/.test(of) ? Number(of) : numberOf(of, pulls) ?? 0;
+    const width = Math.round(max * (top > 0 ? Math.min(Math.max(v / top, 0), 1) : 0));
+    if (name[2] === "bar") { bars++; return sp.replace(/(<a:xfrm[^>]*>\s*<a:off x="-?\d+" y="-?\d+"\/>\s*<a:ext cx=")\d+(")/, `$1${width}$2`); }
+    const x0 = Number(arg("x0") ?? 0), gap = Number(arg("gap") ?? 0);
+    return sp.replace(/(<a:xfrm[^>]*>\s*<a:off x=")-?\d+(")/, `$1${x0 + width + gap}$2`);
+  });
+  return { xml: out, bars };
+}
+
 /** A built deck, read back: every slide's paragraphs, numbered as in the template listing. */
 export async function deckListing(buf: Buffer): Promise<string> {
   const slides = await slideParagraphs(buf);
@@ -272,6 +298,7 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
         return `${open}${encode(r.text)}${close}`;
       });
     }
+    if (/name="hq:(bar|after) /.test(xml)) xml = scaleBars(xml, allPulls).xml;
     const paras = paragraphs(xml);
     const withText = paras.filter((p) => p.text.trim());
     const next = new Map<number, string>(); // index in paras → new text
@@ -313,11 +340,16 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
   // Every numbered paragraph no edit changed, on every slide: Phil's check is "do the slides match the report", and a
   // figure left from the template is the usual way they don't (Nov 21).
   const tplZip = await JSZip.loadAsync(file.data);
+  let templateCoded = false;
+  for (const path of slides) if (/\{\{[^{}]*\}\}/.test(await tplZip.file(path)!.async("string"))) { templateCoded = true; break; }
   for (const [k, path] of slides.entries()) {
     const n = k + 1;
     const paras = paragraphs(await zip.file(path)!.async("string")).filter((p) => p.text.trim());
     const edited = new Set((bySlide.get(n) ?? []).filter((e) => !missed.includes(e)).map((e) => e.para));
     const tplParas = paragraphs(await tplZip.file(path)!.async("string")).filter((p) => p.text.trim());
+    // A template that carries its own codes was marked on purpose: what it leaves as plain text (a target, a rule's
+    // number) is meant to stay, so nothing in it is "stale".
+    if (templateCoded) continue;
     tplParas.forEach((p, i) => { if (isFigure(p.text) && paras[i]?.text === p.text && !edited.has(i + 1)) stale.push({ slide: n, para: i + 1, text: p.text.trim() }); });
   }
   const charts = await chartSlides(zip, slides);
