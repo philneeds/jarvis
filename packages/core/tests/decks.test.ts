@@ -64,7 +64,7 @@ test("sales data: CSV and Excel are read into text, Stevon builds the deck, and 
 
   // The routine exists, pushes, and runs Monday night.
   const r = SCHEDULES.find((s) => s.id === "stevon-weekly")!;
-  assert.equal(r.when, "weekly:mon@20:00");
+  assert.equal(r.when, "weekly:mon@21:00");
   assert.ok(r.push);
 
   const j = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }) });

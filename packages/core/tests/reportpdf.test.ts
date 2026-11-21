@@ -135,7 +135,7 @@ test("the deck's period is the month to date, compared with the same days of the
   const at = (iso: string) => new Date(iso);
   // Tuesday Nov 24 2026, built Monday night or on the day: the 1st through today.
   assert.deepEqual(deckPeriod(at("2026-11-24T14:00:00Z")), { start: "11/01/2026", end: "11/24/2026", priorStart: "10/01/2026", priorEnd: "10/24/2026" });
-  assert.deepEqual(deckPeriod(at("2026-11-24T01:00:00Z")), { start: "11/01/2026", end: "11/23/2026", priorStart: "10/01/2026", priorEnd: "10/23/2026" }, "Monday 8 pm Eastern is still Monday");
+  assert.deepEqual(deckPeriod(at("2026-11-24T02:00:00Z")), { start: "11/01/2026", end: "11/23/2026", priorStart: "10/01/2026", priorEnd: "10/23/2026" }, "Monday 9 pm Eastern is still Monday");
   // On the 1st there is nothing of the new month yet: the whole month just ended.
   assert.deepEqual(deckPeriod(at("2026-12-01T15:00:00Z")), { start: "11/01/2026", end: "11/30/2026", priorStart: "10/01/2026", priorEnd: "10/31/2026" });
   // The month before is shorter, and January looks back to December.

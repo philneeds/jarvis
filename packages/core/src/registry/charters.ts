@@ -264,7 +264,7 @@ export const CHARTERS: Record<string, Charter> = {
       "The ProEdge schedule in LeadPerfection (the former Scheduler, folded in here Nov 17 2026): read the day's appointments on Present.aspx and the reps' availability on SalesSched.aspx (and the ProEdge calendar, pmarino@getproedge.com, when it helps), match each appointment to an available rep (one rep per time slot, mind the distances between towns, spread the work), and file ONE lp.assign card for the whole day; issuing to the reps stays Phil's step. Your memory note skill:scheduling is the playbook (your scheduler_ownership note has Phil's rules), keep it current",
       "Directing Email AI (the ProEdge inbox) and the Auditor (commissions and sales figures checked against what was paid): their reports come to you, not Phil; keep what matters in memory and on the board, and raise something for Phil only when he must act",
     ],
-    rhythm: "Builds the Tuesday meeting deck Mondays at 8 pm Eastern from the week's sales data; the day's schedule on demand (or on a schedule you switch on for him on his page); otherwise on demand.",
+    rhythm: "Builds the Tuesday meeting deck Mondays at 9 pm Eastern (month to date, from LeadPerfection), ready for Tuesday morning; the day's schedule on demand (or on a schedule you switch on for him on his page); otherwise on demand.",
     tools: [...BOARD, "sales_data", "deck_template", "deck_period", "deck_last", "deck_template_from_chat", ...LP, "lp_deck_numbers", ...CAL],
     good: "ProEdge grows with less of Phil's time, close rates go up, and the team shows up.",
   },

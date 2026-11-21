@@ -212,7 +212,7 @@ export class TelegramBot {
           await this.send(`Got the template "${name}" (${t.outline.length} slides). Stevon's decks will follow its order, colours and fonts.`);
         } else {
           const f = await addDataFile(this.jarvis.store, "proedge", { name, mime: doc.mime_type, data, note: msg.caption });
-          await this.send(`Saved ${name}${f.rows ? ` (${f.rows} rows)` : ""} as this week's ProEdge sales data. Stevon builds Tuesday's deck from it Monday at 8 pm; say "@stevon make the deck now" to get it sooner.`);
+          await this.send(`Saved ${name}${f.rows ? ` (${f.rows} rows)` : ""} as this week's ProEdge sales data. Stevon builds Tuesday's deck from it Monday at 9 pm; say "@stevon make the deck now" to get it sooner.`);
         }
       } catch (e) { await this.send(`I couldn't take ${name}: ${(e as Error).message}`); }
       return;
