@@ -156,7 +156,7 @@ export function tableText(t: ReportTable): string {
   // so they can't be taken for his; his are in the table salesEfficiency() puts above this.
   const phil = !!salesEfficiency(t);
   const label = (k: string, c: { main?: string; second?: string }) => {
-    if (phil && k === "Close count") return `Sold ${c.main ?? "–"}${c.second ? ` [the report's Close % = sold ÷ demos ${c.second}: NOT Phil's close rate, which is close to issue, in the table above]` : ""}`;
+    if (phil && k === "Close count") return `Sold ${c.main ?? "–"}${c.second ? ` [the report's Close % = sold ÷ demos ${c.second}: NOT Phil's close rate, which is close to issue (sold ÷ net issued), in the table above]` : ""}`;
     if (phil && /^NSLI/i.test(k)) return `${k} (the report's, leaves pre-net out: NOT Phil's NSLI) ${c.main ?? "–"}${c.second ? ` [${c.second}]` : ""}`;
     return `${k} ${c.main ?? "–"}${c.second ? ` [${c.second}]` : ""}`;
   };
@@ -171,7 +171,7 @@ export function tableText(t: ReportTable): string {
 /**
  * Phil's numbers from Sales Efficiency by Sales Rep (his definitions, Nov 16 2026), worked out by HQ rather than by an
  * agent reading columns:
- *   close to issue = Close count ÷ Iss (Marino 7 ÷ 14 = 50%); the report's own Close % is close to demo, not used
+ *   close to issue = Close count ÷ Net Iss/opp (Phil, Nov 21: on net issued); the report's own Close % is close to demo, not used
  *   demo rate      = the report's Sit / demo % (demos ÷ net issued)
  *   NSLI           = (Net $ + 70% of Pre-net $) ÷ Iss. Not the report's own NSLI column, which leaves pre-net out
  *                    (Phil, Nov 16: "technically incorrect for our NSLI because it doesn't include the pre-net")
@@ -184,13 +184,13 @@ export function salesEfficiency(t: ReportTable): string | undefined {
   const head = "| Rep | Issued | Sold | Close to issue | Demo rate | NSLI (net + 70% of pre-net, ÷ issued) | Cancels | Cancel rate | Pending (pre-net) | Net | Projected net (net + 70% of pre-net) |\n|---|---|---|---|---|---|---|---|---|---|---|";
   const row = (r: ReportRow) => {
     const c = r.cells;
-    const iss = num(c.Iss?.main), sold = num(c["Close count"]?.main), cancels = num(c["Cancelled count"]?.main);
+    const iss = num(c.Iss?.main), netIss = num(c["Net Iss/opp"]?.main), sold = num(c["Close count"]?.main), cancels = num(c["Cancelled count"]?.main);
     const net = num(c["Net $"]?.main), pre = num(c["Pre-net $"]?.main), preN = num(c["Pre-net count"]?.main);
     const projected = net + 0.7 * pre;
     const nsli = iss ? `${money(projected / iss)}` : "n/a";
     const demo = c["Sit / demo"]?.second ?? (c["Net Iss/opp"]?.main ? pct(num(c["Sit / demo"]?.main), num(c["Net Iss/opp"]?.main)) : "n/a");
-    return `| ${r.total ? "**Team**" : r.name} | ${iss} | ${sold} | ${pct(sold, iss)} (${sold} ÷ ${iss}) | ${demo} (${num(c["Sit / demo"]?.main)} demo${num(c["Sit / demo"]?.main) === 1 ? "" : "s"}) | ${nsli} | ${cancels} | ${sold ? pct(cancels, sold) : "n/a"} | ${preN} · ${money(pre)} | ${money(net)} | ${money(projected)} |`;
+    return `| ${r.total ? "**Team**" : r.name} | ${iss} | ${sold} | ${pct(sold, netIss)} (${sold} ÷ ${netIss} net issued) | ${demo} (${num(c["Sit / demo"]?.main)} demo${num(c["Sit / demo"]?.main) === 1 ? "" : "s"}) | ${nsli} | ${cancels} | ${sold ? pct(cancels, sold) : "n/a"} | ${preN} · ${money(pre)} | ${money(net)} | ${money(projected)} |`;
   };
   const total = t.rows.find((r) => r.total);
-  return [`Phil's numbers, worked out by HQ from the report (close to issue = sold ÷ issued; demo rate = the report's Sit / demo %; NSLI = (net + 70% of pre-net) ÷ issued, not the report's own NSLI column, which leaves pre-net out; cancel rate = cancelled ÷ sold, credit declines not counted; pending = pre-net, ~70% of which goes net). Use these numbers as they are:`, head, ...(total ? [row(total)] : []), ...t.rows.filter((r) => !r.total).map(row)].join("\n");
+  return [`Phil's numbers, worked out by HQ from the report (close to issue = sold ÷ net issued; demo rate = the report's Sit / demo %; NSLI = (net + 70% of pre-net) ÷ issued, not the report's own NSLI column, which leaves pre-net out; cancel rate = cancelled ÷ sold, credit declines not counted; pending = pre-net, ~70% of which goes net). Use these numbers as they are:`, head, ...(total ? [row(total)] : []), ...t.rows.filter((r) => !r.total).map(row)].join("\n");
 }

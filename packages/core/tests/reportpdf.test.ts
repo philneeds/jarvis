@@ -68,17 +68,47 @@ test("each number lands in the column it sits under, blanks stay blank, and Phil
   assert.equal(t.rows[2]!.total, true);
   const text = tableText(t);
   // The report's own Close % (sold ÷ demos) and NSLI are labelled as not Phil's, so they can't end up on a slide (Nov 21).
-  assert.match(text, /^Lane, Avery: Iss 14 · Net Iss\/opp 13 \[93%\] · Sit \/ demo 10 \[77%\] · Sold 7 \[the report's Close % = sold ÷ demos 70%: NOT Phil's close rate, which is close to issue, in the table above\] · Close \$ 110,000 \[15,714\]/m);
+  assert.match(text, /^Lane, Avery: Iss 14 · Net Iss\/opp 13 \[93%\] · Sit \/ demo 10 \[77%\] · Sold 7 \[the report's Close % = sold ÷ demos 70%: NOT Phil's close rate, which is close to issue \(sold ÷ net issued\), in the table above\] · Close \$ 110,000 \[15,714\]/m);
   assert.match(text, /NSLI \/ NCP \(the report's, leaves pre-net out: NOT Phil's NSLI\) 2,143/);
   const nums = salesEfficiency(t)!;
-  // close to issue 7 ÷ 14; demo rate the report's 77%; NSLI (30,000 + 0.7 × 20,000) ÷ 14 = 3,143; cancels 4 ÷ 7; credit declines not cancels.
-  assert.match(nums, /\| Lane, Avery \| 14 \| 7 \| 50\.0% \(7 ÷ 14\) \| 77% \(10 demos\) \| \$3,143 \| 4 \| 57\.1% \| 1 · \$20,000 \| \$30,000 \| \$44,000 \|/);
-  assert.match(nums, /\| Quill, Morgan \| 8 \| 1 \| 12\.5% \(1 ÷ 8\) \| 75% \(6 demos\) \| \$0 \| 0 \| 0\.0% \| 0 · \$0 \| \$0 \| \$0 \|/);
-  assert.match(nums, /\| \*\*Team\*\* \| 22 \| 8 \| 36\.4% \(8 ÷ 22\) \| 76% \(16 demos\) \| \$2,000 \| 4 \| 50\.0% \| 1 · \$20,000 \| \$30,000 \| \$44,000 \|/);
+  // close to issue 7 ÷ 13 net issued (Phil, Nov 21: on net issued); demo rate the report's 77%; NSLI (30,000 + 0.7 × 20,000) ÷ 14 = 3,143; cancels 4 ÷ 7; credit declines not cancels.
+  assert.match(nums, /\| Lane, Avery \| 14 \| 7 \| 53\.8% \(7 ÷ 13 net issued\) \| 77% \(10 demos\) \| \$3,143 \| 4 \| 57\.1% \| 1 · \$20,000 \| \$30,000 \| \$44,000 \|/);
+  assert.match(nums, /\| Quill, Morgan \| 8 \| 1 \| 12\.5% \(1 ÷ 8 net issued\) \| 75% \(6 demos\) \| \$0 \| 0 \| 0\.0% \| 0 · \$0 \| \$0 \| \$0 \|/);
+  assert.match(nums, /\| \*\*Team\*\* \| 22 \| 8 \| 38\.1% \(8 ÷ 21 net issued\) \| 76% \(16 demos\) \| \$2,000 \| 4 \| 50\.0% \| 1 · \$20,000 \| \$30,000 \| \$44,000 \|/);
   assert.doesNotMatch(nums, /\$1,364/, "the report's own NSLI (no pre-net) isn't used");
+  // The same report as numbers HQ writes onto a deck: {{codes}} filled from it, with Phil's formulas.
+  const { salesRows, fillNumbers } = await import("../src/salesnumbers.js");
+  const sr = salesRows(t)!;
+  const week = { start: "11/09/2026", end: "11/15/2026", at: "x", ...sr };
+  const prior = { ...week, start: "11/02/2026", end: "11/08/2026", team: { ...sr.team!, sold: 4 } };
+  const f = (s: string) => fillNumbers(s, { week, prior });
+  assert.deepEqual(f("Close {{close}} · demo {{demo|0}} · NSLI {{nsli}} · {{gross}} · {{week}} vs {{prior.week}} ({{prior.close}})"), { text: "Close 38.1% · demo 76% · NSLI $2,000 · $150,000 · 11/09–11/15 vs 11/02–11/08 (19.0%)", errors: [] });
+  assert.equal(f("{{rep:Lane.close}} {{rep:quill.demos}}").text, "53.8% 6");
+  assert.equal(f("1. {{top.close.1.rep}} {{top.close.1}} · 2. {{top.close.2.rep}} {{top.close.2}}").text, "1. Lane, Avery 53.8% · 2. Quill, Morgan 12.5%");
+  assert.equal(f("{{top.close.3.rep}}").text, "", "past the end of the board: blank");
+  const bad = f("{{rep:Nobody.close}} {{closing}}");
+  assert.equal(bad.errors.length, 2);
+  assert.match(bad.errors[0]!, /no rep "Nobody" in the 11\/09–11\/15 report \(reps: Lane, Avery; Quill, Morgan\)/);
+  assert.match(bad.errors[1]!, /no figure called "closing"/);
+  assert.match(fillNumbers("{{prior.close}}", { week }).errors[0]!, /no lp_report pull of Sales Efficiency for the week before/);
 });
 
 test("a PDF that isn't a column report reads as nothing here, so the plain text is used", async () => {
   assert.equal(await pdfTable(pdfAt([[["Just a letter", 72, 100], ["with two lines", 72, 120]]])), undefined);
   assert.equal(await pdfTable(Buffer.from("not a pdf")), undefined);
+});
+
+test("a deck's two weeks: the newest team-wide pull and the one before it, or the dates the deck names", async () => {
+  const { memoryStore, saveSalesPull, pullsFor } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const p = (start: string, end: string, extra = {}) => ({ start, end, at: new Date().toISOString(), reps: [], ...extra });
+  await saveSalesPull(store, p("11/02/2026", "11/08/2026"));
+  await saveSalesPull(store, p("11/09/2026", "11/15/2026"));
+  await saveSalesPull(store, p("11/09/2026", "11/15/2026", { market: "NYW" }));
+  await saveSalesPull(store, p("10/26/2026", "11/01/2026"));
+  const d = await pullsFor(store);
+  assert.equal(`${d.week?.start} ${d.week?.market ?? ""}`, "11/09/2026 ", "the newest team-wide week, not one market");
+  assert.equal(d.prior?.start, "11/02/2026", "and the week right before it");
+  const named = await pullsFor(store, { week: "11/02/2026-11/08/2026", prior: "10/26/2026 - 11/01/2026" });
+  assert.equal(named.week?.start, "11/02/2026"); assert.equal(named.prior?.start, "10/26/2026");
 });

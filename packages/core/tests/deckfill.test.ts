@@ -64,7 +64,7 @@ test("a deckfill block in an agent's reply becomes the filled-in deck in chat", 
   const chat = await store.chat.list(10);
   // The same edits came back on the check pass (the stand-in model can't do better), so Phil gets that deck with its
   // problems named: the edit that missed and the template numbers left as they were.
-  const msg = chat.find((m) => /Deck ready: ProEdge weekly sales · your template with 1 change\. Check before using it: 1 edit didn't match and weren't made: slide 2 "Nope"\. 3 paragraphs still carry the template's own numbers, unchanged: slide 1 \[2\] "Week of 11\/02 & 11\/08"; slide 2 \[2\] "NSLI \$1,900"; slide 2 \[4\] "40%"/.test(m.text));
+  const msg = chat.find((m) => /Deck ready: ProEdge weekly sales · your template with 1 change\. Check before using it: 1 edit types a sales figure by hand instead of a \{\{code\}\}: slide 2 "Close rate: 17\.5%"\. 1 edit didn't match and weren't made: slide 2 "Nope"\. 3 paragraphs still carry the template's own numbers, unchanged: slide 1 \[2\] "Week of 11\/02 & 11\/08"; slide 2 \[2\] "NSLI \$1,900"; slide 2 \[4\] "40%"/.test(m.text));
   assert.ok(msg?.files?.length, "the file is handed over in chat");
   assert.deepEqual(extractBlocks("```deckfill\n{\"edits\":[]}\n```").fills.length, 1);
   assert.equal(normalizeFill({ edits: [] }), undefined);
@@ -172,7 +172,10 @@ test("a deck with template numbers left over is checked before Phil sees it: the
   const provider = mockProvider("m");
   const prompts: string[] = [];
   const first = { title: "ProEdge weekly sales", edits: [{ slide: 2, para: 1, text: "Close rate: 23.8%" }] };
-  const fixed = { title: "ProEdge weekly sales", edits: [{ slide: 1, para: 2, text: "Week of 11/09 & 11/15" }, { slide: 2, para: 1, text: "Close rate: 23.8%" }, { slide: 2, para: 2, text: "NSLI $3,566" }, { slide: 2, para: 4, text: "50%" }] };
+  const fixed = { title: "ProEdge weekly sales", edits: [{ slide: 1, para: 2, text: "Week of {{week}}" }, { slide: 2, para: 1, text: "Close rate: {{close}}" }, { slide: 2, para: 2, text: "NSLI {{nsli}}" }, { slide: 2, para: 4, text: "{{rep:Marino.close}}" }] };
+  const { saveSalesPull } = await import("../src/index.js");
+  const row = (rep: string, issued: number, netIssued: number, demos: number, sold: number) => ({ rep, issued, netIssued, demos, sold, gross: sold * 26_000, cancels: 0, declines: 0, preCount: 0, pre: 0, net: sold * 20_000 });
+  await saveSalesPull(store, { start: "11/09/2026", end: "11/15/2026", at: "x", team: row("Team", 101, 95, 69, 24), reps: [row("Marino, Phil", 10, 10, 8, 5), row("Shehadeh, Tarek", 20, 19, 15, 6)] });
   provider.run = async (req) => { prompts.push(req.prompt); const again = /HQ built your deck/.test(req.prompt); return { text: `${again ? "Fixed." : "Here's the deck: close 23.8%."}\n\n\`\`\`deckfill\n${JSON.stringify(again ? fixed : first)}\n\`\`\``, provider: "m", modelId: "m", inputTokens: 1, outputTokens: 1, costUsd: 0, durationMs: 1 }; };
   const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [provider], grok: [provider] } }) });
   const { getAgent } = await import("../src/index.js");
@@ -184,11 +187,14 @@ test("a deck with template numbers left over is checked before Phil sees it: the
   const ready = (await store.chat.list(20)).filter((m) => /^Deck ready:/.test(m.text));
   assert.equal(ready.length, 1, "Phil gets one deck: the corrected one");
   assert.match(ready[0]!.text, /your template with 4 changes\.$/, "and it's clean");
+  const { deckListing, deckFile, listDecks } = await import("../src/index.js");
+  const built = await deckFile(store, (await listDecks(store, "proedge"))[0]!.id);
+  assert.match(await deckListing(built!.data), /Slide 1: \[1\] ProEdge Weekly Sales  \[2\] Week of 11\/09–11\/15\nSlide 2: \[1\] Close rate: 25\.3%  \[2\] NSLI \$4,752  \[3\] Marino  \[4\] 50\.0%/, "HQ wrote the numbers: 24 ÷ 95 net issued; (24 × 20,000) ÷ 101");
   assert.match(r.text, /HQ checked the deck before it went to you and Stevon corrected it/);
   // Stevon can read the last deck back himself.
   const { SALES_TOOLS } = await import("../src/salesdata.js").then((m) => ({ SALES_TOOLS: Object.values(m).find((v) => Array.isArray(v) && (v as { name?: string }[]).some((t) => t?.name === "deck_last")) as { name: string; handler: (a: unknown, c: unknown) => Promise<string> }[] }));
   const out = await SALES_TOOLS.find((t) => t.name === "deck_last")!.handler({}, { store, agentId: "stevon" });
-  assert.match(out, /Slide 1: \[1\] ProEdge Weekly Sales  \[2\] Week of 11\/09 & 11\/15/);
+  assert.match(out, /Slide 1: \[1\] ProEdge Weekly Sales  \[2\] Week of 11\/09–11\/15/);
 });
 
 test("a slide with a chart is named: its numbers can't be changed by an edit", async () => {
@@ -198,7 +204,8 @@ test("a slide with a chart is named: its numbers can't be changed by an edit", a
   await setTemplate(store, "proedge", "Weekly Sales.pptx", await zip.generateAsync({ type: "nodebuffer" }));
   const f = await fillTemplate(store, { edits: [{ slide: 1, para: 2, text: "Week of 11/09 & 11/15" }, { slide: 2, para: 1, text: "Close rate: 23.8%" }, { slide: 2, para: 2, text: "NSLI $3,566" }, { slide: 2, para: 4, text: "50%" }] }, { agentId: "stevon", venture: "proedge" });
   assert.deepEqual(f.stale, []);
+  assert.equal(f.typed.length, 3, "a $ or % typed by hand is flagged");
   assert.deepEqual(f.charts, [2]);
   const { fillProblems } = await import("../src/index.js");
-  assert.match(fillProblems(f) ?? "", /^slide 2 has a chart: HQ can't change a chart's numbers, so it still shows the template's$/);
+  assert.match(fillProblems(f) ?? "", /slide 2 has a chart: HQ can't change a chart's numbers, so it still shows the template's$/);
 });
