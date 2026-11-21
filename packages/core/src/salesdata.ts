@@ -139,6 +139,20 @@ export const DATA_TOOLS: ToolDef[] = [
     },
   }),
   defineTool({
+    name: "deck_last",
+    description: "The last deck HQ built for your venture, read back slide by slide as it is now (numbered paragraphs, as in the template listing), with any template numbers left unchanged and the slides that hold charts. Use it to check a deck against the report.",
+    schema: {},
+    async handler(_a, { store, agentId }) {
+      const v = getAgent(agentId)?.venture ?? "proedge";
+      const d = (await listDecks(store, v))[0];
+      if (!d) return "No deck has been built for this venture yet.";
+      const { deckFile, deckListing } = await import("./decks.js");
+      const f = await deckFile(store, d.id);
+      if (!f) return `The last deck, "${d.title}" (${d.at.slice(0, 10)}), isn't on the server any more.`;
+      return `"${d.title}", built ${d.at.slice(0, 16).replace("T", " ")} UTC, ${d.slides} slides:\n${await deckListing(f.data)}`;
+    },
+  }),
+  defineTool({
     name: "deck_template",
     description: "Phil's presentation template for your venture (slide order and section names to follow), and the last decks made.",
     schema: {},

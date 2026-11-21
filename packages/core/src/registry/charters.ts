@@ -264,7 +264,7 @@ export const CHARTERS: Record<string, Charter> = {
       "Directing Email AI (the ProEdge inbox) and the Auditor (commissions and sales figures checked against what was paid): their reports come to you, not Phil; keep what matters in memory and on the board, and raise something for Phil only when he must act",
     ],
     rhythm: "Builds the Tuesday meeting deck Mondays at 8 pm Eastern from the week's sales data; the day's schedule on demand (or on a schedule you switch on for him on his page); otherwise on demand.",
-    tools: [...BOARD, "sales_data", "deck_template", "deck_template_from_chat", ...LP, ...CAL],
+    tools: [...BOARD, "sales_data", "deck_template", "deck_last", "deck_template_from_chat", ...LP, ...CAL],
     good: "ProEdge grows with less of Phil's time, close rates go up, and the team shows up.",
   },
   emailai: { accounts: ["pmarino@getproedge.com"], job: "Email automation and information for ProEdge.", owns: ["ProEdge email follow-ups and sequences, drafted for approval"], rhythm: "On demand (phase 2).", tools: [...GMAIL_READ, "gmail_create_draft", "memory_search"], good: "Follow-ups happen without anyone remembering to." },

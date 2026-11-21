@@ -27,7 +27,7 @@ import { GLASSES_HINT } from "../glasses.js";
 import { LOOKUP_TOOLS } from "../lookup.js";
 import { INSTAGRAM_LINE, VideoAnalyzer, videoCaps, videoLogLine, videoRefs, videoText, videoTools, withoutInstagramLinks, type VideoDeps, type VideoRef } from "../video.js";
 import { Secrets } from "../secrets.js";
-import { DECK_HINT, makeDeck, fillTemplate, normalizeFill, normalizeDeck, deckFolderName, type Deck } from "../decks.js";
+import { DECK_HINT, makeDeck, fillTemplate, fillProblems, deckListing, normalizeFill, normalizeDeck, deckFolderName, type Deck } from "../decks.js";
 import { GUARDRAIL_FILES, HELD_FOR_UPDATE, WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
 import { HeldJobs, deployPending, heldLine, type HeldJob } from "../deployhold.js";
 import { NOT_PLACED } from "../hyperliquid-trade.js";
@@ -798,7 +798,7 @@ export class Jarvis {
   }
 
   /** Run one agent on a task with its persona, memory and safety rules; queue approvals and memories it emits. */
-  async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string; depth?: number; noBlocks?: boolean; /** A held job being started again (resumeHeldJobs). */ heldId?: string } = {}) {
+  async runAgent(agent: AgentDef, task: string, opts: { direct?: boolean; parentRunId?: string; from?: string; depth?: number; noBlocks?: boolean; /** A held job being started again (resumeHeldJobs). */ heldId?: string; /** HQ's one correction pass on a deck it just checked: no second pass. */ deckCheck?: boolean } = {}) {
     if (agent.venture === "money") await this.refreshHoldings();
     const memory = [...(await this.store.memory.list("phil")), ...(await this.store.memory.list(`venture:${agent.venture}`)), ...(await this.store.memory.list(`agent:${agent.id}`))];
     const cfg = await getAgentConfig(this.store, agent.id);
@@ -878,8 +878,27 @@ export class Jarvis {
       if (!spec) { text += "\n\n(A template fill was written but had no usable edits, so no file was made.)"; continue; }
       try {
         const f = await fillTemplate(this.store, spec, { agentId: agent.id, venture: agent.venture });
+        const problems = fillProblems(f);
+        // Checked before Phil sees it (Nov 21, "the slides don't match the report"): an edit that missed or a template
+        // number left unchanged gets the agent one pass to fix, with the deck read back to him; the corrected deck is
+        // the one Phil gets. Charts alone can't be fixed by an edit, so they're only reported.
+        if (problems && !opts.deckCheck && (f.missed.length || f.stale.length) && (opts.depth ?? 0) < 2) {
+          const { deckFile } = await import("../decks.js");
+          const built = await deckFile(this.store, f.deck.id);
+          const listing = built ? await deckListing(built.data) : "(couldn't be read back)";
+          await this.router.log(agent.id, "system", `${agent.name}'s deck "${f.deck.title}" checked before it went to Phil: ${problems.slice(0, 300)}; one correction pass`, r.runId);
+          const fix = await this.runAgent(agent, [
+            `HQ built your deck "${f.deck.title}" from your deckfill and checked it before it goes to Phil. It isn't right yet: ${problems}.`,
+            `Send ONE new deckfill block with the COMPLETE edit list: everything from your last one that was right, plus a fix for each problem above (same template numbering; "para" for tables and boards). Every number on every slide must come from your report pull: change each template figure listed above to this week's, or, if one is genuinely still right (a target, a fixed label), say which in one line. Re-pull with your tools if you need a number you don't have. No other blocks.`,
+            `Your answer when you built it (your numbers are in here):\n${r.text.slice(0, 12_000)}`,
+            `The edits you sent:\n${JSON.stringify(spec.edits).slice(0, 30_000)}`,
+            `The deck as it reads now:\n${listing}`,
+          ].join("\n\n"), { direct: opts.direct, from: "HQ (deck check)", depth: (opts.depth ?? 0) + 1, deckCheck: true, parentRunId: r.runId });
+          if (!fix.blocked && /\[Deck ready:/.test(fix.text)) { decks.push(f.deck); text += `\n\n(HQ checked the deck before it went to you and ${agent.name} corrected it; the corrected one is above.)`; continue; }
+          await this.router.log(agent.id, "system", `${agent.name}'s correction pass made no deck${fix.blocked ? ` (${fix.blocked})` : ""}; the first one goes to Phil with its problems named`, r.runId);
+        }
         decks.push(f.deck);
-        const miss = f.missed.length ? ` ${f.missed.length} change${f.missed.length === 1 ? "" : "s"} didn't match the template and weren't made: ${f.missed.slice(0, 8).map((m) => `slide ${m.slide} ${m.para ? `paragraph ${m.para}` : `"${(m.find ?? "").slice(0, 40)}"`}`).join("; ")}.` : "";
+        const miss = problems ? ` Check before using it: ${problems}.` : "";
         await this.router.log(agent.id, "system", `${agent.name} filled in the template: ${f.deck.title} (${f.done} changes)${miss}`, r.runId);
         // It goes straight into Phil's Google Drive, in the venture's own deck folder, as Google Slides. The .pptx is
         // handed over in chat only when Drive isn't there to take it.

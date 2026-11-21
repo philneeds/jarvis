@@ -32,7 +32,7 @@ export const DECK_HINT = [
   '{"title":"...","subtitle":"...","slides":[{"title":"...","stats":[{"label":"Revenue","value":"$42,300","change":"+12% vs last week"}],"chart":{"type":"bar|line|pie","title":"...","labels":["Mon","Tue"],"series":[{"name":"Sales","values":[1200,900]}]},"table":{"columns":["Rep","Closed"],"rows":[["Ana",5]]},"bullets":["..."],"notes":"what to say on this slide"}]}',
   "Every slide needs a title; use at most one of chart or table per slide, up to 4 stats, up to 6 short bullets, up to 12 table rows. Numbers in charts are plain numbers. Use only figures from the data; never invent one. HQ builds the file and sends it to Phil; outside the block, reply with the three headlines in a few lines.",
   "If a template exists (deck_template), follow its slide order and section names.",
-  'When Phil wants HIS template filled in (his own slides, look and logos kept), write a fenced block tagged "deckfill" instead: {"title":"ProEdge weekly sales 11/09-11/15","edits":[{"slide":2,"find":"Close rate 15%","replace":"Close rate 17.5%"},{"slide":10,"para":3,"text":"Shehadeh, Tarek"},{"slide":10,"para":4,"text":"~30%"}]}. deck_template numbers every paragraph on every slide. For tables, leaderboards and anything that repeats (names, percentages), point at the paragraph by its number with "para" and give its whole new "text"; rewrite a board row by row in order, and give "text":"" to blank a row that has no one now. Elsewhere you can quote text with "find" and give its "replace". Change every number, date and name that the new data changes; leave the rest. Charts in the template aren\'t changed: say which ones need updating by hand. HQ reports any edit that didn\'t match, and when Google is connected saves the result straight into Phil\'s Google Drive as Google Slides, in the venture\'s deck folder ("ProEdge decks"), and posts where it went (or, if Drive refuses, attaches the .pptx and says why): say HQ is saving it to his Drive, not that it is there, and don\'t say you can\'t give him a link.',
+  'When Phil wants HIS template filled in (his own slides, look and logos kept), write a fenced block tagged "deckfill" instead: {"title":"ProEdge weekly sales 11/09-11/15","edits":[{"slide":2,"find":"Close rate 15%","replace":"Close rate 17.5%"},{"slide":10,"para":3,"text":"Shehadeh, Tarek"},{"slide":10,"para":4,"text":"~30%"}]}. deck_template numbers every paragraph on every slide. For tables, leaderboards and anything that repeats (names, percentages), point at the paragraph by its number with "para" and give its whole new "text"; rewrite a board row by row in order, and give "text":"" to blank a row that has no one now. Elsewhere you can quote text with "find" and give its "replace". Change every number, date and name that the new data changes; leave the rest. Charts in the template aren\'t changed: say which ones need updating by hand. HQ reports any edit that didn\'t match, and when Google is connected saves the result straight into Phil\'s Google Drive as Google Slides, in the venture\'s deck folder ("ProEdge decks"), and posts where it went (or, if Drive refuses, attaches the .pptx and says why): say HQ is saving it to his Drive, not that it is there, and don\'t say you can\'t give him a link. HQ checks every deck before Phil gets it: an edit that missed, or a template number left unchanged, comes back to you once to fix. To check a deck against the report yourself, deck_last reads the last one back slide by slide (no Drive needed).',
 ].join("\n");
 
 const hex = (c: string | undefined, d: string) => (c && /^[0-9a-f]{6}$/i.test(c) ? c.toUpperCase() : d);
@@ -173,7 +173,36 @@ export async function templateListing(store: Store, venture: string): Promise<st
  * that doesn't match is reported back, never guessed. Charts aren't changed (their numbers live in an embedded
  * spreadsheet), and neither are drawn shapes such as bar lengths.
  */
-export async function fillTemplate(store: Store, spec: { title?: string; edits: FillEdit[] }, by: { agentId: string; venture: string }): Promise<{ deck: Deck; missed: FillEdit[]; done: number }> {
+/** A template paragraph with a number in it that no edit changed: the template's old figure, still on the slide. */
+export interface StaleCell { slide: number; para: number; text: string }
+export interface FillResult { deck: Deck; missed: FillEdit[]; done: number; stale: StaleCell[]; charts: number[] }
+
+/** The slides (numbered from 1) that hold a chart: its numbers live in an embedded spreadsheet HQ doesn't change. */
+async function chartSlides(zip: JSZip, slides: string[]): Promise<number[]> {
+  const out: number[] = [];
+  for (const [i, path] of slides.entries()) {
+    const rels = zip.file(path.replace(/slides\/(slide\d+\.xml)$/, "slides/_rels/$1.rels"));
+    if (rels && /relationships\/chart"/.test(await rels.async("string"))) out.push(i + 1);
+  }
+  return out;
+}
+
+/** A built deck, read back: every slide's paragraphs, numbered as in the template listing. */
+export async function deckListing(buf: Buffer): Promise<string> {
+  const slides = await slideParagraphs(buf);
+  return slides.map((ps, i) => `Slide ${i + 1}: ${ps.length ? ps.map((p, n) => `[${n + 1}] ${p.slice(0, 200)}`).join("  ") : "(no text)"}`).join("\n").slice(0, 40_000);
+}
+
+/** What the check after a fill says, or nothing when the deck is clean: edits that missed, old numbers left, charts. */
+export function fillProblems(f: Pick<FillResult, "missed" | "stale" | "charts">): string | undefined {
+  const parts: string[] = [];
+  if (f.missed.length) parts.push(`${f.missed.length} edit${f.missed.length === 1 ? "" : "s"} didn't match and weren't made: ${f.missed.slice(0, 12).map((m) => `slide ${m.slide} ${m.para ? `[${m.para}]` : `"${(m.find ?? "").slice(0, 40)}"`}`).join("; ")}`);
+  if (f.stale.length) parts.push(`${f.stale.length} paragraph${f.stale.length === 1 ? " still carries" : "s still carry"} the template's own numbers, unchanged: ${f.stale.slice(0, 25).map((c) => `slide ${c.slide} [${c.para}] "${c.text.slice(0, 60)}"`).join("; ")}`);
+  if (f.charts.length) parts.push(`slide${f.charts.length === 1 ? "" : "s"} ${f.charts.join(", ")} ${f.charts.length === 1 ? "has a chart" : "have charts"}: HQ can't change a chart's numbers, so ${f.charts.length === 1 ? "it still shows" : "they still show"} the template's`);
+  return parts.length ? parts.join(". ") : undefined;
+}
+
+export async function fillTemplate(store: Store, spec: { title?: string; edits: FillEdit[] }, by: { agentId: string; venture: string }): Promise<FillResult> {
   const tpl = await getTemplate(store, by.venture);
   if (!tpl) throw new Error("there's no template to fill; Phil uploads one on the agent's page");
   const file = await loadFile(tpl.fileId);
@@ -181,6 +210,7 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
   const zip = await JSZip.loadAsync(file.data);
   const slides = slideFiles(zip);
   const missed: FillEdit[] = [];
+  const stale: StaleCell[] = [];
   let done = 0;
   // Edits are worked out against the template as it is (so numbering never shifts as earlier edits land), then
   // written in, last paragraph first.
@@ -219,6 +249,17 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
     }
     zip.file(path, s);
   }
+  // Every numbered paragraph no edit changed, on every slide: Phil's check is "do the slides match the report", and a
+  // figure left from the template is the usual way they don't (Nov 21).
+  const tplZip = await JSZip.loadAsync(file.data);
+  for (const [k, path] of slides.entries()) {
+    const n = k + 1;
+    const paras = paragraphs(await zip.file(path)!.async("string")).filter((p) => p.text.trim());
+    const edited = new Set((bySlide.get(n) ?? []).filter((e) => !missed.includes(e)).map((e) => e.para));
+    const tplParas = paragraphs(await tplZip.file(path)!.async("string")).filter((p) => p.text.trim());
+    tplParas.forEach((p, i) => { if (/\d/.test(p.text) && paras[i]?.text === p.text && !edited.has(i + 1)) stale.push({ slide: n, para: i + 1, text: p.text.trim() }); });
+  }
+  const charts = await chartSlides(zip, slides);
   missed.sort((a, b) => spec.edits.indexOf(a) - spec.edits.indexOf(b));
   const out = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
   const fileId = await saveFile(out, "pptx");
@@ -227,7 +268,7 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
   const deck: Deck = { id: randomUUID(), fileId, name: `${title.replace(/[^\w\s.-]+/g, "").replace(/\s+/g, " ").trim().slice(0, 60) || "Deck"} ${day}.pptx`, title, agentId: by.agentId, venture: by.venture, at: new Date().toISOString(), slides: slides.length };
   const all = await store.settings.get<Deck[]>(DECKS_KEY, []);
   await store.settings.set(DECKS_KEY, [...all, deck].slice(-60));
-  return { deck, missed, done };
+  return { deck, missed, done, stale, charts };
 }
 
 /** Tidy an agent's deckfill block. */
