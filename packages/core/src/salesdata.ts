@@ -141,8 +141,8 @@ export const DATA_TOOLS: ToolDef[] = [
   defineTool({
     name: "deck_period",
     description: "The dates the sales meeting deck covers, worked out by HQ: month to date (the 1st through today) and the period to compare with, plus the \"numbers\" line for the deckfill. Call it before lp_report whenever you build or rebuild the deck.",
-    schema: {},
-    async handler() { const { deckPeriodText } = await import("./salesnumbers.js"); return deckPeriodText(); },
+    schema: { through: z.string().max(12).optional().describe("the last day, MM/DD/YYYY, only when Phil names one (\"through 11/15\"); otherwise leave it out") },
+    async handler({ through }) { const { deckPeriodText } = await import("./salesnumbers.js"); return deckPeriodText(new Date(), through); },
   }),
   defineTool({
     name: "deck_last",

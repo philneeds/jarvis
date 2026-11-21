@@ -183,6 +183,8 @@ export interface FillResult {
   codeErrors: string[];
   /** Edits that type a sales figure ($ or %) by hand instead of a code. */
   typed: { slide: number; para?: number; text: string }[];
+  /** Figures HQ filled from codes the template itself carries. */
+  coded: number;
 }
 /**
  * A paragraph that holds a figure that changes week to week: a dollar amount, a percentage, a decimal, a number in
@@ -236,7 +238,7 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
   const stale: StaleCell[] = [];
   const codeErrors: string[] = [];
   const typed: FillResult["typed"] = [];
-  let done = 0;
+  let done = 0, coded = 0;
   // Numbers come from HQ, not the agent: each {{code}} is filled from the report pulls (salesnumbers.ts). An edit with
   // a code that can't be filled isn't made (a wrong or blank figure on a slide is worse than the old one, flagged).
   const pulls = spec.edits.some((e) => /\{\{/.test(`${e.text ?? ""}${e.replace ?? ""}`)) ? await pullsFor(store, spec.numbers) : {};
@@ -254,13 +256,34 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
   // written in, last paragraph first.
   const bySlide = new Map<number, FillEdit[]>();
   for (const e of spec.edits.slice(0, 600)) { if (!slides[e.slide - 1]) { missed.push(e); continue; } bySlide.set(e.slide, [...(bySlide.get(e.slide) ?? []), e]); }
-  for (const [n, edits] of bySlide) {
-    const path = slides[n - 1]!;
-    const xml = await zip.file(path)!.async("string");
+  const allPulls = await pullsFor(store, spec.numbers);
+  for (const [k, path] of slides.entries()) {
+    const n = k + 1, edits = bySlide.get(n) ?? [];
+    let xml = await zip.file(path)!.async("string");
+    // A template that carries its own codes ("{{close}}" in a cell, put there once) needs no edit for its numbers:
+    // HQ fills every one, in place, so a figure keeps the formatting of the run it sits in. This is how a deck's
+    // numbers stay right without a model placing them (Phil, Nov 21: "its still messing it up").
+    if (/\{\{/.test(xml)) {
+      xml = xml.replace(/(<a:t(?: [^>]*)?>)([^<]*)(<\/a:t>)/g, (m0, open: string, t: string, close: string) => {
+        if (!/\{\{[^{}]*\}\}/.test(t)) return m0;
+        const r = fillNumbers(decode(t), allPulls);
+        if (r.errors.length) codeErrors.push(...r.errors.map((x) => `slide ${n}: ${x}`));
+        coded += (t.match(/\{\{[^{}]*\}\}/g) ?? []).length - r.errors.length;
+        return `${open}${encode(r.text)}${close}`;
+      });
+    }
     const paras = paragraphs(xml);
     const withText = paras.filter((p) => p.text.trim());
     const next = new Map<number, string>(); // index in paras → new text
     const textOf = (i: number) => next.get(i) ?? paras[i]!.text;
+    // A code PowerPoint split across two runs ("{{clo" + "se}}") is filled a paragraph at a time.
+    paras.forEach((p, i) => {
+      if (!/\{\{[^{}]*\}\}/.test(p.text)) return;
+      const r = fillNumbers(p.text, allPulls);
+      if (r.errors.length) { codeErrors.push(...r.errors.map((x) => `slide ${n}: ${x}`)); return; }
+      coded += (p.text.match(/\{\{[^{}]*\}\}/g) ?? []).length;
+      next.set(i, r.text);
+    });
     for (const e of edits) {
       let i = -1;
       if (e.para !== undefined) {
@@ -312,7 +335,7 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
     const own = t.para ? paragraphs(await tplZip.file(slides[t.slide - 1] ?? "")?.async("string") ?? "").filter((p) => p.text.trim())[t.para - 1]?.text.trim() : undefined;
     if (own === undefined || own !== t.text) typedNow.push(t);
   }
-  return { deck, missed, done, stale, charts, codeErrors, typed: typedNow };
+  return { deck, missed, done, stale, charts, codeErrors, typed: typedNow, coded };
 }
 
 /** Tidy an agent's deckfill block. */
@@ -332,7 +355,9 @@ export function normalizeFill(raw: unknown): { title?: string; edits: FillEdit[]
   const nb = (o.numbers ?? {}) as { week?: unknown; period?: unknown; prior?: unknown };
   const span = typeof nb.period === "string" ? nb.period : typeof nb.week === "string" ? nb.week : undefined;
   const numbers = span || typeof nb.prior === "string" ? { ...(span ? { period: span } : {}), ...(typeof nb.prior === "string" ? { prior: nb.prior } : {}) } : undefined;
-  return edits.length ? { title: typeof o.title === "string" ? o.title : undefined, edits, ...(numbers ? { numbers } : {}) } : undefined;
+  // No edits at all is still a deck when the list is there: a template that carries its own codes needs none.
+  // (A list whose every edit was broken is not that: it was meant to change something.)
+  return edits.length || (Array.isArray(o.edits) && o.edits.length === 0) ? { title: typeof o.title === "string" ? o.title : undefined, edits, ...(numbers ? { numbers } : {}) } : undefined;
 }
 
 /** Read a .pptx template: theme colours and fonts, slide size, and each slide's text in order. */

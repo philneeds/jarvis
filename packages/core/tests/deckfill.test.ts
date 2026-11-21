@@ -67,7 +67,8 @@ test("a deckfill block in an agent's reply becomes the filled-in deck in chat", 
   const msg = chat.find((m) => /Deck ready: ProEdge weekly sales · your template with 1 change\. Check before using it: 1 edit types a sales figure by hand instead of a \{\{code\}\}: slide 2 "Close rate: 17\.5%"\. 1 edit didn't match and weren't made: slide 2 "Nope"\. 3 paragraphs still carry the template's own numbers, unchanged: slide 1 \[2\] "Week of 11\/02 & 11\/08"; slide 2 \[2\] "NSLI \$1,900"; slide 2 \[4\] "40%"/.test(m.text));
   assert.ok(msg?.files?.length, "the file is handed over in chat");
   assert.deepEqual(extractBlocks("```deckfill\n{\"edits\":[]}\n```").fills.length, 1);
-  assert.equal(normalizeFill({ edits: [] }), undefined);
+  assert.deepEqual(normalizeFill({ edits: [] }), { title: undefined, edits: [] }, "no edits is still a deck: a template with its own codes needs none");
+  assert.equal(normalizeFill({ title: "x" }), undefined, "but a block with no edit list at all isn't one");
 });
 
 test("with Google connected, the filled-in deck goes straight into the venture's Drive folder, with no .pptx in chat", async () => {
@@ -218,4 +219,28 @@ test("only real figures count as stale: not row numbers or a year in a sentence;
   await setTemplate(store, "proedge", "Weekly Sales.pptx", await template());
   const f = await fillTemplate(store, { edits: [{ slide: 2, para: 4, text: "40%" }, { slide: 2, para: 2, text: "NSLI $2,000" }] }, { agentId: "stevon", venture: "proedge" });
   assert.deepEqual(f.typed.map((t) => t.text), ["NSLI $2,000"], "the 40% target kept as it was isn't flagged; a changed figure is");
+});
+
+test("a template that carries its own codes is filled by HQ with no edits at all, run by run, and says what it couldn't fill", async () => {
+  const store = memoryStore(); await store.init();
+  const zip = new JSZip();
+  const run = (t: string, b = false) => `<a:r><a:rPr lang="en-US"${b ? ' b="1"' : ""}/><a:t>${t}</a:t></a:r>`;
+  const sp = (paras: string[]) => `<p:sp><p:txBody>${paras.map((p) => `<a:p>${p}</a:p>`).join("")}</p:txBody></p:sp>`;
+  zip.file("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>');
+  zip.file("ppt/presentation.xml", '<p:presentation><p:sldSz cx="12192000" cy="6858000"/></p:presentation>');
+  zip.file("ppt/slides/slide1.xml", `<p:sld><p:cSld><p:spTree>${sp([run("Month to date: {{period}}"), run("Close rate: ", true) + run("{{close}}"), run("{{top.close.1.rep}}") , run("{{top.close.1|0}}"), run("{{clo") + run("se|0}} of {{net_issued}}"), run("{{rep:Nobody.close}}"), run("Takeaway goes here")])}</p:spTree></p:cSld></p:sld>`);
+  await setTemplate(store, "proedge", "Coded.pptx", await zip.generateAsync({ type: "nodebuffer" }));
+  const { saveSalesPull, deckListing, deckFile } = await import("../src/index.js");
+  const row = (rep: string, issued: number, netIssued: number, demos: number, sold: number) => ({ rep, issued, netIssued, demos, sold, gross: sold * 25_000, cancels: 0, declines: 0, preCount: 0, pre: 0, net: 0 });
+  await saveSalesPull(store, { start: "11/01/2026", end: "11/21/2026", at: "x", team: row("Team", 20, 16, 10, 4), reps: [row("Lane, Avery", 4, 4, 1, 1), row("Quill, Morgan", 16, 12, 9, 3)] });
+  const f = await fillTemplate(store, { title: "ProEdge sales 11/01-11/21", edits: [{ slide: 1, para: 7, text: "Demos are the lever." }] }, { agentId: "stevon", venture: "proedge" });
+  const text = await deckListing((await deckFile(store, f.deck.id))!.data);
+  assert.equal(text, "Slide 1: [1] Month to date: 11/01–11/21  [2] Close rate: 25.0%  [3] Quill, Morgan  [4] 25%  [5] 25% of 16  [6] {{rep:Nobody.close}}  [7] Demos are the lever.");
+  assert.equal(f.coded, 6, "six figures filled by HQ, one of them from a code PowerPoint had split in two");
+  assert.equal(f.done, 1, "and the agent's one edit was words");
+  assert.deepEqual(f.typed, []);
+  assert.match(f.codeErrors.join(" "), /slide 1: \{\{rep:Nobody\.close\}\}: no rep "Nobody"/);
+  // The bold label keeps its own run: only the figure's run changed.
+  const xml = await (await JSZip.loadAsync((await deckFile(store, f.deck.id))!.data)).file("ppt/slides/slide1.xml")!.async("string");
+  assert.match(xml, /<a:rPr lang="en-US" b="1"\/><a:t>Close rate: <\/a:t><\/a:r><a:r><a:rPr lang="en-US"\/><a:t>25\.0%<\/a:t>/);
 });

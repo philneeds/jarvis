@@ -573,6 +573,18 @@ export class LeadPerfectionConnector {
         handler: (a) => wrap(() => this.runReport(a)),
       }),
       defineTool({
+        name: "lp_deck_numbers",
+        description: "Pull the sales meeting deck's numbers, in one step: Sales Efficiency by Sales Rep for the deck's period (month to date) and for its comparison period (the same days of the month before). HQ works the dates out and keeps both pulls, so the deck's {{codes}} fill from them. Call it before any deck. Give \"through\" only when Phil names the last day.",
+        schema: { through: z.string().max(12).optional().describe("the last day, MM/DD/YYYY, only when Phil names one; otherwise leave it out (today)") },
+        handler: ({ through }) => wrap(async () => {
+          const { deckPeriod } = await import("../salesnumbers.js");
+          const p = deckPeriod(new Date(), through);
+          const now = await this.runReport({ start: p.start, end: p.end });
+          const before = await this.runReport({ start: p.priorStart, end: p.priorEnd }).catch((e: Error) => `The comparison period (${p.priorStart} to ${p.priorEnd}) couldn't be pulled: ${e.message}`);
+          return `Both periods are pulled and kept for the deck. Its numbers line: "numbers":{"period":"${p.start}-${p.end}","prior":"${p.priorStart}-${p.priorEnd}"}\n\nTHE DECK'S PERIOD, ${p.start} to ${p.end}:\n${now.slice(0, 14_000)}\n\nTHE COMPARISON PERIOD, ${p.priorStart} to ${p.priorEnd}:\n${before.slice(0, 14_000)}`;
+        }),
+      }),
+      defineTool({
         name: "lp_click",
         description: "Click a link, tab, arrow or button on the LeadPerfection screen by its [ref] (to open a customer, change the day, page through). Anything that would save, issue, assign, create or delete is refused. Returns the screen afterwards.",
         schema: { ref: z.string().max(10) },

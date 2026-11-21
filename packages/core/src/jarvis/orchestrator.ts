@@ -911,7 +911,7 @@ export class Jarvis {
             if (file) { where = ` Saved to your Google Drive in "${folder}": ${await this.slidesExport(f.deck.title, file.data, agent.id, folder)}`; attach = false; }
           } catch (e) { where = ` (It couldn't be saved to Google Drive: ${driveProblem((e as Error).message)}; the .pptx is attached instead.)`; }
         }
-        await this.say({ role: "agent", agentId: agent.id, text: `Deck ready: ${f.deck.title} · your template with ${f.done} change${f.done === 1 ? "" : "s"}.${miss}${where}`, runId: r.runId, ...(attach ? { files: [{ id: f.deck.id, name: f.deck.name }] } : {}), kind: "progress" });
+        await this.say({ role: "agent", agentId: agent.id, text: `Deck ready: ${f.deck.title} · your template with ${f.coded ? `${f.coded} figure${f.coded === 1 ? "" : "s"} filled by HQ from the report${f.done ? ` and ${f.done} change${f.done === 1 ? "" : "s"}` : ""}` : `${f.done} change${f.done === 1 ? "" : "s"}`}.${miss}${where}`, runId: r.runId, ...(attach ? { files: [{ id: f.deck.id, name: f.deck.name }] } : {}), kind: "progress" });
       } catch (e) { text += `\n\n(The template couldn't be filled in: ${(e as Error).message})`; }
     }
     if (decks.length) text = `${text}\n\n[Deck ready: ${decks.map((d) => d.title).join("; ")}]`.trim();

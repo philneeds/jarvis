@@ -85,9 +85,19 @@ const daysIn = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate(
  * compare with. Built on the 1st, there is nothing of the new month yet: it covers the whole month just ended,
  * compared with the whole month before that.
  */
-export function deckPeriod(now: Date = new Date()): { start: string; end: string; priorStart: string; priorEnd: string } {
+export function deckPeriod(now: Date = new Date(), through?: string): { start: string; end: string; priorStart: string; priorEnd: string } {
   const [y, m, d] = now.toLocaleDateString("en-CA", { timeZone: "America/New_York" }).split("-").map(Number) as [number, number, number];
   const back = (yy: number, mm: number) => (mm === 1 ? ([yy - 1, 12] as const) : ([yy, mm - 1] as const));
+  // Phil names the last day ("through 11/15"): the 1st of that month through it, whatever today is.
+  const t = through?.trim().match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/);
+  if (t) {
+    const ty = t[3] ? (t[3].length === 2 ? 2000 + Number(t[3]) : Number(t[3])) : y;
+    const tm = Number(t[1]), td = Number(t[2]);
+    if (tm >= 1 && tm <= 12 && td >= 1 && td <= daysIn(ty, tm)) {
+      const [py, pm] = back(ty, tm);
+      return { start: us(ty, tm, 1), end: us(ty, tm, td), priorStart: us(py, pm, 1), priorEnd: us(py, pm, Math.min(td, daysIn(py, pm))) };
+    }
+  }
   if (d === 1) {
     const [py, pm] = back(y, m), [qy, qm] = back(py, pm);
     return { start: us(py, pm, 1), end: us(py, pm, daysIn(py, pm)), priorStart: us(qy, qm, 1), priorEnd: us(qy, qm, daysIn(qy, qm)) };
@@ -96,9 +106,9 @@ export function deckPeriod(now: Date = new Date()): { start: string; end: string
   return { start: us(y, m, 1), end: us(y, m, d), priorStart: us(py, pm, 1), priorEnd: us(py, pm, Math.min(d, daysIn(py, pm))) };
 }
 /** The period in words for the agent, with the deckfill "numbers" to copy. */
-export function deckPeriodText(now: Date = new Date()): string {
-  const p = deckPeriod(now);
-  return `The deck covers ${p.start} to ${p.end} (month to date: the 1st through today, Phil's rule), compared with ${p.priorStart} to ${p.priorEnd} (the same days of the month before). Run lp_report for both (Sales Efficiency by Sales Rep, all markets, no rep), then put this in the deckfill: "numbers":{"period":"${p.start}-${p.end}","prior":"${p.priorStart}-${p.priorEnd}"}. Never a single week unless Phil asks for one.`;
+export function deckPeriodText(now: Date = new Date(), through?: string): string {
+  const p = deckPeriod(now, through);
+  return `The deck covers ${p.start} to ${p.end} (${through ? "the 1st of the month through the day Phil named" : "month to date: the 1st through today, Phil's rule"}), compared with ${p.priorStart} to ${p.priorEnd} (the same days of the month before). Run lp_report for both (Sales Efficiency by Sales Rep, all markets, no rep), then put this in the deckfill: "numbers":{"period":"${p.start}-${p.end}","prior":"${p.priorStart}-${p.priorEnd}"}. Never a single week unless Phil asks for one.`;
 }
 
 /** Keep a pull by its dates (and market), newest replacing an older pull of the same range. */
@@ -179,5 +189,5 @@ export function fillNumbers(text: string, pulls: { week?: SalesPull; prior?: Sal
 
 /** The codes, for the agent: every figure with its definition, and the reps in the newest pull. */
 export function numbersHint(): string {
-  return `Numbers on a deck are written by HQ, never typed: put a code where the figure goes and HQ fills it from the last lp_report pull of Sales Efficiency (deck_period gives the dates to pull: month to date and its comparison). Codes: {{close}} {{demo}} … for the team over the deck's period; {{prior.close}} for the comparison period; {{rep:Marino.close}} for one rep (last name is enough); {{top.close.1.rep}} and {{top.close.1}} for a leaderboard's first name and figure (2, 3, … down the board), and {{top.gross.1.gross_share}} for another figure of that same rep; {{period}} and {{prior.period}} for the dates; {{reps}} for how many reps ran appointments; add |0 to a percentage for no decimal ({{demo|0}}). Figures: ${Object.entries(METRICS).map(([k, v]) => `${k} (${v.says})`).join("; ")}. Text around a code is yours ("Close rate {{close}}").`;
+  return `Numbers on a deck are written by HQ, never typed: put a code where the figure goes and HQ fills it from the last lp_report pull of Sales Efficiency (deck_period gives the dates to pull: month to date and its comparison). Codes: {{close}} {{demo}} … for the team over the deck's period; {{prior.close}} for the comparison period; {{rep:Marino.close}} for one rep (last name is enough); {{top.close.1.rep}} and {{top.close.1}} for a leaderboard's first name and figure (2, 3, … down the board), and {{top.gross.1.gross_share}} for another figure of that same rep; {{period}} and {{prior.period}} for the dates; {{reps}} for how many reps ran appointments; add |0 to a percentage for no decimal ({{demo|0}}). Figures: ${Object.entries(METRICS).map(([k, v]) => `${k} (${v.says})`).join("; ")}. Text around a code is yours ("Close rate {{close}}"). When the template itself already has the codes in its cells (deck_template shows them), HQ fills them all with no edit from you: call lp_deck_numbers, then send a deckfill with the title, the numbers line and "edits" for words only ([] if none).`;
 }

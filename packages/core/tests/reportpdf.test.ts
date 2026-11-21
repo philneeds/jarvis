@@ -141,6 +141,10 @@ test("the deck's period is the month to date, compared with the same days of the
   // The month before is shorter, and January looks back to December.
   assert.deepEqual(deckPeriod(at("2027-03-31T15:00:00Z")), { start: "03/01/2027", end: "03/31/2027", priorStart: "02/01/2027", priorEnd: "02/28/2027" });
   assert.deepEqual(deckPeriod(at("2027-01-12T15:00:00Z")), { start: "01/01/2027", end: "01/12/2027", priorStart: "12/01/2026", priorEnd: "12/12/2026" });
+  // Phil names the last day: the 1st of that month through it, whatever today is.
+  assert.deepEqual(deckPeriod(at("2026-11-21T18:00:00Z"), "11/15/2026"), { start: "11/01/2026", end: "11/15/2026", priorStart: "10/01/2026", priorEnd: "10/15/2026" });
+  assert.deepEqual(deckPeriod(at("2026-11-21T18:00:00Z"), "10/31"), { start: "10/01/2026", end: "10/31/2026", priorStart: "09/01/2026", priorEnd: "09/30/2026" });
+  assert.equal(deckPeriod(at("2026-11-21T18:00:00Z"), "13/45").end, "11/21/2026", "a date that isn't one is ignored");
   assert.match(deckPeriodText(at("2026-11-24T14:00:00Z")), /"numbers":\{"period":"11\/01\/2026-11\/24\/2026","prior":"10\/01\/2026-10\/24\/2026"\}/);
   const row = { rep: "Team", issued: 60, netIssued: 50, demos: 35, sold: 10, gross: 250_000, cancels: 1, declines: 1, preCount: 2, pre: 40_000, net: 120_000 };
   const period = { start: "11/01/2026", end: "11/15/2026", at: "x", team: row, reps: [] };
