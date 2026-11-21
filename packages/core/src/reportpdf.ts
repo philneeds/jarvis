@@ -151,9 +151,18 @@ const pct = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(1)}%` : "n
 
 /** The table as plain lines an agent reads, one per rep, every number labelled with its column. */
 export function tableText(t: ReportTable): string {
+  // Sales Efficiency's own Close % (under Close count) is sold ÷ demos, and its NSLI leaves pre-net out: neither is
+  // Phil's number, and an agent reading "[35%]" as the close rate put the wrong one on the slides (Nov 21). Labelled
+  // so they can't be taken for his; his are in the table salesEfficiency() puts above this.
+  const phil = !!salesEfficiency(t);
+  const label = (k: string, c: { main?: string; second?: string }) => {
+    if (phil && k === "Close count") return `Sold ${c.main ?? "–"}${c.second ? ` [the report's Close % = sold ÷ demos ${c.second}: NOT Phil's close rate, which is close to issue, in the table above]` : ""}`;
+    if (phil && /^NSLI/i.test(k)) return `${k} (the report's, leaves pre-net out: NOT Phil's NSLI) ${c.main ?? "–"}${c.second ? ` [${c.second}]` : ""}`;
+    return `${k} ${c.main ?? "–"}${c.second ? ` [${c.second}]` : ""}`;
+  };
   const line = (r: ReportRow) => {
     const parts: string[] = [];
-    for (const [k, c] of Object.entries(r.cells)) parts.push(`${k} ${c.main ?? "–"}${c.second ? ` [${c.second}]` : ""}`);
+    for (const [k, c] of Object.entries(r.cells)) parts.push(label(k, c));
     return `${r.name}: ${parts.join(" · ")}`;
   };
   return [`${t.title}${t.subtitle.length ? ` (${t.subtitle.join("; ")})` : ""}`, "Every number is labelled with its column; [brackets] is the second line under it (a percentage, or under Close $ the average sale). A column not listed for a rep is blank in the report.", ...t.rows.map(line)].join("\n");

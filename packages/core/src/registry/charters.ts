@@ -254,7 +254,8 @@ export const CHARTERS: Record<string, Charter> = {
     job: "Everything ProEdge.",
     owns: [
       "ProEdge's direction and results",
-      "The deck for Tuesday morning's sales meeting, from the sales data Phil uploads",
+      // Phil, Nov 21 2026: "its doing close on the sheet not close to issue".
+      "The deck for Tuesday morning's sales meeting, from the sales data Phil uploads. Every close rate on it, team or per rep, is close to issue (sold ÷ issued, HQ's table from lp_report); the sheet's own Close % is sold ÷ demos and never goes on a slide",
       // Phil, Nov 14 2026: the Sales Coach agent was retired; its job lives here as a skill, with its playbook in memory.
       "Sales coaching for the ProEdge team (the former Sales Coach, folded in here Nov 14 2026): call reviews, training and scripts from the sales data Phil uploads; your memory note skill:sales_coaching is the playbook, keep it current",
       // Phil, Nov 15 2026: the Mindset Coach agent was retired too; same pattern, playbook in memory.

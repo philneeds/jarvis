@@ -67,7 +67,9 @@ test("each number lands in the column it sits under, blanks stay blank, and Phil
   assert.equal(t.rows[1]!.cells["Cancelled count"], undefined);
   assert.equal(t.rows[2]!.total, true);
   const text = tableText(t);
-  assert.match(text, /^Lane, Avery: Iss 14 · Net Iss\/opp 13 \[93%\] · Sit \/ demo 10 \[77%\] · Close count 7 \[70%\] · Close \$ 110,000 \[15,714\]/m);
+  // The report's own Close % (sold ÷ demos) and NSLI are labelled as not Phil's, so they can't end up on a slide (Nov 21).
+  assert.match(text, /^Lane, Avery: Iss 14 · Net Iss\/opp 13 \[93%\] · Sit \/ demo 10 \[77%\] · Sold 7 \[the report's Close % = sold ÷ demos 70%: NOT Phil's close rate, which is close to issue, in the table above\] · Close \$ 110,000 \[15,714\]/m);
+  assert.match(text, /NSLI \/ NCP \(the report's, leaves pre-net out: NOT Phil's NSLI\) 2,143/);
   const nums = salesEfficiency(t)!;
   // close to issue 7 ÷ 14; demo rate the report's 77%; NSLI (30,000 + 0.7 × 20,000) ÷ 14 = 3,143; cancels 4 ÷ 7; credit declines not cancels.
   assert.match(nums, /\| Lane, Avery \| 14 \| 7 \| 50\.0% \(7 ÷ 14\) \| 77% \(10 demos\) \| \$3,143 \| 4 \| 57\.1% \| 1 · \$20,000 \| \$30,000 \| \$44,000 \|/);
