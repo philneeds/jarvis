@@ -79,3 +79,10 @@ test("sales data: CSV and Excel are read into text, Stevon builds the deck, and 
   const msgs = await store.chat.list(20);
   assert.ok(msgs.some((m) => m.files?.[0]?.id === decks[0]!.id), "the deck is handed over in chat");
 });
+
+test("a Drive refusal is said in words Phil can act on: the API switched off names the project and the link", async () => {
+  const { driveProblem } = await import("../src/jarvis/orchestrator.js");
+  const raw = 'Google API 403: {\n  "error": {\n    "code": 403,\n    "message": "Google Drive API has not been used in project 850967116859 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=850967116859 then retry."';
+  assert.match(driveProblem(raw), /Drive API is turned off for HQ's Google project \(850967116859\)\. Turn it on once at https:\/\/console\.cloud\.google\.com\/apis\/library\/drive\.googleapis\.com\?project=850967116859/);
+  assert.match(driveProblem("Request had insufficient authentication scopes."), /reconnect Google in Settings/);
+});

@@ -36,6 +36,16 @@ async function within<T, F>(p: Promise<T>, ms: number, fallback: () => F): Promi
   let t: ReturnType<typeof setTimeout> | undefined;
   try { return await Promise.race([p, new Promise<F>((res) => { t = setTimeout(() => res(fallback()), ms); })]); } finally { clearTimeout(t); }
 }
+/**
+ * Why Google Drive refused, in words Phil can act on. The common one (Nov 21): the Drive API is switched off in the
+ * Google Cloud project HQ's Google login belongs to; Google's own message is long JSON and was cut off mid-link.
+ */
+export function driveProblem(msg: string): string {
+  const off = msg.match(/Google Drive API has not been used in project (\d+)|drive\.googleapis\.com[^"]*?project=(\d+)/);
+  if (off) { const project = off[1] ?? off[2]; return `the Google Drive API is turned off for HQ's Google project (${project}). Turn it on once at https://console.cloud.google.com/apis/library/drive.googleapis.com?project=${project} (Enable), wait a few minutes, then ask again`; }
+  if (/insufficient.*scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(msg)) return "HQ's Google login doesn't have Drive access; reconnect Google in Settings and allow Drive";
+  return msg.replace(/\s+/g, " ").slice(0, 160);
+}
 /** Settings keys for Phil's auto-ship switch and the day's auto-ships. */
 export const AUTO_SHIP_KEY = "workshop.autoShip";
 const AUTO_SHIP_LOG_KEY = "workshop.autoShipLog";
@@ -880,7 +890,7 @@ export class Jarvis {
             const { deckFile } = await import("../decks.js");
             const file = await deckFile(this.store, f.deck.id);
             if (file) { where = ` Saved to your Google Drive in "${folder}": ${await this.slidesExport(f.deck.title, file.data, agent.id, folder)}`; attach = false; }
-          } catch (e) { where = ` (It couldn't be saved to Google Drive: ${(e as Error).message.slice(0, 160)}; the .pptx is attached instead.)`; }
+          } catch (e) { where = ` (It couldn't be saved to Google Drive: ${driveProblem((e as Error).message)}; the .pptx is attached instead.)`; }
         }
         await this.say({ role: "agent", agentId: agent.id, text: `Deck ready: ${f.deck.title} · your template with ${f.done} change${f.done === 1 ? "" : "s"}.${miss}${where}`, runId: r.runId, ...(attach ? { files: [{ id: f.deck.id, name: f.deck.name }] } : {}), kind: "progress" });
       } catch (e) { text += `\n\n(The template couldn't be filled in: ${(e as Error).message})`; }
