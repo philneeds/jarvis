@@ -162,6 +162,22 @@ test("GoHighLevel's internal writes go through on their own for the JD PM team (
   const sms = await jarvis.requestApproval({ agentId: "stephanie", kind: "send", title: "Reply to Ana", body: "Friday works.", payload: { action: "ghl.message", contactId: "c1", type: "SMS", message: "Friday works." } });
   assert.equal(sms.status, "pending");
   assert.equal(writes.length, 4);
+  // Nov 21, Myra Morgan: one card makes the contact, the note, the deal, and marks it won using the deal step 3 made.
+  const card = await jarvis.requestApproval({ agentId: "stella", kind: "record", title: "Myra Morgan: add to GHL, mark carport sale won", body: "why", payload: { action: "batch", steps: [
+    { action: "ghl.contact.create", name: "Myra Morgan", phone: "+15855550123" },
+    { action: "ghl.note", contactId: "$step1.contactId", body: "Signed Nov 18: $4,888 down of $9,776." },
+    { action: "ghl.deal.create", name: "Myra Morgan carport", contactId: "$step1.contactId", stage: "Quoted", value: 9776 },
+    { action: "ghl.deal.move", opportunityId: "$step3.opportunityId", name: "Myra Morgan carport", stage: "Quoted", status: "won" },
+  ] } });
+  if (card.status === "pending") await jarvis.decide(card.id, "approved");
+  assert.deepEqual(writes.slice(4).map((w) => `${w.method} ${w.path}`), ["POST /contacts/", "POST /contacts/c9/notes", "POST /opportunities/", "PUT /opportunities/o9"], "every step ran, each with what the one before made");
+  assert.equal(writes[6]!.body.contactId, "c9");
+  assert.equal(writes[7]!.body.status, "won");
+  // Or in one step: a deal can start won, with the amount written as text.
+  const won = await ask("jake", "Signed", { action: "ghl.deal.create", name: "Kim roof", contactId: "c1", stage: "Quoted", value: "$12,500", status: "won" });
+  assert.equal(won.status, "approved");
+  assert.deepEqual(writes.at(-1)!.body, { pipelineId: "p1", locationId: "loc1", name: "Kim roof", pipelineStageId: "s2", status: "won", contactId: "c1", monetaryValue: 12500 });
+  assert.match(won.note ?? "", /Deal "Kim roof" created in GoHighLevel at Quoted, won at \$12,500 \(o9\)/);
 });
 
 test("an appointment booked by phone goes on the GoHighLevel calendar, with the customer added first when they're new", async () => {
