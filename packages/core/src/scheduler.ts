@@ -69,6 +69,19 @@ export const SCHEDULES: Schedule[] = [
 const LAST_RUN_KEY = "schedule.lastRun";
 /** Routines that came due while an approved update was waiting to restart HQ; they run on the first tick after it. */
 export const DEFERRED_KEY = "schedule.deferred";
+/** A routine held for an update, and when (older records are bare ids). */
+type Deferred = { id: string; at: number };
+async function readDeferred(store: Store): Promise<Deferred[]> {
+  return (await store.settings.get<(string | Deferred)[]>(DEFERRED_KEY, [])).map((d) => (typeof d === "string" ? { id: d, at: 0 } : d));
+}
+async function addDeferred(store: Store, ids: string[], at: number): Promise<string[]> {
+  const waiting = await readDeferred(store);
+  const fresh = [...new Set(ids)].filter((id) => !waiting.some((w) => w.id === id));
+  if (fresh.length) await store.settings.set(DEFERRED_KEY, [...waiting, ...fresh.map((id) => ({ id, at }))]);
+  return fresh;
+}
+/** Reports a routine made that would have started the lead's run while an update waited; handed over after it. */
+const HELD_REPORTS_KEY = "schedule.heldReports";
 
 /** The built-in routines plus each agent's own schedule from its settings. */
 export async function withCustom(store: Store, schedules: Schedule[] = SCHEDULES): Promise<Schedule[]> {
@@ -304,6 +317,8 @@ export class Scheduler {
 
   /** Routines running right now, so an overlapping tick never starts the same one twice. */
   private running = new Set<string>();
+  /** When each routine last really started (wall clock), so one held for an update that a running tick started anyway isn't run twice. */
+  private startedAt = new Map<string, number>();
 
   async tick(now = new Date()) {
     const phase = await this.jarvis.store.settings.get("phase", 0);
@@ -315,24 +330,31 @@ export class Scheduler {
     const store = this.jarvis.store;
     // An approved update is waiting to restart HQ: start nothing, or the update would wait for it too. What comes due
     // is noted, not marked as run (a daily routine's ten-minute window may be gone by then), and runs after the update.
-    if (await deployPending(store, now.getTime())) {
-      const waiting = await store.settings.get<string[]>(DEFERRED_KEY, []);
-      const fresh = this.due(now, phase, all).filter((s) => !waiting.includes(s.id));
-      if (fresh.length) {
-        await store.settings.set(DEFERRED_KEY, [...waiting, ...fresh.map((s) => s.id)]);
-        await this.jarvis.router.log("jarvis", "schedule", `Scheduled: ${fresh.map((s) => s.id).join(", ")} · waiting for the HQ update to go in; ${fresh.length === 1 ? "it runs" : "they run"} right after`);
-      }
-      return;
+    const hold = async (ids: string[]) => {
+      const fresh = await addDeferred(store, ids, now.getTime());
+      if (fresh.length) await this.jarvis.router.log("jarvis", "schedule", `Scheduled: ${fresh.join(", ")} · waiting for the HQ update to go in; ${fresh.length === 1 ? "it runs" : "they run"} right after`);
+    };
+    if (await deployPending(store, now.getTime())) { await hold(this.due(now, phase, all).map((s) => s.id)); return; }
+    // Held for the update: run now, unless it already ran since it was held (a tick that was going when the update was
+    // approved may have run it).
+    const deferred = new Set((await readDeferred(store)).filter((d) => !(d.at > 0 && (this.startedAt.get(d.id) ?? 0) >= d.at)).map((d) => d.id));
+    await store.settings.set(DEFERRED_KEY, []);
+    const heldReports = await store.settings.get<{ toId: string; reports: { agentId: string; scheduleId: string; text: string; runId: string }[] }[]>(HELD_REPORTS_KEY, []);
+    if (heldReports.length) {
+      await store.settings.set(HELD_REPORTS_KEY, []);
+      for (const h of heldReports) batches.set(h.toId, [...(batches.get(h.toId) ?? []), ...h.reports.flatMap((r) => { const agent = getAgent(r.agentId); return agent ? [{ agent, scheduleId: r.scheduleId, text: r.text, runId: r.runId }] : []; })]);
     }
-    const deferred = new Set(await store.settings.get<string[]>(DEFERRED_KEY, []));
-    if (deferred.size) await store.settings.set(DEFERRED_KEY, []);
     // No update waiting: a workshop job held for one that never restarted HQ starts now (after a restart, boot does it).
     void this.jarvis.resumeHeldJobs().catch((e) => console.warn("[workshop] held jobs:", (e as Error).message));
     const dueNow = new Set(this.due(now, phase, all).map((s) => s.id));
-    for (const s of all.filter((x) => dueNow.has(x.id) || (deferred.has(x.id) && x.phase <= phase))) {
+    const list = all.filter((x) => dueNow.has(x.id) || (deferred.has(x.id) && x.phase <= phase));
+    for (const [i, s] of list.entries()) {
+      // An update approved while this tick was going: the rest waits for it too (each routine run would hold it up).
+      if (await deployPending(store, now.getTime())) { await hold(list.slice(i).filter((x) => !this.running.has(x.id)).map((x) => x.id)); break; }
       // A long routine can span ticks: skip what's still running, and re-check since the snapshot was taken.
       if (this.running.has(s.id) || (!deferred.has(s.id) && !this.due(now, phase, [s]).length)) continue;
       if ((this.lastRun.get(s.id) ?? 0) < now.getTime()) this.lastRun.set(s.id, now.getTime());
+      this.startedAt.set(s.id, Date.now());
       await this.jarvis.store.settings.set(LAST_RUN_KEY, Object.fromEntries(this.lastRun));
       const agent = getAgent(s.agentId);
       if (!agent) continue;
@@ -374,6 +396,12 @@ export class Scheduler {
       } catch (e) {
         await this.jarvis.router.log(agent.id, "error", `Schedule ${s.id} failed: ${(e as Error).message}`);
       } finally { this.running.delete(s.id); }
+    }
+    // Handing reports to a lead starts the lead's run: while an update waits, they're kept and handed over after it.
+    if (batches.size && await deployPending(store, now.getTime())) {
+      const kept = await store.settings.get<{ toId: string; reports: { agentId: string; scheduleId: string; text: string; runId: string }[] }[]>(HELD_REPORTS_KEY, []);
+      await store.settings.set(HELD_REPORTS_KEY, [...kept, ...[...batches].map(([toId, rs]) => ({ toId, reports: rs.map((r) => ({ agentId: r.agent.id, scheduleId: r.scheduleId, text: r.text, runId: r.runId })) }))]);
+      batches.clear();
     }
     for (const [toId, reports] of batches) {
       try { await deliverReports(this.jarvis, toId, reports); } catch (e) { await this.jarvis.router.log(toId === "jarvis" ? "jarvis" : toId, "error", `Handing over ${reports.length} report(s) failed: ${(e as Error).message}`); }

@@ -93,7 +93,7 @@ export class GoHighLevelConnector {
 
   get locationId() { return this.opts.locationId; }
 
-  private async call<T>(method: "GET" | "POST", path: string, body?: unknown, version = "2021-07-28"): Promise<T> {
+  private async call<T>(method: "GET" | "POST", path: string, body?: unknown, version = "2021-07-28", opts: { keepStatus?: boolean } = {}): Promise<T> {
     const key = `${method} ${path} ${body ? JSON.stringify(body) : ""}`;
     const c = this.cache.get(key);
     if (c && this.now() - c.at < CACHE_MS) return c.v as T;
@@ -106,7 +106,8 @@ export class GoHighLevelConnector {
     if ((res.status === 401 || res.status === 403) && /scope/i.test(msg ?? "")) throw new Error(scopeError(path, res.status, msg));
     if (res.status === 401 || res.status === 403) { await this.mark(false, `GoHighLevel refused the key (${res.status}${msg ? `: ${msg}` : ""})`); throw new Error(`GoHighLevel refused the key${msg ? ` (${msg})` : ""}. Check GHL_API_KEY and its scopes, and GHL_LOCATION_ID.`); }
     if (res.status === 429) throw new Error("GoHighLevel's rate limit is hit; try again in a minute.");
-    if (!res.ok) { await this.mark(false, `GoHighLevel error ${res.status}${msg ? `: ${msg}` : ""}`); throw new Error(`GoHighLevel error ${res.status}${msg ? `: ${msg}` : ""}`); }
+    // One calendar's error (keepStatus) isn't the connection lost.
+    if (!res.ok) { if (!opts.keepStatus) await this.mark(false, `GoHighLevel error ${res.status}${msg ? `: ${msg}` : ""}`); throw new Error(`GoHighLevel error ${res.status}${msg ? `: ${msg}` : ""}`); }
     this.cache.set(key, { at: this.now(), v: j });
     await this.mark(true);
     return j;
@@ -170,15 +171,24 @@ export class GoHighLevelConnector {
    * one calendar (or user or group) at a time (422 "calendarId, userId or groupId is required" otherwise; Bill, Nov 19),
    * so it's one call per calendar, merged, each event carrying its calendar's name.
    */
-  async appointments(days = 7, from = this.now()): Promise<Appointment[]> {
+  async appointments(days = 7, from = Math.floor(this.now() / 60_000) * 60_000): Promise<Appointment[] & { failed?: string[] }> {
     const cals = await this.calendars();
-    const lists = await Promise.all(cals.map(async (c) => {
-      const q = new URLSearchParams({ locationId: this.opts.locationId, calendarId: c.id, startTime: String(from), endTime: String(from + days * 86_400_000) });
-      const j = await this.call<{ events?: Appointment[] }>("GET", `/calendars/events?${q}`, undefined, CAL_VERSION);
-      return (j.events ?? []).map((e) => ({ ...e, calendarId: e.calendarId ?? c.id, calendarName: c.name }));
-    }));
+    // A few at a time, not all at once (a location with many calendars would hit the rate limit), and one calendar
+    // failing doesn't lose the others: what was read comes back, and the failures are named in the last entry.
+    const lists: Appointment[][] = [];
+    const failed: string[] = [];
+    for (let i = 0; i < cals.length; i += 5) {
+      const got = await Promise.allSettled(cals.slice(i, i + 5).map(async (c) => {
+        const q = new URLSearchParams({ locationId: this.opts.locationId, calendarId: c.id, startTime: String(from), endTime: String(from + days * 86_400_000) });
+        const j = await this.call<{ events?: Appointment[] }>("GET", `/calendars/events?${q}`, undefined, CAL_VERSION, { keepStatus: true });
+        return (j.events ?? []).map((e) => ({ ...e, calendarId: e.calendarId ?? c.id, calendarName: c.name }));
+      }));
+      got.forEach((g, k) => { if (g.status === "fulfilled") lists.push(g.value); else failed.push(`${cals[i + k]!.name} (${(g.reason as Error).message.slice(0, 120)})`); });
+    }
+    if (failed.length && !lists.length) throw new Error(`GoHighLevel couldn't read any calendar: ${failed.join("; ")}`);
     const seen = new Set<string>();
-    return lists.flat().filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)));
+    const out = lists.flat().filter((e) => (!e.id ? true : seen.has(e.id) ? false : (seen.add(e.id), true)));
+    return Object.assign(out, failed.length ? { failed } : {});
   }
 
   /** The location's calendars (needs the calendars.readonly scope). */
@@ -261,10 +271,11 @@ export class GoHighLevelConnector {
     return [`${is.length} invoice${is.length === 1 ? "" : "s"}${status ? ` (${status})` : ""}, ${money(due)} still due.`, ...is.map((i) => `[${i._id ?? i.id}] #${i.invoiceNumber ?? "?"} ${clean(i.name || i.title, 60)}${i.contactDetails?.name ? ` · ${i.contactDetails.name}` : ""} · ${money(i.total)} total, ${money(i.amountDue)} due · ${i.status ?? "?"}${i.dueDate ? ` · due ${i.dueDate.slice(0, 10)}` : ""}`)].join("\n");
   }
 
-  appointmentsText(as: Appointment[], days: number): string {
-    if (!as.length) return `No appointments in the next ${days} days.`;
+  appointmentsText(as: Appointment[] & { failed?: string[] }, days: number): string {
+    const missed = as.failed?.length ? `\n(Couldn't read ${as.failed.length === 1 ? "one calendar" : `${as.failed.length} calendars`}, so this may be missing some: ${as.failed.join("; ")})` : "";
+    if (!as.length) return `No appointments in the next ${days} days.${missed}`;
     const many = new Set(as.map((a) => a.calendarName).filter(Boolean)).size > 1;
-    return [...as].sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? "")).map((a) => `${when(a.startTime)}–${when(a.endTime).split(", ").pop()} · ${clean(a.title, 80) || "(untitled)"}${a.appointmentStatus ? ` · ${a.appointmentStatus}` : ""}${many && a.calendarName ? ` · ${a.calendarName}` : ""}${a.address ? ` · ${clean(a.address, 80)}` : ""}${a.contactId ? ` · contact ${a.contactId}` : ""}`).join("\n");
+    return [...as].sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? "")).map((a) => `${when(a.startTime)}–${when(a.endTime).split(", ").pop()} · ${clean(a.title, 80) || "(untitled)"}${a.appointmentStatus ? ` · ${a.appointmentStatus}` : ""}${many && a.calendarName ? ` · ${a.calendarName}` : ""}${a.address ? ` · ${clean(a.address, 80)}` : ""}${a.contactId ? ` · contact ${a.contactId}` : ""}`).join("\n") + missed;
   }
 
   tools(): ToolDef[] {

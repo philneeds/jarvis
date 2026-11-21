@@ -152,6 +152,8 @@ export class Watchers {
     const phase = await this.jarvis.store.settings.get("phase", 0);
     const state = await this.jarvis.store.settings.get<Record<string, WatchState>>(WATCH_STATE_KEY, {});
     for (const w of this.due(now, phase, state)) {
+      // An update approved while this tick was going: the rest look after it (a wake would hold it up).
+      if (await deployPending(this.jarvis.store, now.getTime())) break;
       if (this.running.has(w.id)) continue;
       this.running.add(w.id);
       const st: WatchState = { ...(state[w.id] ?? {}) };

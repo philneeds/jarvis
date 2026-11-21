@@ -814,7 +814,13 @@ export class Jarvis {
         workshopHint = `\n\n${WORKSHOP_HINT(w.dir, w.branch, w.base)}`;
       } catch (e) {
         // A question on a card is answered on the card or not at all: it isn't kept for later.
-        if ((e as Error).message === HELD_FOR_UPDATE) return this.holdJob(agent, job, !opts.noBlocks);
+        if ((e as Error).message === HELD_FOR_UPDATE) {
+          // It was shown as "queued for the workshop": with nothing of his running, he isn't working, and a status left
+          // at "working" would make the deploy wait for him to its cap.
+          const st = (await this.store.agentState.all()).find((x) => x.id === agent.id);
+          if (st?.status === "working" && /^queued for the workshop/.test(st.detail ?? "") && !(await this.store.runs.running()).some((r) => r.agentId === agent.id)) await this.router.setStatus(agent.id, "idle");
+          return this.holdJob(agent, job, !opts.noBlocks);
+        }
         await this.heldJobs.drop(job.id);
         workshopHint = `\n\nYour workshop couldn't be opened (${(e as Error).message.slice(0, 200)}), so you can't change code this run; say so and diagnose with the tools you have.`;
       }

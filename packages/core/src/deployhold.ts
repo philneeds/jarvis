@@ -79,7 +79,7 @@ export class HeldJobs {
   /** The jobs nothing in this process is waiting on, oldest first, taken by the caller to start now. */
   take(): Promise<HeldJob[]> {
     return this.change(async (all) => {
-      const jobs = all.filter((j) => !this.live.has(j.id));
+      const jobs = all.filter((j) => !this.live.has(j.id)).sort((a, b) => a.at.localeCompare(b.at));
       for (const j of jobs) this.live.add(j.id);
       return jobs;
     });
