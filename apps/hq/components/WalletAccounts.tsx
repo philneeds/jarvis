@@ -72,7 +72,8 @@ export function WalletAccounts({ name, blurb, api: base, hint }: { name: string;
             const f = new FormData(e.currentTarget);
             const auto = f.get("auto") === "on";
             if (auto && !trading.limits?.auto && !confirm("Let Pentoshi place real trades on your Hyperliquid account without asking, inside these caps?")) return;
-            const body = { auto, maxTradeUsd: Number(f.get("trade")) || 0, maxDayUsd: Number(f.get("day")) || 0, maxLeverage: Number(f.get("lev")) || 0, maxOpenUsd: Number(f.get("open")) || 0, maxDayLossUsd: Number(f.get("loss")) || 0, coins: String(f.get("coins") ?? "") };
+            const v = (k: string) => String(f.get(k) ?? "").trim();
+            const body = { auto, maxTradeUsd: v("trade"), maxDayUsd: v("day"), maxLeverage: v("lev"), maxOpenUsd: v("open"), maxDayLossUsd: v("loss"), coins: v("coins") };
             try { const r = await put<{ limits: Limits }>(`/api/${base}/limits`, body); setTrading({ ...trading, limits: r.limits }); setBad(false); setMsg("Saved."); }
             catch (err) { setBad(true); setMsg((err as Error).message); }
           }}>
@@ -81,11 +82,11 @@ export function WalletAccounts({ name, blurb, api: base, hint }: { name: string;
               <span><b>Pentoshi trades on his own</b> inside the caps below (needs per trade, per day, leverage and loss stop). Off: every order waits for your card.</span>
             </label>
             <div className="flex flex-wrap items-center gap-2">
-              <input name="trade" className="input h-8 w-28" inputMode="numeric" placeholder="$ per trade" aria-label="Cap per trade in dollars" defaultValue={trading.limits?.maxTradeUsd ?? ""} />
-              <input name="day" className="input h-8 w-28" inputMode="numeric" placeholder="$ per day" aria-label="Cap per day in dollars" defaultValue={trading.limits?.maxDayUsd ?? ""} />
-              <input name="lev" className="input h-8 w-24" inputMode="numeric" placeholder="max lev. x" aria-label="Leverage cap" defaultValue={trading.limits?.maxLeverage ?? ""} />
-              <input name="open" className="input h-8 w-28" inputMode="numeric" placeholder="$ open (opt.)" aria-label="Cap on open positions in dollars, optional" defaultValue={trading.limits?.maxOpenUsd ?? ""} />
-              <input name="loss" className="input h-8 w-28" inputMode="numeric" placeholder="$ loss stop" aria-label="Stop trading alone when down this much over 24 hours" defaultValue={trading.limits?.maxDayLossUsd ?? ""} />
+              <input name="trade" className="input h-8 w-28" inputMode="decimal" placeholder="$ per trade" aria-label="Cap per trade in dollars" defaultValue={trading.limits?.maxTradeUsd ?? ""} />
+              <input name="day" className="input h-8 w-28" inputMode="decimal" placeholder="$ per day" aria-label="Cap per day in dollars" defaultValue={trading.limits?.maxDayUsd ?? ""} />
+              <input name="lev" className="input h-8 w-24" inputMode="decimal" placeholder="max lev. x" aria-label="Leverage cap" defaultValue={trading.limits?.maxLeverage ?? ""} />
+              <input name="open" className="input h-8 w-28" inputMode="decimal" placeholder="$ open (opt.)" aria-label="Cap on open positions in dollars, optional" defaultValue={trading.limits?.maxOpenUsd ?? ""} />
+              <input name="loss" className="input h-8 w-28" inputMode="decimal" placeholder="$ loss stop" aria-label="Stop trading alone when down this much over 24 hours" defaultValue={trading.limits?.maxDayLossUsd ?? ""} />
               <input name="coins" className="input h-8 w-40" placeholder="coins (empty = any)" aria-label="Coins he trades alone, comma-separated" defaultValue={trading.limits?.coins?.join(", ") ?? ""} />
               <button className="btn btn-sm h-8">Save</button>
             </div>

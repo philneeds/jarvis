@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { memoryStore, Jarvis, HyperliquidTrader, readOrder, CHARTERS, type HlExchange } from "../src/index.js";
 
 const ACCT = "0x1111111111111111111111111111111111111111", AGENT = "0x2222222222222222222222222222222222222222";
-function setup(opts: { account?: string; role?: { role: string; data?: { user: string } }; position?: string; open?: { coin: string; oid: number }[]; reply?: unknown; pnl?: [number, string][]; openNtl?: string } = {}) {
+function setup(opts: { account?: string; role?: { role: string; data?: { user: string } }; position?: string; open?: { coin: string; oid: number }[]; reply?: unknown; pnl?: [number, string][]; openNtl?: string; resting?: { sz: string; limitPx: string; reduceOnly?: boolean }[] } = {}) {
   const calls: { method: string; args: unknown }[] = [];
   const real: HlExchange = {
     order: async (p) => { calls.push({ method: "order", args: p }); return (opts.reply ?? { response: { data: { statuses: [{ filled: { totalSz: p.orders[0]!.s, avgPx: "63200", oid: 77 } }] } } }) as never; },
@@ -19,6 +19,7 @@ function setup(opts: { account?: string; role?: { role: string; data?: { user: s
     if (b.type === "clearinghouseState") return Response.json({ marginSummary: { totalNtlPos: opts.openNtl ?? "0" }, assetPositions: opts.position ? [{ position: { coin: "BTC", szi: opts.position } }] : [] });
     if (b.type === "portfolio") return opts.pnl ? Response.json([["day", { pnlHistory: opts.pnl }]]) : new Response("{}", { status: 500 });
     if (b.type === "openOrders") return Response.json(opts.open ?? []);
+    if (b.type === "frontendOpenOrders") return Response.json(opts.resting ?? []);
     return new Response("{}", { status: 400 });
   }) as typeof fetch;
   return { calls, exchange, f };
@@ -200,4 +201,63 @@ test("on his own needs every cap; PnL that can't be read means a card; parameter
   // Switched off: back to cards.
   await s.trader.setLimits({ ...PARAMS, auto: false });
   assert.equal((await s.card(order())).status, "pending");
+});
+
+// From the review (Nov 21): ways placing alone let more risk through than the caps, and their fixes.
+const sent = (calls: { method: string; args: unknown }[]) => calls.filter((c) => c.method === "order").map((c) => (c.args as { orders: { s: string; p: string; r: boolean }[] }).orders[0]!);
+
+test("review: a reduce-only order never changes leverage; a far-off limit sell is sized at the mark; a market order ignores a price", async () => {
+  const s = await rig({ pnl: [[1, "0"], [2, "0"]], position: "0.5" });
+  await s.trader.setLimits({ ...PARAMS, coins: ["ETH", "BTC"] });
+  const a = await s.card(order({ side: "sell", size: 0.0002, reduceOnly: true, leverage: 40, cross: false }));
+  assert.equal(a.status, "approved");
+  assert.ok(!s.calls.some((c) => c.method === "updateLeverage"), "no leverage change from a reduce-only order");
+  // $499 sell limited at a quarter of the mark (63,196): sized at the mark, so about $499, not ~$2,000.
+  const far = await s.card(order({ side: "sell", type: "limit", price: 15800, usd: 499, leverage: 5 }));
+  assert.equal(far.status, "approved");
+  const o = sent(s.calls).at(-1)!;
+  assert.ok(Number(o.s) * 63196.5 <= 500, `size ${o.s} is worth no more than the cap`);
+  // A market order with a stray price is sized at the mark.
+  const s2 = await rig();
+  const m = await s2.card(order({ type: "market", usd: 100, price: 100, leverage: undefined }));
+  await s2.jarvis.decide(m.id, "approved");
+  assert.ok(Number(sent(s2.calls)[0]!.s) < 0.01, "about $100 of BTC, not 1 BTC");
+});
+
+test("review: resting orders count toward the open cap; Phil's pause stops it; a cancel alone only touches HQ's own orders", async () => {
+  const s = await rig({ pnl: [[1, "0"], [2, "0"]], resting: [{ sz: "0.008", limitPx: "60000" }], open: [{ coin: "BTC", oid: 9 }] });
+  await s.trader.setLimits({ ...PARAMS, maxOpenUsd: 600 });
+  assert.match((await s.card(order({ usd: 200 }))).note ?? "", /open positions and resting orders to \$680/);
+  const c = await s.card({ action: "hyperliquid.cancel", coin: "BTC" });
+  assert.equal(c.status, "pending");
+  assert.match(c.note ?? "", /order 9 on BTC weren't placed by HQ/);
+  await s.store.settings.set("killSwitch", { all: false, trading: true, agents: [] });
+  const paused = await s.card({ action: "hyperliquid.close", coin: "BTC", pct: 100 });
+  assert.equal(paused.status, "pending");
+  assert.match(paused.note ?? "", /trading is paused/);
+});
+
+test("review: $10 is enough; parameters are read strictly; a card the last check stops goes back to Phil; Phil is told once", async () => {
+  const told: string[] = [];
+  const s = await rig({ pnl: [[1, "0"], [2, "0"]] });
+  (s.jarvis as unknown as { notify: (t: string, b: string) => Promise<void> }).notify = async (t, b) => { told.push(b); };
+  await s.trader.setLimits({ ...PARAMS, maxTradeUsd: "1,000" as unknown as number });
+  assert.equal((await s.trader.limits()).maxTradeUsd, 1000);
+  await assert.rejects(s.trader.setLimits({ ...PARAMS, maxTradeUsd: "lots" as unknown as number }), /must be a number/);
+  await assert.rejects(s.trader.setLimits({ ...PARAMS, auto: "yes" as unknown as boolean }), /true or false/);
+  await s.trader.setLimits({ ...PARAMS, maxLeverage: 5.6 });
+  assert.equal((await s.trader.limits()).maxLeverage, 5, "rounded down");
+  const ten = await s.card(order({ usd: 10 }));
+  assert.equal(ten.status, "approved", ten.note);
+  assert.equal(told.length, 1);
+  assert.equal((told[0]!.match(/Hyperliquid: bought/g) ?? []).length, 1, "the fill once, not twice");
+  // The check passes when filed, but by the time it goes out Phil paused trading: back to him, pending.
+  const t = s.trader as unknown as { autoRefusal: (a: unknown) => Promise<string | undefined> };
+  const real = t.autoRefusal.bind(s.trader);
+  let first = true;
+  t.autoRefusal = async (a) => (first ? ((first = false), real(a)) : "trading is paused");
+  const late = await s.card(order({ usd: 20 }));
+  assert.equal(late.status, "pending");
+  assert.match(late.note ?? "", /^Waits for you: not placed on his own: trading is paused\.$/);
+  assert.equal((await s.store.approvals.get(late.id))?.status, "pending");
 });

@@ -605,7 +605,8 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.put("/hyperliquid/limits", async (c) => {
     if (!connectors.hlTrader) return c.json({ error: "Hyperliquid trading isn't set up (HYPERLIQUID_AGENT_KEY)" }, 400);
     const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
-    const n = (v: unknown) => Number(v) || undefined;
+    // Passed as typed ("1,000" is 1000; "abc" is refused): setLimits reads them strictly.
+    const n = (v: unknown) => v as number | undefined;
     let limits;
     try { limits = await connectors.hlTrader.setLimits({ maxTradeUsd: n(b.maxTradeUsd), maxDayUsd: n(b.maxDayUsd), auto: b.auto === true, maxLeverage: n(b.maxLeverage), maxOpenUsd: n(b.maxOpenUsd), maxDayLossUsd: n(b.maxDayLossUsd), coins: Array.isArray(b.coins) ? (b.coins as string[]) : typeof b.coins === "string" ? b.coins.split(/[\s,]+/) : [] }); }
     catch (e) { return c.json({ error: (e as Error).message }, 400); }

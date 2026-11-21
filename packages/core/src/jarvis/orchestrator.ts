@@ -30,6 +30,7 @@ import { Secrets } from "../secrets.js";
 import { DECK_HINT, makeDeck, fillTemplate, normalizeFill, normalizeDeck, deckFolderName, type Deck } from "../decks.js";
 import { GUARDRAIL_FILES, HELD_FOR_UPDATE, WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
 import { HeldJobs, deployPending, heldLine, type HeldJob } from "../deployhold.js";
+import { NOT_PLACED } from "../hyperliquid-trade.js";
 /** Settings keys for Phil's auto-ship switch and the day's auto-ships. */
 export const AUTO_SHIP_KEY = "workshop.autoShip";
 const AUTO_SHIP_LOG_KEY = "workshop.autoShipLog";
@@ -2172,9 +2173,19 @@ export class Jarvis {
       const v = await check(approval).catch((e: Error) => ({ ok: false, why: `couldn't check whether it may run on its own (${e.message})` }));
       if (v.ok) {
         const who = getAgent(a.agentId)?.name ?? a.agentId;
-        await this.router.log(a.agentId, "approval", `${who}: "${a.title}" ran on its own, ${v.why}`, a.runId, { kind: a.kind, body: a.body });
         const done = await this.decide(approval.id, "approved", `auto: ${v.why}`);
         const result = (done?.note ?? "").replace(/^auto: [^·]*·?\s*/, "");
+        // The last check, at the moment it went out, said no (another order filled the room first): the card goes
+        // back to Phil, pending, instead of ending approved-and-failed where he can't approve it.
+        const notPlaced = result.match(new RegExp(`${NOT_PLACED}(.*)$`));
+        if (done && notPlaced) {
+          const note = `Waits for you: ${NOT_PLACED}${notPlaced[1]!.replace(/\.$/, "")}.`;
+          const back = await this.store.approvals.update(approval.id, { status: "pending", decidedAt: undefined, note });
+          await this.router.log(a.agentId, "approval", `${who}: "${a.title}" not placed on its own (${notPlaced[1]}); it waits for Phil`, a.runId, { kind: a.kind });
+          approval = { ...(back ?? approval), status: "pending", note };
+          continue;
+        }
+        await this.router.log(a.agentId, "approval", `${who}: "${a.title}" ran on its own, ${v.why}: ${result.slice(0, 200)}`, a.runId, { kind: a.kind, body: a.body });
         await this.notify?.(`${who}: ${a.title}`, (result || "done").slice(0, 300)).catch(() => undefined);
         return done ?? approval;
       }
@@ -2311,14 +2322,17 @@ export class Jarvis {
         await this.router.log(a.agentId, "system", `Approved "${a.title}" — ${outcome}`, a.runId, { approvalId: a.id, action: action ?? null });
       }
     }
-    if (outcome) await this.store.approvals.update(a.id, { note: [a.note, outcome].filter(Boolean).join(" · ") });
+    // Worked out once: an in-memory store hands back the live record, so a.note would already hold the outcome below.
+    const finalNote = outcome ? [a.note, outcome].filter(Boolean).join(" · ") : a.note;
+    if (outcome) await this.store.approvals.update(a.id, { note: finalNote });
     // To-dos this card finished are ticked for Phil, in the background so his Approve isn't held up. Not for code:
     // a ship isn't done until the deploy lands (finishShip does it then). Not for HQ's own housekeeping.
     if (decision !== "rejected" && !/^Failed to execute/.test(outcome) && !/^(code\.ship|hq\.update|today\.set|memory\.replace|goals\.(update|benchmarks))$/.test(String((a.payload as { action?: unknown } | undefined)?.action ?? ""))) {
       void this.settleTodos(a, outcome).catch(() => undefined);
     }
-    await this.say({ role: "system", text: `${decision === "approved" ? "Approved" : decision === "rejected" ? "Rejected" : "Edited and approved"}: ${a.title} (${getAgent(a.agentId)?.name ?? a.agentId})${outcome ? ` — ${outcome}` : ""}` });
-    return { ...a, note: outcome ? [a.note, outcome].filter(Boolean).join(" · ") : a.note };
+    // Placing on its own that the last check stopped isn't news: the card goes back to Phil (requestApproval).
+    if (!(/^auto:/.test(note ?? "") && outcome.includes(NOT_PLACED))) await this.say({ role: "system", text: `${decision === "approved" ? "Approved" : decision === "rejected" ? "Rejected" : "Edited and approved"}: ${a.title} (${getAgent(a.agentId)?.name ?? a.agentId})${outcome ? ` — ${outcome}` : ""}` });
+    return { ...a, note: finalNote };
   }
 
   /** Save Phil's change to the text while the item keeps waiting; the agent's original is kept. */

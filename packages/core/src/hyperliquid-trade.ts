@@ -27,6 +27,10 @@ import { defineTool, type ToolDef } from "./tools/index.js";
 const INFO = "https://api.hyperliquid.xyz/info";
 const LIMITS_KEY = "hyperliquid.limits";
 const SPENT_KEY = "hyperliquid.spent";
+/** Resting orders HQ placed, so a cancel on his own never touches one Phil placed by hand. */
+const OURS_KEY = "hyperliquid.ourOrders";
+/** How placing alone says the last check failed: HQ puts the card back for Phil (orchestrator, aloneChecks). */
+export const NOT_PLACED = "not placed on his own: ";
 
 /** The part of Hyperliquid's exchange API HQ uses: nothing that moves money out. */
 export interface HlExchange {
@@ -81,7 +85,11 @@ export function readOrder(p: Record<string, unknown>): OrderAsk {
   if (price !== undefined && !(price > 0)) throw new Error("the limit price isn't a positive number");
   const leverage = p.leverage === undefined ? undefined : Math.round(num(p.leverage));
   if (leverage !== undefined && !(leverage >= 1)) throw new Error("leverage must be 1 or more");
-  return { coin, buy: side === "buy" || side === "long", size: size! > 0 ? size : undefined, usd: dollars! > 0 ? dollars : undefined, price, market: String(p.type ?? (price ? "limit" : "market")).toLowerCase() !== "limit", reduceOnly: p.reduceOnly === true, leverage, cross: p.cross !== false, slippagePct: Math.min(Math.max(num(p.slippagePct) || 2, 0.1), 10) };
+  const market = String(p.type ?? (price ? "limit" : "market")).toLowerCase() !== "limit";
+  const reduceOnly = p.reduceOnly === true;
+  // A market order has no price of its own (one on the card would size it wrongly), and a reduce-only order never
+  // changes leverage: a tiny "close" must not be able to put the rest of a position at 40x.
+  return { coin, buy: side === "buy" || side === "long", size: size! > 0 ? size : undefined, usd: dollars! > 0 ? dollars : undefined, price: market ? undefined : price, market, reduceOnly, leverage: reduceOnly ? undefined : leverage, cross: p.cross !== false, slippagePct: Math.min(Math.max(num(p.slippagePct) || 2, 0.1), 10) };
 }
 
 /** Hyperliquid's smallest new order, in dollars of size. */
@@ -137,9 +145,18 @@ export class HyperliquidTrader {
    * own needs every cap set; asking for it without them is refused and nothing changes.
    */
   async setLimits(l: HlLimits): Promise<HlLimits> {
-    const clean = (v: unknown) => { const n = Math.round(num(v)); return n > 0 ? n : undefined; };
+    // "1,000" and "$500" are 1000 and 500; anything else that isn't a number is refused, not read as "no cap".
+    // Rounded down, so a cap never comes out higher than asked.
+    const clean = (v: unknown, what: string) => {
+      if (v === undefined || v === null || v === "" || v === 0) return undefined;
+      const n = Number(String(v).replace(/[$,\s]/g, "").replace(/x$/i, ""));
+      if (!Number.isFinite(n) || n < 0) throw new Error(`${what} must be a number, not "${String(v)}"`);
+      const f = Math.floor(n);
+      return f > 0 ? f : undefined;
+    };
+    if (l.auto !== undefined && typeof l.auto !== "boolean") throw new Error(`"auto" must be true or false, not "${String(l.auto)}"`);
     const coins = [...new Set((Array.isArray(l.coins) ? l.coins : typeof l.coins === "string" ? String(l.coins).split(/[\s,]+/) : []).map((c) => String(c).trim().toUpperCase()).filter((c) => /^[A-Z0-9]{1,12}$/.test(c)))];
-    const next: HlLimits = { maxTradeUsd: clean(l.maxTradeUsd), maxDayUsd: clean(l.maxDayUsd), auto: l.auto === true, maxLeverage: clean(l.maxLeverage), maxOpenUsd: clean(l.maxOpenUsd), maxDayLossUsd: clean(l.maxDayLossUsd), coins };
+    const next: HlLimits = { maxTradeUsd: clean(l.maxTradeUsd, "the per-trade cap"), maxDayUsd: clean(l.maxDayUsd, "the daily cap"), auto: l.auto === true, maxLeverage: clean(l.maxLeverage, "the leverage cap"), maxOpenUsd: clean(l.maxOpenUsd, "the open positions cap"), maxDayLossUsd: clean(l.maxDayLossUsd, "the loss stop"), coins };
     const missing = autoMissing(next);
     if (next.auto && missing.length) throw new Error(`Pentoshi can trade on his own only once every cap is set: add ${missing.join(", ")}`);
     await this.store.settings.set(LIMITS_KEY, next);
@@ -159,7 +176,7 @@ export class HyperliquidTrader {
     let why: string | undefined;
     try { why = await this.autoRefusal(a); } catch (e) { why = `it couldn't be checked (${(e as Error).message})`; }
     if (!why) return { ok: true, why: "inside your Hyperliquid trading parameters" };
-    return { ok: false, why: /^(not a trade|only Pentoshi|trading on his own is off)/.test(why) ? undefined : `not placed on his own: ${why}` };
+    return { ok: false, why: /^(not a trade|only Pentoshi|trading on his own is off)/.test(why) ? undefined : `${NOT_PLACED}${why}` };
   }
 
   /**
@@ -175,23 +192,42 @@ export class HyperliquidTrader {
     if (!l.auto) return "trading on his own is off";
     const missing = autoMissing(l);
     if (missing.length) return `trading on his own needs ${missing.join(", ")}`;
+    // Phil's pause (Settings › kill switch) stops everything placed alone, risk-off included: he said stop.
+    const kill = await this.store.settings.get<{ all?: boolean; trading?: boolean; agents?: string[] }>("killSwitch", {});
+    if (kill.all || kill.trading || kill.agents?.includes(AUTO_TRADER)) return "trading is paused";
     const s = await this.status();
     if (!s.trading) return s.problem ?? "trading isn't set up";
-    if (action === "hyperliquid.close" || action === "hyperliquid.cancel") return undefined;
+    if (action === "hyperliquid.close") return undefined;
+    if (action === "hyperliquid.cancel") {
+      // Alone, only orders HQ placed: never one Phil placed himself (a stop he set by hand).
+      const coin = String(p.coin ?? "").toUpperCase();
+      const ours = await this.store.settings.get<number[]>(OURS_KEY, []);
+      const open = await this.info<{ coin: string; oid: number }[]>({ type: "openOrders", user: s.account });
+      const hit = open.filter((o) => o.coin.toUpperCase() === coin && (p.oid === undefined || o.oid === num(p.oid)));
+      const theirs = hit.filter((o) => !ours.includes(o.oid));
+      return theirs.length ? `${theirs.length === 1 ? "order" : "orders"} ${theirs.map((o) => o.oid).join(", ")} on ${coin} weren't placed by HQ (yours, by hand?), so cancelling ${theirs.length === 1 ? "it" : "them"} is your call` : undefined;
+    }
+    const coinOk = (c: string) => !l.coins?.length || l.coins.includes(c.toUpperCase());
     if (action === "hyperliquid.leverage") {
       const lev = Math.round(num(p.leverage));
+      if (!coinOk(String(p.coin ?? ""))) return `${String(p.coin ?? "").toUpperCase()} isn't one of the coins he trades alone (${l.coins!.join(", ")})`;
       return lev >= 1 && lev <= l.maxLeverage! ? undefined : `${lev}x is over your ${l.maxLeverage}x leverage cap`;
     }
     const ask = readOrder(p);
     if (ask.reduceOnly) return undefined;
-    if (l.coins?.length && !l.coins.includes(ask.coin)) return `${ask.coin} isn't one of the coins he trades alone (${l.coins.join(", ")})`;
+    if (!coinOk(ask.coin)) return `${ask.coin} isn't one of the coins he trades alone (${(l.coins ?? []).join(", ")})`;
     if (ask.leverage === undefined) return `the order doesn't say its leverage (alone, up to ${l.maxLeverage}x)`;
     if (ask.leverage > l.maxLeverage!) return `${ask.leverage}x is over your ${l.maxLeverage}x leverage cap`;
     const q = await this.plan(ask);
     if (l.maxOpenUsd) {
-      const st = await this.info<{ marginSummary?: { totalNtlPos?: string } }>({ type: "clearinghouseState", user: s.account });
-      const open = num(st.marginSummary?.totalNtlPos);
-      if (open + q.notional > l.maxOpenUsd) return `it would take open positions to ${usd(open + q.notional)}, over your ${usd(l.maxOpenUsd)} cap`;
+      const [st, orders] = await Promise.all([
+        this.info<{ marginSummary?: { totalNtlPos?: string } }>({ type: "clearinghouseState", user: s.account }),
+        // Resting orders count too: four resting buys under the cap could all fill.
+        this.info<{ sz?: string; limitPx?: string; reduceOnly?: boolean; isTrigger?: boolean }[]>({ type: "frontendOpenOrders", user: s.account }),
+      ]);
+      const resting = (Array.isArray(orders) ? orders : []).filter((o) => !o.reduceOnly).reduce((t, o) => t + num(o.sz) * num(o.limitPx), 0);
+      const open = num(st.marginSummary?.totalNtlPos) + resting;
+      if (open + q.notional > l.maxOpenUsd) return `it would take open positions${resting ? " and resting orders" : ""} to ${usd(open + q.notional)}, over your ${usd(l.maxOpenUsd)} cap`;
     }
     let pnl: number;
     try { pnl = await this.dayPnl(s.account!); } catch (e) { return `today's PnL couldn't be read (${(e as Error).message}), so the loss stop can't be checked`; }
@@ -223,13 +259,19 @@ export class HyperliquidTrader {
     const m = await this.market(ask.coin);
     if (!m.mark) throw new Error(`no mark price for ${m.coin} right now`);
     if (ask.leverage && ask.leverage > m.maxLeverage) throw new Error(`${m.coin} allows up to ${m.maxLeverage}x, not ${ask.leverage}x`);
-    const size = formatSize(ask.size ?? ask.usd! / (ask.price ?? m.mark), m.szDecimals);
+    // The highest price each coin can really fill at: a buy limit never fills above its price, but a sell limited below
+    // the mark crosses the book and fills near the mark. Sized and valued at that, so a far-off limit can't slip past
+    // the caps (a $499 sell at a quarter of the mark used to send four times the size).
+    const ref = ask.market || ask.price === undefined ? m.mark : ask.buy ? ask.price : Math.max(ask.price, m.mark);
+    let size = formatSize(ask.size ?? ask.usd! / ref, m.szDecimals);
+    // Rounding the size down could leave a $10 order at $9.48: one step up meets Hyperliquid's minimum.
+    if (ask.size === undefined && !ask.reduceOnly && num(size) * ref < MIN_ORDER_USD && ask.usd! >= MIN_ORDER_USD) size = formatSize((Math.round(num(size) * 10 ** m.szDecimals) + 1) / 10 ** m.szDecimals, m.szDecimals);
     // A market order is an immediate-or-cancel limit a little past the mark, so it can't fill at any price.
     const raw = ask.market ? m.mark * (ask.buy ? 1 + ask.slippagePct / 100 : 1 - ask.slippagePct / 100) : ask.price!;
     const price = formatPrice(raw, m.szDecimals);
     // A limit price goes out exactly as the card shows it, or not at all.
     if (!ask.market && Number(price) !== ask.price) throw new Error(`${m.coin} prices go in steps here: ${px(ask.price!)} would be sent as ${price}; put ${price} (or the next step) on the card`);
-    const notional = num(size) * (ask.market ? m.mark : num(price));
+    const notional = num(size) * Math.max(ask.market ? m.mark : num(price), ref);
     // Hyperliquid refuses a new order under $10 (Phil's "$1 test trade", Nov 20): say so before a card is made.
     if (!ask.reduceOnly && notional < MIN_ORDER_USD) throw new Error(`Hyperliquid's smallest order is ${usd(MIN_ORDER_USD)}; this one is $${notional.toFixed(2)}. Make it at least ${usd(MIN_ORDER_USD)} (with leverage, the margin can be less)`);
     return { m, size, price, notional };
@@ -277,8 +319,8 @@ export class HyperliquidTrader {
     const blocked = await this.preflight({ ...a, payload });
     if (blocked) throw new Error(blocked);
     // Placed on his own: checked once more now, in line behind any order before it (exposure and the loss stop move).
-    if (/^auto:/.test(a.note ?? "") && !ask.reduceOnly) { const why = await this.autoRefusal({ ...a, payload }); if (why) throw new Error(`not placed: ${why}`); }
-    if (ask.leverage) await this.opts.exchange.updateLeverage({ asset: q.m.asset, isCross: ask.cross, leverage: ask.leverage });
+    if (/^auto:/.test(a.note ?? "") && !ask.reduceOnly) { const why = await this.autoRefusal({ ...a, payload }); if (why) throw new Error(`${NOT_PLACED}${why}`); }
+    if (ask.leverage && !ask.reduceOnly) await this.opts.exchange.updateLeverage({ asset: q.m.asset, isCross: ask.cross, leverage: ask.leverage });
     const r = await this.opts.exchange.order({ orders: [{ a: q.m.asset, b: ask.buy, p: q.price, s: q.size, r: ask.reduceOnly, t: { limit: { tif: ask.market ? "Ioc" : "Gtc" } } }], grouping: "na" });
     const st = r.response.data.statuses[0];
     if (!st) throw new Error("Hyperliquid sent no status back; check the account");
@@ -288,6 +330,8 @@ export class HyperliquidTrader {
       return `Hyperliquid: ${ask.buy ? "bought" : "sold"} ${st.filled.totalSz} ${q.m.coin} at ${px(num(st.filled.avgPx))} (${usd(num(st.filled.totalSz) * num(st.filled.avgPx))})${num(st.filled.totalSz) < num(q.size) ? `, ${num(q.size) - num(st.filled.totalSz)} of the ${q.size} didn't fill within ${ask.slippagePct}% of the mark and was cancelled` : ""}${ask.reduceOnly ? ", reducing the position" : ""}. Order ${st.filled.oid}.`;
     }
     if (!ask.reduceOnly) await this.tally(q.notional);
+    const ours = await this.store.settings.get<number[]>(OURS_KEY, []);
+    await this.store.settings.set(OURS_KEY, [...ours, st.resting.oid].slice(-200));
     return `Hyperliquid: ${ask.buy ? "buy" : "sell"} order for ${q.size} ${q.m.coin} at ${px(num(q.price))} is resting on the book (order ${st.resting.oid}); cancel it with a hyperliquid.cancel card.`;
   }
 
