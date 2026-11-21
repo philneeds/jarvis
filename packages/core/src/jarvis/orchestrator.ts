@@ -1990,10 +1990,16 @@ export class Jarvis {
    * No answer, or one that isn't JSON, is nothing: the caller changes nothing.
    */
   private async smallAsk<T>(system: string, prompt: string, parentRunId?: string): Promise<T | undefined> {
-    const ask = (modelKey: "claude-haiku" | "claude-sonnet") => Promise.race([
-      this.router.run(getAgent("jarvis")!, { system, prompt, direct: true, maxTurns: 1, modelKey, background: true, parentRunId }),
-      new Promise<undefined>((res) => setTimeout(() => res(undefined), Number(process.env.DESK_CHECK_TIMEOUT_MS ?? 30_000))),
-    ]);
+    // The timer is cleared once there's an answer: left running, it held the process up for 30 seconds after each one.
+    const ask = async (modelKey: "claude-haiku" | "claude-sonnet") => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          this.router.run(getAgent("jarvis")!, { system, prompt, direct: true, maxTurns: 1, modelKey, background: true, parentRunId }),
+          new Promise<undefined>((res) => { timer = setTimeout(() => res(undefined), Number(process.env.DESK_CHECK_TIMEOUT_MS ?? 30_000)); }),
+        ]);
+      } finally { clearTimeout(timer); }
+    };
     let r = await ask("claude-haiku");
     if (r?.blocked) r = await ask("claude-sonnet");
     if (!r || r.blocked) return undefined;
