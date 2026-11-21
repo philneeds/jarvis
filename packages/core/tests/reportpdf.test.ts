@@ -118,3 +118,14 @@ test("a deck's two weeks: the newest team-wide pull and the one before it, or th
   const named = await pullsFor(store, { week: "11/02/2026-11/08/2026", prior: "10/26/2026 - 11/01/2026" });
   assert.equal(named.week?.start, "11/02/2026"); assert.equal(named.prior?.start, "10/26/2026");
 });
+
+test("a rep with 4 leads, 1 demo and 1 sale closes 25% of issue, though the sheet's own close % says 100%", async () => {
+  // Phil, Nov 21: this rep showed "~100%" on a hand-typed board (sold ÷ demos). HQ's codes give sold ÷ net issued.
+  const { fillNumbers } = await import("../src/salesnumbers.js");
+  const row = (rep: string, issued: number, netIssued: number, demos: number, sold: number, gross: number) => ({ rep, issued, netIssued, demos, sold, gross, cancels: 0, declines: 0, preCount: 0, pre: 0, net: 0 });
+  const week = { start: "11/01/2026", end: "11/15/2026", at: "x", team: row("Team", 18, 15, 8, 4, 122_185), reps: [row("Lane, Avery", 4, 4, 1, 1, 13_944), row("Quill, Morgan", 14, 11, 7, 3, 108_241)] };
+  const f = (s: string) => fillNumbers(s, { week }).text;
+  assert.equal(f("{{rep:Lane.close}} · {{rep:Lane.demo}} · {{rep:Lane.close|0}}"), "25.0% · 25.0% · 25%");
+  assert.equal(f("{{top.close.1.rep}} {{top.close.1|0}} / {{top.close.2.rep}} {{top.close.2|0}}"), "Quill, Morgan 27% / Lane, Avery 25%");
+  assert.equal(f("{{close}} ({{sold}} of {{net_issued}} net issued)"), "26.7% (4 of 15 net issued)");
+});
