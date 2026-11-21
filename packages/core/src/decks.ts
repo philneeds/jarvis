@@ -33,7 +33,7 @@ export const DECK_HINT = [
   '{"title":"...","subtitle":"...","slides":[{"title":"...","stats":[{"label":"Revenue","value":"$42,300","change":"+12% vs last week"}],"chart":{"type":"bar|line|pie","title":"...","labels":["Mon","Tue"],"series":[{"name":"Sales","values":[1200,900]}]},"table":{"columns":["Rep","Closed"],"rows":[["Ana",5]]},"bullets":["..."],"notes":"what to say on this slide"}]}',
   "Every slide needs a title; use at most one of chart or table per slide, up to 4 stats, up to 6 short bullets, up to 12 table rows. Numbers in charts are plain numbers. Use only figures from the data; never invent one. HQ builds the file and sends it to Phil; outside the block, reply with the three headlines in a few lines.",
   "If a template exists (deck_template), follow its slide order and section names.",
-  'When Phil wants HIS template filled in (his own slides, look and logos kept), write a fenced block tagged "deckfill" instead: {"title":"ProEdge weekly sales 11/09-11/15","numbers":{"week":"11/09/2026-11/15/2026","prior":"11/02/2026-11/08/2026"},"edits":[{"slide":2,"find":"Close rate 15%","replace":"Close rate {{close}}"},{"slide":10,"para":3,"text":"{{top.close.1.rep}}"},{"slide":10,"para":4,"text":"{{top.close.1}}"}]}. deck_template numbers every paragraph on every slide. For tables, leaderboards and anything that repeats (names, percentages), point at the paragraph by its number with "para" and give its whole new "text"; rewrite a board row by row in order, and give "text":"" to blank a row that has no one now. Elsewhere you can quote text with "find" and give its "replace". Change every number, date and name that the new data changes; leave the rest. Charts in the template aren\'t changed: say which ones need updating by hand. HQ reports any edit that didn\'t match, and when Google is connected saves the result straight into Phil\'s Google Drive as Google Slides, in the venture\'s deck folder ("ProEdge decks"), and posts where it went (or, if Drive refuses, attaches the .pptx and says why): say HQ is saving it to his Drive, not that it is there, and don\'t say you can\'t give him a link. HQ checks every deck before Phil gets it: an edit that missed, or a template number left unchanged, comes back to you once to fix. To check a deck against the report yourself, deck_last reads the last one back slide by slide (no Drive needed).',
+  'When Phil wants HIS template filled in (his own slides, look and logos kept), write a fenced block tagged "deckfill" instead: {"title":"ProEdge sales 11/01-11/24","numbers":{"period":"11/01/2026-11/24/2026","prior":"10/01/2026-10/24/2026"},"edits":[{"slide":2,"find":"Close rate 15%","replace":"Close rate {{close}}"},{"slide":10,"para":3,"text":"{{top.close.1.rep}}"},{"slide":10,"para":4,"text":"{{top.close.1}}"}]}. deck_template numbers every paragraph on every slide. For tables, leaderboards and anything that repeats (names, percentages), point at the paragraph by its number with "para" and give its whole new "text"; rewrite a board row by row in order, and give "text":"" to blank a row that has no one now. Elsewhere you can quote text with "find" and give its "replace". Change every number, date and name that the new data changes; leave the rest. Charts in the template aren\'t changed: say which ones need updating by hand. HQ reports any edit that didn\'t match, and when Google is connected saves the result straight into Phil\'s Google Drive as Google Slides, in the venture\'s deck folder ("ProEdge decks"), and posts where it went (or, if Drive refuses, attaches the .pptx and says why): say HQ is saving it to his Drive, not that it is there, and don\'t say you can\'t give him a link. HQ checks every deck before Phil gets it: an edit that missed, or a template number left unchanged, comes back to you once to fix. To check a deck against the report yourself, deck_last reads the last one back slide by slide (no Drive needed).',
   numbersHint(),
 ].join("\n");
 
@@ -225,7 +225,7 @@ export function fillProblems(f: Pick<FillResult, "missed" | "stale" | "charts"> 
   return parts.length ? parts.join(". ") : undefined;
 }
 
-export async function fillTemplate(store: Store, spec: { title?: string; edits: FillEdit[]; numbers?: { week?: string; prior?: string } }, by: { agentId: string; venture: string }): Promise<FillResult> {
+export async function fillTemplate(store: Store, spec: { title?: string; edits: FillEdit[]; numbers?: { week?: string; period?: string; prior?: string } }, by: { agentId: string; venture: string }): Promise<FillResult> {
   const tpl = await getTemplate(store, by.venture);
   if (!tpl) throw new Error("there's no template to fill; Phil uploads one on the agent's page");
   const file = await loadFile(tpl.fileId);
@@ -316,7 +316,7 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
 }
 
 /** Tidy an agent's deckfill block. */
-export function normalizeFill(raw: unknown): { title?: string; edits: FillEdit[]; numbers?: { week?: string; prior?: string } } | undefined {
+export function normalizeFill(raw: unknown): { title?: string; edits: FillEdit[]; numbers?: { week?: string; period?: string; prior?: string } } | undefined {
   const o = (raw ?? {}) as { title?: unknown; edits?: unknown; numbers?: unknown };
   const edits: FillEdit[] = [];
   for (const r of Array.isArray(o.edits) ? o.edits : []) {
@@ -329,8 +329,9 @@ export function normalizeFill(raw: unknown): { title?: string; edits: FillEdit[]
     if (para !== undefined ? text === undefined && !(find && replace !== undefined) : !(find && replace !== undefined)) continue;
     edits.push({ slide, ...(find ? { find } : {}), ...(replace !== undefined ? { replace } : {}), ...(para !== undefined ? { para } : {}), ...(text !== undefined ? { text } : {}) });
   }
-  const nb = (o.numbers ?? {}) as { week?: unknown; prior?: unknown };
-  const numbers = typeof nb.week === "string" || typeof nb.prior === "string" ? { ...(typeof nb.week === "string" ? { week: nb.week } : {}), ...(typeof nb.prior === "string" ? { prior: nb.prior } : {}) } : undefined;
+  const nb = (o.numbers ?? {}) as { week?: unknown; period?: unknown; prior?: unknown };
+  const span = typeof nb.period === "string" ? nb.period : typeof nb.week === "string" ? nb.week : undefined;
+  const numbers = span || typeof nb.prior === "string" ? { ...(span ? { period: span } : {}), ...(typeof nb.prior === "string" ? { prior: nb.prior } : {}) } : undefined;
   return edits.length ? { title: typeof o.title === "string" ? o.title : undefined, edits, ...(numbers ? { numbers } : {}) } : undefined;
 }
 

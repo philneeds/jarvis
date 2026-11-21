@@ -96,7 +96,7 @@ test("each number lands in the column it sits under, blanks stay blank, and Phil
   assert.equal(bad.errors.length, 2);
   assert.match(bad.errors[0]!, /no rep "Nobody" in the 11\/09–11\/15 report \(reps: Lane, Avery; Quill, Morgan\)/);
   assert.match(bad.errors[1]!, /no figure called "closing"/);
-  assert.match(fillNumbers("{{prior.close}}", { week }).errors[0]!, /no lp_report pull of Sales Efficiency for the week before/);
+  assert.match(fillNumbers("{{prior.close}}", { week }).errors[0]!, /no lp_report pull of Sales Efficiency for the comparison period/);
 });
 
 test("a PDF that isn't a column report reads as nothing here, so the plain text is used", async () => {
@@ -128,4 +128,21 @@ test("a rep with 4 leads, 1 demo and 1 sale closes 25% of issue, though the shee
   assert.equal(f("{{rep:Lane.close}} · {{rep:Lane.demo}} · {{rep:Lane.close|0}}"), "25.0% · 25.0% · 25%");
   assert.equal(f("{{top.close.1.rep}} {{top.close.1|0}} / {{top.close.2.rep}} {{top.close.2|0}}"), "Quill, Morgan 27% / Lane, Avery 25%");
   assert.equal(f("{{close}} ({{sold}} of {{net_issued}} net issued)"), "26.7% (4 of 15 net issued)");
+});
+
+test("the deck's period is the month to date, compared with the same days of the month before", async () => {
+  const { deckPeriod, deckPeriodText, fillNumbers } = await import("../src/salesnumbers.js");
+  const at = (iso: string) => new Date(iso);
+  // Tuesday Nov 24 2026, built Monday night or on the day: the 1st through today.
+  assert.deepEqual(deckPeriod(at("2026-11-24T14:00:00Z")), { start: "11/01/2026", end: "11/24/2026", priorStart: "10/01/2026", priorEnd: "10/24/2026" });
+  assert.deepEqual(deckPeriod(at("2026-11-24T01:00:00Z")), { start: "11/01/2026", end: "11/23/2026", priorStart: "10/01/2026", priorEnd: "10/23/2026" }, "Monday 8 pm Eastern is still Monday");
+  // On the 1st there is nothing of the new month yet: the whole month just ended.
+  assert.deepEqual(deckPeriod(at("2026-12-01T15:00:00Z")), { start: "11/01/2026", end: "11/30/2026", priorStart: "10/01/2026", priorEnd: "10/31/2026" });
+  // The month before is shorter, and January looks back to December.
+  assert.deepEqual(deckPeriod(at("2027-03-31T15:00:00Z")), { start: "03/01/2027", end: "03/31/2027", priorStart: "02/01/2027", priorEnd: "02/28/2027" });
+  assert.deepEqual(deckPeriod(at("2027-01-12T15:00:00Z")), { start: "01/01/2027", end: "01/12/2027", priorStart: "12/01/2026", priorEnd: "12/12/2026" });
+  assert.match(deckPeriodText(at("2026-11-24T14:00:00Z")), /"numbers":\{"period":"11\/01\/2026-11\/24\/2026","prior":"10\/01\/2026-10\/24\/2026"\}/);
+  const row = { rep: "Team", issued: 60, netIssued: 50, demos: 35, sold: 10, gross: 250_000, cancels: 1, declines: 1, preCount: 2, pre: 40_000, net: 120_000 };
+  const period = { start: "11/01/2026", end: "11/15/2026", at: "x", team: row, reps: [] };
+  assert.equal(fillNumbers("{{period}}: {{close}} of {{net_issued}} net issued, demo {{demo|0}}", { week: period }).text, "11/01–11/15: 20.0% of 50 net issued, demo 70%");
 });

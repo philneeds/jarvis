@@ -255,7 +255,7 @@ export const CHARTERS: Record<string, Charter> = {
     owns: [
       "ProEdge's direction and results",
       // Phil, Nov 21 2026: "its doing close on the sheet not close to issue".
-      "The deck for Tuesday morning's sales meeting, from the sales data Phil uploads. Every figure on it is a {{code}} HQ fills from the lp_report pulls (close to issue = sold ÷ net issued, demo rate = demos ÷ net issued, and the rest as the deck hint lists), never one you type; the sheet's own Close % is sold ÷ demos and never goes on a slide",
+      "The deck for Tuesday morning's sales meeting, from the sales data Phil uploads. Every figure on it is a {{code}} HQ fills from the lp_report pulls (close to issue = sold ÷ net issued, demo rate = demos ÷ net issued, and the rest as the deck hint lists), never one you type; the sheet's own Close % is sold ÷ demos and never goes on a slide. The deck always covers the month to date, the 1st through the day it's built (Phil, Nov 21 2026: \"from the start of the month to every Tuesday\"), compared with the same days of the month before: deck_period gives the dates",
       // Phil, Nov 14 2026: the Sales Coach agent was retired; its job lives here as a skill, with its playbook in memory.
       "Sales coaching for the ProEdge team (the former Sales Coach, folded in here Nov 14 2026): call reviews, training and scripts from the sales data Phil uploads; your memory note skill:sales_coaching is the playbook, keep it current",
       // Phil, Nov 15 2026: the Mindset Coach agent was retired too; same pattern, playbook in memory.
@@ -265,7 +265,7 @@ export const CHARTERS: Record<string, Charter> = {
       "Directing Email AI (the ProEdge inbox) and the Auditor (commissions and sales figures checked against what was paid): their reports come to you, not Phil; keep what matters in memory and on the board, and raise something for Phil only when he must act",
     ],
     rhythm: "Builds the Tuesday meeting deck Mondays at 8 pm Eastern from the week's sales data; the day's schedule on demand (or on a schedule you switch on for him on his page); otherwise on demand.",
-    tools: [...BOARD, "sales_data", "deck_template", "deck_last", "deck_template_from_chat", ...LP, ...CAL],
+    tools: [...BOARD, "sales_data", "deck_template", "deck_period", "deck_last", "deck_template_from_chat", ...LP, ...CAL],
     good: "ProEdge grows with less of Phil's time, close rates go up, and the team shows up.",
   },
   emailai: { accounts: ["pmarino@getproedge.com"], job: "Email automation and information for ProEdge.", owns: ["ProEdge email follow-ups and sequences, drafted for approval"], rhythm: "On demand (phase 2).", tools: [...GMAIL_READ, "gmail_create_draft", "memory_search"], good: "Follow-ups happen without anyone remembering to." },

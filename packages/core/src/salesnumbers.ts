@@ -10,7 +10,11 @@ import type { ReportRow, ReportTable } from "./reportpdf.js";
  *   NSLI           = (net $ + 70% of pre-net $) ÷ issued (Nov 16: the sheet's own NSLI leaves pre-net out)
  *   cancel rate    = cancelled ÷ sold; credit declines aren't cancels
  *   pending        = pre-net, about 70% of which goes net: projected net = net $ + 70% of pre-net $
- * Every pull of the report (lp_report, team-wide) is kept by its dates, so a deck can name this week and last.
+ * Every pull of the report (lp_report, team-wide) is kept by its dates, so a deck can name its period and the one it
+ * is compared with.
+ * The period (Phil, Nov 21 2026: "always from the start of the month to every Tuesday"): month to date, the 1st
+ * through the day the deck is built; compared with the same days of the month before. deckPeriod() works the dates
+ * out, so they aren't left to an agent.
  */
 export interface SalesRow {
   rep: string;
@@ -73,6 +77,30 @@ const fmt = (kind: Kind, v: number | undefined, decimals?: number) => {
   return Math.round(v).toLocaleString("en-US");
 };
 
+const us = (y: number, m: number, d: number) => `${String(m).padStart(2, "0")}/${String(d).padStart(2, "0")}/${y}`;
+const daysIn = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+
+/**
+ * The dates a deck covers: the 1st of the month through today (Eastern), and the same days of the month before to
+ * compare with. Built on the 1st, there is nothing of the new month yet: it covers the whole month just ended,
+ * compared with the whole month before that.
+ */
+export function deckPeriod(now: Date = new Date()): { start: string; end: string; priorStart: string; priorEnd: string } {
+  const [y, m, d] = now.toLocaleDateString("en-CA", { timeZone: "America/New_York" }).split("-").map(Number) as [number, number, number];
+  const back = (yy: number, mm: number) => (mm === 1 ? ([yy - 1, 12] as const) : ([yy, mm - 1] as const));
+  if (d === 1) {
+    const [py, pm] = back(y, m), [qy, qm] = back(py, pm);
+    return { start: us(py, pm, 1), end: us(py, pm, daysIn(py, pm)), priorStart: us(qy, qm, 1), priorEnd: us(qy, qm, daysIn(qy, qm)) };
+  }
+  const [py, pm] = back(y, m);
+  return { start: us(y, m, 1), end: us(y, m, d), priorStart: us(py, pm, 1), priorEnd: us(py, pm, Math.min(d, daysIn(py, pm))) };
+}
+/** The period in words for the agent, with the deckfill "numbers" to copy. */
+export function deckPeriodText(now: Date = new Date()): string {
+  const p = deckPeriod(now);
+  return `The deck covers ${p.start} to ${p.end} (month to date: the 1st through today, Phil's rule), compared with ${p.priorStart} to ${p.priorEnd} (the same days of the month before). Run lp_report for both (Sales Efficiency by Sales Rep, all markets, no rep), then put this in the deckfill: "numbers":{"period":"${p.start}-${p.end}","prior":"${p.priorStart}-${p.priorEnd}"}. Never a single week unless Phil asks for one.`;
+}
+
 /** Keep a pull by its dates (and market), newest replacing an older pull of the same range. */
 export async function saveSalesPull(store: Pick<Store, "settings">, pull: SalesPull): Promise<void> {
   const all = await store.settings.get<SalesPull[]>(SALES_PULLS_KEY, []);
@@ -87,10 +115,10 @@ const short = (s: string) => s.replace(/^(\d{1,2})\/(\d{1,2})\/\d{4}$/, (_m, a: 
  * The two pulls a deck uses: "week" (the newest team-wide pull, or the one whose dates the deck names) and "prior"
  * (the pull that ends before it starts, nearest first).
  */
-export async function pullsFor(store: Pick<Store, "settings">, want?: { week?: string; prior?: string }): Promise<{ week?: SalesPull; prior?: SalesPull }> {
+export async function pullsFor(store: Pick<Store, "settings">, want?: { week?: string; period?: string; prior?: string }): Promise<{ week?: SalesPull; prior?: SalesPull }> {
   const all = (await store.settings.get<SalesPull[]>(SALES_PULLS_KEY, [])).filter((p) => !p.market);
   const named = (r?: string) => { if (!r) return undefined; const [a, b] = r.split(/\s*(?:-|–|to)\s*/); return all.filter((p) => day(p.start) === day(a ?? "") && day(p.end) === day(b ?? "")).at(-1); };
-  const week = named(want?.week) ?? [...all].sort((a, b) => day(a.end) - day(b.end) || a.at.localeCompare(b.at)).at(-1);
+  const week = named(want?.period ?? want?.week) ?? [...all].sort((a, b) => day(a.end) - day(b.end) || a.at.localeCompare(b.at)).at(-1);
   const prior = named(want?.prior) ?? (week ? all.filter((p) => day(p.end) < day(week.start)).sort((a, b) => day(b.end) - day(a.end))[0] : undefined);
   return { week, prior };
 }
@@ -103,10 +131,10 @@ const findRep = (pull: SalesPull, name: string) => {
 
 /**
  * Fill the {{...}} codes in a deck edit with the numbers:
- *   {{close}} {{demo}} {{gross}} ...           the team, this week          {{prior.close}}   the team, the week before
+ *   {{close}} {{demo}} {{gross}} ...           the team, the deck's period  {{prior.close}}   the comparison period
  *   {{rep:Marino.close}}                        one rep (last name is enough) {{prior.rep:Marino.close}}
  *   {{top.close.1.rep}} {{top.close.1}}         a leaderboard: the 1st rep by close, and their figure
- *   {{week}} {{prior.week}}                     the dates, "11/09–11/15"
+ *   {{period}} {{prior.period}}                 the dates, "11/01–11/24" ({{week}} still reads the same)
  *   |0 after a percentage drops the decimal: {{demo|0}} is "73%".
  * Returns the text, or why a code can't be filled.
  */
@@ -118,9 +146,9 @@ export function fillNumbers(text: string, pulls: { week?: SalesPull; prior?: Sal
     const isPrior = code.startsWith("prior.");
     if (isPrior) code = code.slice(6);
     const pull = isPrior ? pulls.prior : pulls.week;
-    if (!pull) { errors.push(`${whole}: there's no lp_report pull of Sales Efficiency for ${isPrior ? "the week before" : "this week"}; run lp_report for those dates first`); return whole; }
+    if (!pull) { errors.push(`${whole}: there's no lp_report pull of Sales Efficiency for ${isPrior ? "the comparison period" : "the deck's period"}; run lp_report for those dates first`); return whole; }
     const decimals = opt !== undefined && /^\d$/.test(opt.trim()) ? Number(opt.trim()) : undefined;
-    if (code === "week") return `${short(pull.start)}–${short(pull.end)}`;
+    if (code === "week" || code === "period") return `${short(pull.start)}–${short(pull.end)}`;
     // How many reps ran appointments that week ("across 14 reps").
     if (code === "reps") return String(pull.reps.filter((r) => r.issued > 0).length);
     let row: SalesRow | undefined = pull.team, metric = code;
@@ -151,5 +179,5 @@ export function fillNumbers(text: string, pulls: { week?: SalesPull; prior?: Sal
 
 /** The codes, for the agent: every figure with its definition, and the reps in the newest pull. */
 export function numbersHint(): string {
-  return `Numbers on a deck are written by HQ, never typed: put a code where the figure goes and HQ fills it from the last lp_report pull of Sales Efficiency (run lp_report for this week and last week first). Codes: {{close}} {{demo}} … for the team this week; {{prior.close}} for the week before; {{rep:Marino.close}} for one rep (last name is enough); {{top.close.1.rep}} and {{top.close.1}} for a leaderboard's first name and figure (2, 3, … down the board), and {{top.gross.1.gross_share}} for another figure of that same rep; {{week}} and {{prior.week}} for the dates; {{reps}} for how many reps ran appointments; add |0 to a percentage for no decimal ({{demo|0}}). Figures: ${Object.entries(METRICS).map(([k, v]) => `${k} (${v.says})`).join("; ")}. Text around a code is yours ("Close rate {{close}}").`;
+  return `Numbers on a deck are written by HQ, never typed: put a code where the figure goes and HQ fills it from the last lp_report pull of Sales Efficiency (deck_period gives the dates to pull: month to date and its comparison). Codes: {{close}} {{demo}} … for the team over the deck's period; {{prior.close}} for the comparison period; {{rep:Marino.close}} for one rep (last name is enough); {{top.close.1.rep}} and {{top.close.1}} for a leaderboard's first name and figure (2, 3, … down the board), and {{top.gross.1.gross_share}} for another figure of that same rep; {{period}} and {{prior.period}} for the dates; {{reps}} for how many reps ran appointments; add |0 to a percentage for no decimal ({{demo|0}}). Figures: ${Object.entries(METRICS).map(([k, v]) => `${k} (${v.says})`).join("; ")}. Text around a code is yours ("Close rate {{close}}").`;
 }

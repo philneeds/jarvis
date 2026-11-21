@@ -139,6 +139,12 @@ export const DATA_TOOLS: ToolDef[] = [
     },
   }),
   defineTool({
+    name: "deck_period",
+    description: "The dates the sales meeting deck covers, worked out by HQ: month to date (the 1st through today) and the period to compare with, plus the \"numbers\" line for the deckfill. Call it before lp_report whenever you build or rebuild the deck.",
+    schema: {},
+    async handler() { const { deckPeriodText } = await import("./salesnumbers.js"); return deckPeriodText(); },
+  }),
+  defineTool({
     name: "deck_last",
     description: "The last deck HQ built for your venture, read back slide by slide as it is now (numbered paragraphs, as in the template listing), with any template numbers left unchanged and the slides that hold charts. Use it to check a deck against the report.",
     schema: {},
