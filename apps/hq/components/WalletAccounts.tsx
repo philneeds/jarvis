@@ -5,6 +5,14 @@ import { api, post, put } from "@/lib/api";
 import { BrandLogo } from "@/components/BrandLogo";
 
 interface Account { label: string; address: string }
+interface Limits { maxTradeUsd?: number; maxDayUsd?: number; auto?: boolean; maxLeverage?: number; maxOpenUsd?: number; maxDayLossUsd?: number; coins?: string[] }
+const money = (n?: number) => (n ? `$${n.toLocaleString("en-US")}` : "");
+/** The parameters in words, the way the card and Pentoshi's tool put them. */
+function limitsLine(l: Limits = {}): string {
+  const caps = `${l.maxTradeUsd ? `${money(l.maxTradeUsd)} a trade` : "no per-trade cap"}, ${l.maxDayUsd ? `${money(l.maxDayUsd)} a day` : "no daily cap"}`;
+  if (!l.auto) return `Every order waits for your approval card. Caps: ${caps}.`;
+  return `Pentoshi trades on his own: up to ${caps}, ${l.maxLeverage}x leverage at most${l.maxOpenUsd ? `, ${money(l.maxOpenUsd)} open at most` : ""}, stopping when down ${money(l.maxDayLossUsd)} over 24 hours, ${l.coins?.length ? `only ${l.coins.join(", ")}` : "any coin"}. An order outside these is a card for you; changing them is always your call.`;
+}
 
 /**
  * A Settings row for wallets an agent reads by public address (Hyperliquid for Pentoshi, Polymarket for Cat). A public
@@ -12,7 +20,7 @@ interface Account { label: string; address: string }
  */
 export function WalletAccounts({ name, blurb, api: base, hint }: { name: string; blurb: string; api: string; hint?: string }) {
   const [list, setList] = useState<Account[]>();
-  const [trading, setTrading] = useState<{ trading: boolean; agent?: string; account?: string; problem?: string; limits?: { maxTradeUsd?: number; maxDayUsd?: number } }>();
+  const [trading, setTrading] = useState<{ trading: boolean; agent?: string; account?: string; problem?: string; limits?: Limits }>();
   const [label, setLabel] = useState("");
   const [address, setAddress] = useState("");
   const [msg, setMsg] = useState<string>();
@@ -54,21 +62,34 @@ export function WalletAccounts({ name, blurb, api: base, hint }: { name: string;
         {trading && (
           <p className="m-0" style={{ color: trading.trading ? "var(--green)" : "var(--muted)" }}>
             {trading.trading
-              ? `Trading on for ${trading.account?.slice(0, 8)}…${trading.account?.slice(-6)} through API wallet ${trading.agent?.slice(0, 8)}… (it can trade, not withdraw). Every order waits for your approval card. Limits: ${trading.limits?.maxTradeUsd ? `$${trading.limits.maxTradeUsd} a trade` : "none a trade"}, ${trading.limits?.maxDayUsd ? `$${trading.limits.maxDayUsd} a day` : "none a day"}.`
+              ? `Trading on for ${trading.account?.slice(0, 8)}…${trading.account?.slice(-6)} through API wallet ${trading.agent?.slice(0, 8)}… (it can trade, not withdraw). ${limitsLine(trading.limits)}`
               : `Trading off: ${trading.problem}.`}
           </p>
         )}
         {trading?.trading && (
-          <form className="flex flex-wrap items-center gap-2" onSubmit={async (e) => {
+          <form className="flex flex-col gap-2" onSubmit={async (e) => {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
-            try { const r = await put<{ limits: { maxTradeUsd?: number; maxDayUsd?: number } }>(`/api/${base}/limits`, { maxTradeUsd: Number(f.get("trade")) || 0, maxDayUsd: Number(f.get("day")) || 0 }); setTrading({ ...trading, limits: r.limits }); setBad(false); setMsg("Limits saved."); }
+            const auto = f.get("auto") === "on";
+            if (auto && !trading.limits?.auto && !confirm("Let Pentoshi place real trades on your Hyperliquid account without asking, inside these caps?")) return;
+            const body = { auto, maxTradeUsd: Number(f.get("trade")) || 0, maxDayUsd: Number(f.get("day")) || 0, maxLeverage: Number(f.get("lev")) || 0, maxOpenUsd: Number(f.get("open")) || 0, maxDayLossUsd: Number(f.get("loss")) || 0, coins: String(f.get("coins") ?? "") };
+            try { const r = await put<{ limits: Limits }>(`/api/${base}/limits`, body); setTrading({ ...trading, limits: r.limits }); setBad(false); setMsg("Saved."); }
             catch (err) { setBad(true); setMsg((err as Error).message); }
           }}>
-            <span style={{ color: "var(--muted)" }}>Limits ($, empty = none):</span>
-            <input name="trade" className="input h-8 w-28" inputMode="numeric" placeholder="per trade" aria-label="Limit per trade in dollars" defaultValue={trading.limits?.maxTradeUsd ?? ""} />
-            <input name="day" className="input h-8 w-28" inputMode="numeric" placeholder="per day" aria-label="Limit per day in dollars" defaultValue={trading.limits?.maxDayUsd ?? ""} />
-            <button className="btn btn-sm h-8">Save limits</button>
+            <label className="flex items-center gap-2" style={{ color: "var(--ink)" }}>
+              <input type="checkbox" name="auto" defaultChecked={!!trading.limits?.auto} aria-label="Pentoshi trades on his own" />
+              <span><b>Pentoshi trades on his own</b> inside the caps below (needs per trade, per day, leverage and loss stop). Off: every order waits for your card.</span>
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input name="trade" className="input h-8 w-28" inputMode="numeric" placeholder="$ per trade" aria-label="Cap per trade in dollars" defaultValue={trading.limits?.maxTradeUsd ?? ""} />
+              <input name="day" className="input h-8 w-28" inputMode="numeric" placeholder="$ per day" aria-label="Cap per day in dollars" defaultValue={trading.limits?.maxDayUsd ?? ""} />
+              <input name="lev" className="input h-8 w-24" inputMode="numeric" placeholder="max lev. x" aria-label="Leverage cap" defaultValue={trading.limits?.maxLeverage ?? ""} />
+              <input name="open" className="input h-8 w-28" inputMode="numeric" placeholder="$ open (opt.)" aria-label="Cap on open positions in dollars, optional" defaultValue={trading.limits?.maxOpenUsd ?? ""} />
+              <input name="loss" className="input h-8 w-28" inputMode="numeric" placeholder="$ loss stop" aria-label="Stop trading alone when down this much over 24 hours" defaultValue={trading.limits?.maxDayLossUsd ?? ""} />
+              <input name="coins" className="input h-8 w-40" placeholder="coins (empty = any)" aria-label="Coins he trades alone, comma-separated" defaultValue={trading.limits?.coins?.join(", ") ?? ""} />
+              <button className="btn btn-sm h-8">Save</button>
+            </div>
+            <span style={{ color: "var(--muted)" }}>Size is the position&apos;s full size, not the margin. The loss stop uses Hyperliquid&apos;s own 24-hour PnL; past it, new orders wait for you. Closes and cancels always go through.</span>
           </form>
         )}
         {hint && !list?.length && <p className="m-0" style={{ color: "var(--muted)" }}>{hint}</p>}
@@ -79,6 +100,6 @@ export function WalletAccounts({ name, blurb, api: base, hint }: { name: string;
   );
 }
 
-export const HyperliquidAccounts = () => <WalletAccounts name="Hyperliquid" api="hyperliquid" blurb="Pentoshi reads your own account: positions, liquidation distance, orders, fills and balances. Read-only, from your wallet's public address; nothing can be traded." />;
+export const HyperliquidAccounts = () => <WalletAccounts name="Hyperliquid" api="hyperliquid" blurb="Pentoshi reads your own account (positions, liquidation distance, orders, fills, balances) from its public address. Trading needs the API wallet key on the server; then choose below whether every order waits for you or he trades on his own inside your caps." />;
 export const LighterAccounts = () => <WalletAccounts name="Lighter" api="lighter" blurb="Pentoshi reads your Lighter account and sub-accounts: positions, liquidation distance, PnL and funding paid. Read-only, from the public address of the wallet you use on Lighter; nothing can be traded." />;
 export const PolymarketAccounts = () => <WalletAccounts name="Polymarket" api="polymarket" blurb="Cat reads your own bets: each position's side, price, value and PnL, and winnings to claim. Read-only, from your wallet's public address; nothing can be bet. Market odds on Polymarket and Kalshi need nothing." hint="Your Polymarket address is on your profile page (the 0x… under your name), or in Settings on polymarket.com." />;

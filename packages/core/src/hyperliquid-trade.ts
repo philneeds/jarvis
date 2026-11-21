@@ -4,7 +4,13 @@ import type { Describer, Executor } from "./jarvis/orchestrator.js";
 import { defineTool, type ToolDef } from "./tools/index.js";
 
 /**
- * Trading on Hyperliquid, every order only after Phil approves its card (Phil, Nov 20 2026: "every trade waits").
+ * Trading on Hyperliquid. Two ways, Phil's choice in Settings › Hyperliquid:
+ *   - every order waits for his card (Nov 20 2026: "every trade waits"; the default), or
+ *   - Pentoshi trades on his own inside the parameters Phil set, and only a change to them waits for Phil
+ *     (Nov 21: "pentoshi needs to be able to trade on his own, approvals should only be for parameter changes").
+ *     Turning that on needs every cap set: per trade, per day, leverage, and a loss stop. An order outside them is a
+ *     card for Phil (over the per-trade or daily cap it's refused outright); a close, a reduce-only order or a cancel
+ *     always goes through, since it only takes risk off.
  *
  * HQ signs with an API wallet (Hyperliquid › More › API: an agent key Phil approves for his account). An API wallet can
  * place, cancel and size orders for the account, and that's all: Hyperliquid has withdrawals signed by the main wallet
@@ -15,7 +21,8 @@ import { defineTool, type ToolDef } from "./tools/index.js";
  *                               the key belongs to another one
  * Which account the key trades for is asked of Hyperliquid itself (userRole), never guessed: an API wallet answers
  * "agent" with its owner; a main wallet's own key answers "user" and is refused.
- * Limits are optional and off until Phil sets them (settings "hyperliquid.limits": { maxTradeUsd, maxDayUsd }).
+ * The parameters live in settings "hyperliquid.limits" (HlLimits). Phil sets them in Settings, or approves a
+ * hyperliquid.params card that Pentoshi files; neither the per-agent rules nor anything else can change them.
  */
 const INFO = "https://api.hyperliquid.xyz/info";
 const LIMITS_KEY = "hyperliquid.limits";
@@ -28,7 +35,32 @@ export interface HlExchange {
   updateLeverage(p: { asset: number; isCross: boolean; leverage: number }): Promise<unknown>;
 }
 export interface HlMarket { coin: string; asset: number; szDecimals: number; maxLeverage: number; mark: number }
-export interface HlLimits { maxTradeUsd?: number; maxDayUsd?: number }
+export interface HlLimits {
+  /** Dollars of size per new order, and per day (ET). Over either, an order is refused. */
+  maxTradeUsd?: number; maxDayUsd?: number;
+  /** Pentoshi trades on his own inside the rest. */
+  auto?: boolean;
+  /** Highest leverage an order he places alone may use. */
+  maxLeverage?: number;
+  /** Most open position size, all coins together, after the order. Optional. */
+  maxOpenUsd?: number;
+  /** Down this much over the last 24 hours (Hyperliquid's own PnL, deposits aside): new orders wait for Phil. */
+  maxDayLossUsd?: number;
+  /** Only these coins alone; empty means any. */
+  coins?: string[];
+}
+/** The agent who may trade on his own. */
+export const AUTO_TRADER = "pentoshi";
+/** What has to be set before Pentoshi can trade on his own. */
+export function autoMissing(l: HlLimits): string[] {
+  return [!l.maxTradeUsd && "a per-trade cap", !l.maxDayUsd && "a daily cap", !l.maxLeverage && "a leverage cap", !l.maxDayLossUsd && "a daily loss stop"].filter((x): x is string => !!x);
+}
+/** The parameters in one line, for the tool, the cards and Settings. */
+export function limitsText(l: HlLimits): string {
+  const caps = `${l.maxTradeUsd ? `${usd(l.maxTradeUsd)} a trade` : "no per-trade cap"}, ${l.maxDayUsd ? `${usd(l.maxDayUsd)} a day` : "no daily cap"}`;
+  if (!l.auto) return `Every order waits for Phil's card. Caps: ${caps}.`;
+  return `Pentoshi trades on his own: up to ${caps}, ${l.maxLeverage}x leverage at most${l.maxOpenUsd ? `, ${usd(l.maxOpenUsd)} open at most` : ""}, stopping when down ${usd(l.maxDayLossUsd ?? 0)} over 24 hours${l.coins?.length ? `, only ${l.coins.join(", ")}` : ", any coin"}.`;
+}
 
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
@@ -100,12 +132,71 @@ export class HyperliquidTrader {
   }
 
   async limits(): Promise<HlLimits> { return this.store.settings.get<HlLimits>(LIMITS_KEY, {}); }
-  /** Phil's limits from Settings: a dollar cap per trade and per day; 0 or empty switches one off. */
+  /**
+   * The parameters, as Phil set them in Settings or approved on a card: 0 or empty switches a cap off. Trading on his
+   * own needs every cap set; asking for it without them is refused and nothing changes.
+   */
   async setLimits(l: HlLimits): Promise<HlLimits> {
     const clean = (v: unknown) => { const n = Math.round(num(v)); return n > 0 ? n : undefined; };
-    const next = { maxTradeUsd: clean(l.maxTradeUsd), maxDayUsd: clean(l.maxDayUsd) };
+    const coins = [...new Set((Array.isArray(l.coins) ? l.coins : typeof l.coins === "string" ? String(l.coins).split(/[\s,]+/) : []).map((c) => String(c).trim().toUpperCase()).filter((c) => /^[A-Z0-9]{1,12}$/.test(c)))];
+    const next: HlLimits = { maxTradeUsd: clean(l.maxTradeUsd), maxDayUsd: clean(l.maxDayUsd), auto: l.auto === true, maxLeverage: clean(l.maxLeverage), maxOpenUsd: clean(l.maxOpenUsd), maxDayLossUsd: clean(l.maxDayLossUsd), coins };
+    const missing = autoMissing(next);
+    if (next.auto && missing.length) throw new Error(`Pentoshi can trade on his own only once every cap is set: add ${missing.join(", ")}`);
     await this.store.settings.set(LIMITS_KEY, next);
     return next;
+  }
+
+  /** Hyperliquid's own PnL for the account over the last 24 hours (deposits and withdrawals don't count). */
+  private async dayPnl(account: string): Promise<number> {
+    const r = await this.info<[string, { pnlHistory?: [number, string][] }][]>({ type: "portfolio", user: account });
+    const h = (Array.isArray(r) ? r : []).find((x) => x[0] === "day")?.[1]?.pnlHistory;
+    if (!h?.length) throw new Error("Hyperliquid gave no PnL for the last day");
+    return num(h[h.length - 1]![1]) - num(h[0]![1]);
+  }
+
+  /** For HQ's approval flow: run this card now, or leave it for Phil and say why on it (nothing to say for non-trades). */
+  async runsAlone(a: Pick<Approval, "agentId" | "payload">): Promise<{ ok: boolean; why?: string }> {
+    let why: string | undefined;
+    try { why = await this.autoRefusal(a); } catch (e) { why = `it couldn't be checked (${(e as Error).message})`; }
+    if (!why) return { ok: true, why: "inside your Hyperliquid trading parameters" };
+    return { ok: false, why: /^(not a trade|only Pentoshi|trading on his own is off)/.test(why) ? undefined : `not placed on his own: ${why}` };
+  }
+
+  /**
+   * Whether a card may run without Phil: undefined when it may (Pentoshi's, trading on his own is on, and it is inside
+   * every parameter), else why not. Closing, reduce-only orders and cancels only take risk off, so they always may.
+   */
+  async autoRefusal(a: Pick<Approval, "agentId" | "payload">): Promise<string | undefined> {
+    const p = (a.payload ?? {}) as Record<string, unknown>;
+    const action = String(p.action ?? "");
+    if (!/^hyperliquid\.(order|close|cancel|leverage)$/.test(action)) return "not a trade";
+    if (a.agentId !== AUTO_TRADER) return "only Pentoshi trades on his own";
+    const l = await this.limits();
+    if (!l.auto) return "trading on his own is off";
+    const missing = autoMissing(l);
+    if (missing.length) return `trading on his own needs ${missing.join(", ")}`;
+    const s = await this.status();
+    if (!s.trading) return s.problem ?? "trading isn't set up";
+    if (action === "hyperliquid.close" || action === "hyperliquid.cancel") return undefined;
+    if (action === "hyperliquid.leverage") {
+      const lev = Math.round(num(p.leverage));
+      return lev >= 1 && lev <= l.maxLeverage! ? undefined : `${lev}x is over your ${l.maxLeverage}x leverage cap`;
+    }
+    const ask = readOrder(p);
+    if (ask.reduceOnly) return undefined;
+    if (l.coins?.length && !l.coins.includes(ask.coin)) return `${ask.coin} isn't one of the coins he trades alone (${l.coins.join(", ")})`;
+    if (ask.leverage === undefined) return `the order doesn't say its leverage (alone, up to ${l.maxLeverage}x)`;
+    if (ask.leverage > l.maxLeverage!) return `${ask.leverage}x is over your ${l.maxLeverage}x leverage cap`;
+    const q = await this.plan(ask);
+    if (l.maxOpenUsd) {
+      const st = await this.info<{ marginSummary?: { totalNtlPos?: string } }>({ type: "clearinghouseState", user: s.account });
+      const open = num(st.marginSummary?.totalNtlPos);
+      if (open + q.notional > l.maxOpenUsd) return `it would take open positions to ${usd(open + q.notional)}, over your ${usd(l.maxOpenUsd)} cap`;
+    }
+    let pnl: number;
+    try { pnl = await this.dayPnl(s.account!); } catch (e) { return `today's PnL couldn't be read (${(e as Error).message}), so the loss stop can't be checked`; }
+    if (-pnl >= l.maxDayLossUsd!) return `the account is down ${usd(-pnl)} over the last 24 hours, at or past your ${usd(l.maxDayLossUsd!)} loss stop`;
+    return undefined;
   }
 
   private async info<T>(body: unknown): Promise<T> {
@@ -185,6 +276,8 @@ export class HyperliquidTrader {
     // Limits are checked again at the moment it runs: the day may have filled up since the card was made.
     const blocked = await this.preflight({ ...a, payload });
     if (blocked) throw new Error(blocked);
+    // Placed on his own: checked once more now, in line behind any order before it (exposure and the loss stop move).
+    if (/^auto:/.test(a.note ?? "") && !ask.reduceOnly) { const why = await this.autoRefusal({ ...a, payload }); if (why) throw new Error(`not placed: ${why}`); }
     if (ask.leverage) await this.opts.exchange.updateLeverage({ asset: q.m.asset, isCross: ask.cross, leverage: ask.leverage });
     const r = await this.opts.exchange.order({ orders: [{ a: q.m.asset, b: ask.buy, p: q.price, s: q.size, r: ask.reduceOnly, t: { limit: { tif: ask.market ? "Ioc" : "Gtc" } } }], grouping: "na" });
     const st = r.response.data.statuses[0];
@@ -202,13 +295,17 @@ export class HyperliquidTrader {
   tools(): ToolDef[] {
     return [defineTool({
       name: "hyperliquid_trading",
-      description: "Whether HQ can trade on Phil's Hyperliquid account, the limits he set, and how to propose a trade. Every order waits for Phil's approval.",
+      description: "Whether HQ can trade on Phil's Hyperliquid account, the parameters he set (whether Pentoshi trades on his own, the caps), and how to file a trade or ask for a parameter change.",
       schema: {},
       handler: async () => {
         const s = await this.status();
         if (!s.trading) return `Hyperliquid trading is off: ${s.problem}.`;
         const l = s.limits;
-        return `Hyperliquid trading is on for ${s.account} (through API wallet ${s.agent}; it can trade, not withdraw). Limits: ${l.maxTradeUsd ? `${usd(l.maxTradeUsd)} per trade` : "none per trade"}, ${l.maxDayUsd ? `${usd(l.maxDayUsd)} a day` : "none per day"}.\n${HyperliquidTrader.promptHint()}`;
+        const spent = await this.store.settings.get<{ day: string; usd: number }>(SPENT_KEY, { day: day(), usd: 0 });
+        const own = l.auto && !autoMissing(l).length
+          ? `You trade on your own. A trade block inside these parameters is placed the moment HQ reads it, and Phil is told; one outside them becomes a card for Phil (over the per-trade or daily cap it's refused). Every order you place alone must say its "leverage". Closes, reduce-only orders and cancels always go through. Traded today: ${usd(spent.day === day() ? spent.usd : 0)}${l.maxDayUsd ? ` of ${usd(l.maxDayUsd)}` : ""}.`
+          : `Phil can let you trade on your own in Settings › Hyperliquid, or you can ask with a hyperliquid.params card.`;
+        return `Hyperliquid trading is on for ${s.account} (through API wallet ${s.agent}; it can trade, not withdraw). ${limitsText(l)}\n${own}\n${HyperliquidTrader.promptHint()}`;
       },
     })];
   }
@@ -216,6 +313,14 @@ export class HyperliquidTrader {
   executors(): Record<string, Executor> {
     return {
       "hyperliquid.order": async (a) => this.placeOrder((a.payload ?? {}) as Record<string, unknown>, a),
+      // A change to the parameters: only ever on Phil's approval (rules.ts never lets a hyperliquid.* card run alone).
+      "hyperliquid.params": async (a) => {
+        const p = (a.payload ?? {}) as Record<string, unknown>;
+        const cur = await this.limits();
+        const pick = <K extends keyof HlLimits>(k: K) => (k in p ? (p[k] as HlLimits[K]) : cur[k]);
+        const next = await this.setLimits({ maxTradeUsd: pick("maxTradeUsd"), maxDayUsd: pick("maxDayUsd"), auto: pick("auto"), maxLeverage: pick("maxLeverage"), maxOpenUsd: pick("maxOpenUsd"), maxDayLossUsd: pick("maxDayLossUsd"), coins: pick("coins") });
+        return `Hyperliquid parameters now: ${limitsText(next)}`;
+      },
       "hyperliquid.close": async (a) => {
         const account = await this.ready();
         const p = (a.payload ?? {}) as Record<string, unknown>;
@@ -264,11 +369,16 @@ export class HyperliquidTrader {
       },
       "hyperliquid.close": (p) => `Closes ${closePct(p.pct) < 100 ? `${closePct(p.pct)}% of ` : ""}your ${String(p.coin ?? "?").toUpperCase()} position at market (reduce-only, within ${num(p.slippagePct) || 2}% of the mark). ${real}`,
       "hyperliquid.cancel": (p) => `Cancels ${p.oid !== undefined ? `order ${String(p.oid)}` : "every open order"} on ${String(p.coin ?? "?").toUpperCase()} on Hyperliquid.`,
+      "hyperliquid.params": (p) => {
+        const names: Record<string, string> = { auto: "Pentoshi trades on his own", maxTradeUsd: "per-trade cap ($)", maxDayUsd: "daily cap ($)", maxLeverage: "leverage cap (x)", maxOpenUsd: "open positions cap ($)", maxDayLossUsd: "24-hour loss stop ($)", coins: "coins he trades alone" };
+        const parts = Object.keys(names).filter((k) => k in p).map((k) => `${names[k]}: ${Array.isArray(p[k]) ? (p[k] as unknown[]).join(", ") || "any" : p[k] === true ? "yes" : p[k] === false ? "no" : p[k] ? String(p[k]) : "none"}`);
+        return `Changes your Hyperliquid trading parameters. ${parts.length ? parts.join("; ") : "Nothing named to change"}. Everything not named stays as it is.`;
+      },
       "hyperliquid.leverage": (p) => `Sets ${String(p.coin ?? "?").toUpperCase()} leverage to ${num(p.leverage)}x ${p.cross === false ? "isolated" : "cross"} on Hyperliquid. Higher leverage moves the liquidation price closer.`,
     };
   }
 
   static promptHint(): string {
-    return 'Hyperliquid trading is connected, and every order waits for Phil\'s approval card (nothing auto-approves). Propose one with an approval block of kind "money": {"kind":"money","title":"<Long|Short> <COIN> <size or $>","body":"<the thesis, the invalidation (where you\'d be wrong) and the risk, in a few lines>","payload":{"action":"hyperliquid.order","coin":"BTC","side":"buy|sell","usd":250,"type":"market|limit","price":<limit only>,"leverage":<optional>,"cross":true,"reduceOnly":false}} (or "size" in coins instead of "usd"; the smallest order is $10 of size). To close: {"action":"hyperliquid.close","coin":"BTC","pct":100}; to cancel resting orders: {"action":"hyperliquid.cancel","coin":"BTC","oid":<optional>}; leverage alone: {"action":"hyperliquid.leverage","coin":"BTC","leverage":5,"cross":true}. Check hyperliquid_account first: never propose something that pushes a position near liquidation without saying so.';
+    return 'Hyperliquid trading is connected. hyperliquid_trading says whether you trade on your own inside Phil\'s parameters or every order waits for his card; either way a trade is the same approval block of kind "money": {"kind":"money","title":"<Long|Short> <COIN> <size or $>","body":"<the thesis, the invalidation (where you\'d be wrong) and the risk, in a few lines>","payload":{"action":"hyperliquid.order","coin":"BTC","side":"buy|sell","usd":250,"type":"market|limit","price":<limit only>,"leverage":<optional>,"cross":true,"reduceOnly":false}} (or "size" in coins instead of "usd"; the smallest order is $10 of size). To close: {"action":"hyperliquid.close","coin":"BTC","pct":100}; to cancel resting orders: {"action":"hyperliquid.cancel","coin":"BTC","oid":<optional>}; leverage alone: {"action":"hyperliquid.leverage","coin":"BTC","leverage":5,"cross":true}. To ask Phil to change a parameter, a block of kind "config": {"action":"hyperliquid.params", plus only what changes: "auto":true|false, "maxTradeUsd", "maxDayUsd", "maxLeverage", "maxOpenUsd", "maxDayLossUsd", "coins":["BTC","ETH"]}, with why in the body. Check hyperliquid_account first: never trade into something that pushes a position near liquidation, and say so if one is close.';
   }
 }

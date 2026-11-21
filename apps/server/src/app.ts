@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import { glassesKeyOk, glassesReplies, glassesStatus, pairGlasses, unpairGlasses } from "@jarvis/core";
-import { hlAccounts, isHlAddress, accountText, HL_ACCOUNTS_KEY, polyAccounts, polyPositionsText, POLY_ACCOUNTS_KEY, lighterAccounts, lighterAccountText, LIGHTER_ACCOUNTS_KEY } from "@jarvis/core";
+import { limitsText, hlAccounts, isHlAddress, accountText, HL_ACCOUNTS_KEY, polyAccounts, polyPositionsText, POLY_ACCOUNTS_KEY, lighterAccounts, lighterAccountText, LIGHTER_ACCOUNTS_KEY } from "@jarvis/core";
 import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type LeadPerfectionConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type EagleViewConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
@@ -604,9 +604,12 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   // Settings › Hyperliquid: Phil's own trading limits (a cap per trade and per day; empty switches one off).
   api.put("/hyperliquid/limits", async (c) => {
     if (!connectors.hlTrader) return c.json({ error: "Hyperliquid trading isn't set up (HYPERLIQUID_AGENT_KEY)" }, 400);
-    const b = (await c.req.json().catch(() => ({}))) as { maxTradeUsd?: unknown; maxDayUsd?: unknown };
-    const limits = await connectors.hlTrader.setLimits({ maxTradeUsd: Number(b.maxTradeUsd) || undefined, maxDayUsd: Number(b.maxDayUsd) || undefined });
-    await jarvis.router.log("jarvis", "system", `Phil set Hyperliquid limits: ${limits.maxTradeUsd ? `$${limits.maxTradeUsd} a trade` : "none a trade"}, ${limits.maxDayUsd ? `$${limits.maxDayUsd} a day` : "none a day"}`);
+    const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const n = (v: unknown) => Number(v) || undefined;
+    let limits;
+    try { limits = await connectors.hlTrader.setLimits({ maxTradeUsd: n(b.maxTradeUsd), maxDayUsd: n(b.maxDayUsd), auto: b.auto === true, maxLeverage: n(b.maxLeverage), maxOpenUsd: n(b.maxOpenUsd), maxDayLossUsd: n(b.maxDayLossUsd), coins: Array.isArray(b.coins) ? (b.coins as string[]) : typeof b.coins === "string" ? b.coins.split(/[\s,]+/) : [] }); }
+    catch (e) { return c.json({ error: (e as Error).message }, 400); }
+    await jarvis.router.log("jarvis", "system", `Phil set the Hyperliquid parameters: ${limitsText(limits)}`);
     return c.json({ limits });
   });
   // Settings › GitHub: every repo the key reads, and which agents read each one.

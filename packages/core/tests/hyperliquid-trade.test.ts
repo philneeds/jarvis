@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { memoryStore, Jarvis, HyperliquidTrader, readOrder, CHARTERS, type HlExchange } from "../src/index.js";
 
 const ACCT = "0x1111111111111111111111111111111111111111", AGENT = "0x2222222222222222222222222222222222222222";
-function setup(opts: { account?: string; role?: { role: string; data?: { user: string } }; position?: string; open?: { coin: string; oid: number }[]; reply?: unknown } = {}) {
+function setup(opts: { account?: string; role?: { role: string; data?: { user: string } }; position?: string; open?: { coin: string; oid: number }[]; reply?: unknown; pnl?: [number, string][]; openNtl?: string } = {}) {
   const calls: { method: string; args: unknown }[] = [];
   const real: HlExchange = {
     order: async (p) => { calls.push({ method: "order", args: p }); return (opts.reply ?? { response: { data: { statuses: [{ filled: { totalSz: p.orders[0]!.s, avgPx: "63200", oid: 77 } }] } } }) as never; },
@@ -16,7 +16,8 @@ function setup(opts: { account?: string; role?: { role: string; data?: { user: s
     const b = JSON.parse(String(init?.body)) as { type: string };
     if (b.type === "metaAndAssetCtxs") return Response.json([{ universe: [{ name: "BTC", szDecimals: 5, maxLeverage: 40 }, { name: "ETH", szDecimals: 4, maxLeverage: 25 }, { name: "OLD", szDecimals: 0, maxLeverage: 3, isDelisted: true }] }, [{ markPx: "63196.5" }, { markPx: "1782.5" }, { markPx: "1" }]]);
     if (b.type === "userRole") return Response.json(opts.role ?? { role: "agent", data: { user: ACCT } });
-    if (b.type === "clearinghouseState") return Response.json({ assetPositions: opts.position ? [{ position: { coin: "BTC", szi: opts.position } }] : [] });
+    if (b.type === "clearinghouseState") return Response.json({ marginSummary: { totalNtlPos: opts.openNtl ?? "0" }, assetPositions: opts.position ? [{ position: { coin: "BTC", szi: opts.position } }] : [] });
+    if (b.type === "portfolio") return opts.pnl ? Response.json([["day", { pnlHistory: opts.pnl }]]) : new Response("{}", { status: 500 });
     if (b.type === "openOrders") return Response.json(opts.open ?? []);
     return new Response("{}", { status: 400 });
   }) as typeof fetch;
@@ -93,9 +94,9 @@ test("Hyperliquid itself says which account the key trades for: a main wallet's 
   assert.match((await main.jarvis.decide(o.id, "approved"))?.note ?? "", /Failed to execute hyperliquid\.order: .*main wallet's own key/);
   assert.equal(main.calls.length, 0);
   const ok = await rig();
-  assert.match(await ok.trader.tools()[0]!.handler({}, { store: ok.store, agentId: "pentoshi" }), /^Hyperliquid trading is on for 0x1111.*it can trade, not withdraw\)\. Limits: none per trade, none per day\./);
+  assert.match(await ok.trader.tools()[0]!.handler({}, { store: ok.store, agentId: "pentoshi" }), /^Hyperliquid trading is on for 0x1111.*it can trade, not withdraw\)\. Every order waits for Phil's card\. Caps: no per-trade cap, no daily cap\.\nPhil can let you trade on your own/);
   assert.ok(CHARTERS.pentoshi!.tools!.includes("hyperliquid_trading"));
-  assert.deepEqual(Object.keys(ok.trader.executors()).sort(), ["hyperliquid.cancel", "hyperliquid.close", "hyperliquid.leverage", "hyperliquid.order"]);
+  assert.deepEqual(Object.keys(ok.trader.executors()).sort(), ["hyperliquid.cancel", "hyperliquid.close", "hyperliquid.leverage", "hyperliquid.order", "hyperliquid.params"]);
   assert.deepEqual(readOrder({ coin: "eth", side: "short", size: "2", price: "1900" }), { coin: "ETH", buy: false, size: 2, usd: undefined, price: 1900, market: false, reduceOnly: false, leverage: undefined, cross: true, slippagePct: 2 });
 });
 
@@ -141,4 +142,62 @@ test("Jarvis's rules know trades go through Pentoshi's cards, not that HQ can't 
   assert.doesNotMatch(SAFETY_RULES, /no private keys in the system/);
   assert.match(SAFETY_RULES, /hyperliquid_trading/);
   assert.match(jarvisSystemPrompt([], "ok"), /perps trade on Hyperliquid[^\n]*delegate to pentoshi/);
+});
+
+const PARAMS = { auto: true, maxTradeUsd: 500, maxDayUsd: 2000, maxLeverage: 5, maxDayLossUsd: 200 };
+const order = (o: Record<string, unknown> = {}) => ({ action: "hyperliquid.order", coin: "BTC", side: "buy", usd: 100, leverage: 3, ...o });
+
+test("on his own: Pentoshi's order inside the parameters is placed at once and Phil is told; nobody else's is", async () => {
+  const told: string[] = [];
+  const s = await rig({ pnl: [[1, "0"], [2, "-50"]] });
+  (s.jarvis as unknown as { notify: (t: string, b: string) => Promise<void> }).notify = async (t, b) => { told.push(`${t} | ${b}`); };
+  await s.trader.setLimits(PARAMS);
+  const a = await s.card(order());
+  assert.equal(a.status, "approved");
+  assert.match(a.note ?? "", /^auto: inside your Hyperliquid trading parameters · Hyperliquid: bought/);
+  assert.equal(s.calls.filter((c) => c.method === "order").length, 1);
+  assert.match(told.join("\n"), /Pentoshi: Long BTC \| Hyperliquid: bought/);
+  // Another agent's identical card waits.
+  const other = await s.jarvis.requestApproval({ agentId: "mantis", kind: "money", title: "Long BTC", body: "x", payload: order() });
+  assert.equal(other.status, "pending");
+  assert.equal(s.calls.filter((c) => c.method === "order").length, 1);
+});
+
+test("on his own: outside the parameters is a card that says why; over a hard cap is refused; risk-off always runs", async () => {
+  const s = await rig({ pnl: [[1, "0"], [2, "-250"]], position: "0.01", openNtl: "900" });
+  await s.trader.setLimits({ ...PARAMS, maxOpenUsd: 1000, coins: ["BTC", "ETH"] });
+  const loss = await s.card(order({ usd: 50 }));
+  assert.equal(loss.status, "pending");
+  assert.match(loss.note ?? "", /Waits for you: not placed on his own: the account is down \$250 over the last 24 hours/);
+  const s2 = await rig({ pnl: [[1, "0"], [2, "10"]], openNtl: "900" });
+  await s2.trader.setLimits({ ...PARAMS, maxOpenUsd: 1000, coins: ["BTC", "ETH"] });
+  assert.match((await s2.card(order({ usd: 200 }))).note ?? "", /over your \$1,000 cap/);
+  assert.match((await s2.card(order({ coin: "SOL", usd: 20 }))).note ?? "", /isn't one of the coins|isn't a Hyperliquid perp/);
+  assert.match((await s2.card(order({ usd: 20, leverage: undefined }))).note ?? "", /doesn't say its leverage/);
+  assert.match((await s2.card(order({ usd: 20, leverage: 10 }))).note ?? "", /over your 5x leverage cap/);
+  assert.equal((await s2.card(order({ usd: 900 }))).status, "rejected", "over the per-trade cap: refused, not a card");
+  // A close goes through even past the loss stop.
+  const close = await s.card({ action: "hyperliquid.close", coin: "BTC", pct: 100 });
+  assert.equal(close.status, "approved");
+  assert.ok(s.calls.some((c) => c.method === "order" && (c.args as { orders: { r: boolean }[] }).orders[0]!.r === true));
+});
+
+test("on his own needs every cap; PnL that can't be read means a card; parameter changes always wait for Phil", async () => {
+  const s = await rig();
+  await assert.rejects(s.trader.setLimits({ auto: true, maxTradeUsd: 100 }), /add a daily cap, a leverage cap, a daily loss stop/);
+  assert.equal((await s.trader.limits()).auto, undefined, "nothing changed");
+  await s.trader.setLimits(PARAMS);
+  const blind = await s.card(order());
+  assert.equal(blind.status, "pending");
+  assert.match(blind.note ?? "", /PnL couldn't be read/);
+  const ask = await s.jarvis.requestApproval({ agentId: "pentoshi", kind: "config", title: "Raise the per-trade cap", body: "why", payload: { action: "hyperliquid.params", maxTradeUsd: 1000 } });
+  assert.equal(ask.status, "pending", "a parameter change waits");
+  await s.jarvis.decide(ask.id, "approved");
+  const l = await s.trader.limits();
+  assert.equal(l.maxTradeUsd, 1000);
+  assert.equal(l.auto, true, "what the card didn't name stays");
+  assert.equal(l.maxLeverage, 5);
+  // Switched off: back to cards.
+  await s.trader.setLimits({ ...PARAMS, auto: false });
+  assert.equal((await s.card(order())).status, "pending");
 });

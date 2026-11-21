@@ -347,12 +347,14 @@ export class Jarvis {
   /** Checks run when an approval is requested; a failing check refuses it with a reason (used by Mayne's limits). */
   private preflights: ((a: Omit<Approval, "id" | "at" | "status">) => Promise<string | undefined>)[] = [];
   onApprovalRequested(fn: (a: Omit<Approval, "id" | "at" | "status">) => Promise<string | undefined>) { this.preflights.push(fn); }
+  /** A connector's say on whether a card runs without Phil, inside parameters he set (Pentoshi's Hyperliquid trades). */
+  private aloneChecks: ((a: Approval) => Promise<{ ok: boolean; why?: string }>)[] = [];
 
   /** Register what happens when an approval with payload.action = name is approved. */
   onApproved(action: string, fn: Executor) { this.executors.set(action, fn); }
 
   /** Plug in a connector: its tools become available in agent settings, its actions run on approval. */
-  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer>; normalize?: Normalizer; preflight?(a: Omit<Approval, "id" | "at" | "status">): Promise<string | undefined>; undoers?(): Record<string, (a: Approval) => Promise<string>>; pulses?(): Record<string, (agentId: string) => Promise<string>>; toolsFor?(agentId: string): Promise<string[]> }, hint?: string) {
+  addConnector(c: { tools(): import("../tools/index.js").ToolDef[]; executors(): Record<string, Executor>; describe?(): Record<string, Describer>; normalize?: Normalizer; preflight?(a: Omit<Approval, "id" | "at" | "status">): Promise<string | undefined>; undoers?(): Record<string, (a: Approval) => Promise<string>>; pulses?(): Record<string, (agentId: string) => Promise<string>>; toolsFor?(agentId: string): Promise<string[]>; runsAlone?(a: Approval): Promise<{ ok: boolean; why?: string }> }, hint?: string) {
     for (const [k, fn] of Object.entries(c.undoers?.() ?? {})) this.undoers.set(k, fn);
     for (const [k, fn] of Object.entries(c.pulses?.() ?? {})) this.pulses.set(k, fn);
     for (const t of c.tools()) this.connectorTools.set(t.name, t);
@@ -362,6 +364,7 @@ export class Jarvis {
     if (c.normalize) this.normalizers.push(c.normalize.bind(c));
     // A connector that knows its actions' required fields refuses a card that would fail the moment Phil approves.
     if (c.preflight) this.preflights.push(c.preflight.bind(c));
+    if (c.runsAlone) this.aloneChecks.push(c.runsAlone.bind(c));
     if (hint) this.promptHints.push(hint);
   }
 
@@ -2162,6 +2165,20 @@ export class Jarvis {
         return done ?? approval;
       }
       if (why !== "auto-ship is off") await this.store.approvals.update(approval.id, { note: `Not auto-shipped: ${why}.` });
+    }
+    // Inside parameters Phil set and approved (Pentoshi trading on his own): it runs now, and Phil is told what was done.
+    // These cards are ones alwaysWaits holds, so nothing else here (the per-agent rules) could let them through.
+    for (const check of this.aloneChecks) {
+      const v = await check(approval).catch((e: Error) => ({ ok: false, why: `couldn't check whether it may run on its own (${e.message})` }));
+      if (v.ok) {
+        const who = getAgent(a.agentId)?.name ?? a.agentId;
+        await this.router.log(a.agentId, "approval", `${who}: "${a.title}" ran on its own, ${v.why}`, a.runId, { kind: a.kind, body: a.body });
+        const done = await this.decide(approval.id, "approved", `auto: ${v.why}`);
+        const result = (done?.note ?? "").replace(/^auto: [^·]*·?\s*/, "");
+        await this.notify?.(`${who}: ${a.title}`, (result || "done").slice(0, 300)).catch(() => undefined);
+        return done ?? approval;
+      }
+      if (v.why) { await this.store.approvals.update(approval.id, { note: `Waits for you: ${v.why}.` }); approval = { ...approval, note: `Waits for you: ${v.why}.` }; }
     }
     // Reversible work goes through on its own, whatever the agent's charter says: HQ keeps what it looked like before,
     // and Phil gets an Undo button under "Done for you" instead of a card to approve.
