@@ -209,3 +209,13 @@ test("a slide with a chart is named: its numbers can't be changed by an edit", a
   const { fillProblems } = await import("../src/index.js");
   assert.match(fillProblems(f) ?? "", /slide 2 has a chart: HQ can't change a chart's numbers, so it still shows the template's$/);
 });
+
+test("only real figures count as stale: not row numbers or a year in a sentence; a target left as it was isn't typed", async () => {
+  const { isFigure } = await import("../src/index.js");
+  for (const t of ["1", "10", "3.", "Pre-1978 homes get the booklet", "Founded 2019"]) assert.equal(isFigure(t), false, t);
+  for (const t of ["across 14 reps", "$640,747", "23.8%", "80%", "101 issued", "1,234"]) assert.equal(isFigure(t), true, t);
+  const store = memoryStore(); await store.init();
+  await setTemplate(store, "proedge", "Weekly Sales.pptx", await template());
+  const f = await fillTemplate(store, { edits: [{ slide: 2, para: 4, text: "40%" }, { slide: 2, para: 2, text: "NSLI $2,000" }] }, { agentId: "stevon", venture: "proedge" });
+  assert.deepEqual(f.typed.map((t) => t.text), ["NSLI $2,000"], "the 40% target kept as it was isn't flagged; a changed figure is");
+});

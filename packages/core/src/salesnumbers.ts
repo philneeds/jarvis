@@ -121,6 +121,8 @@ export function fillNumbers(text: string, pulls: { week?: SalesPull; prior?: Sal
     if (!pull) { errors.push(`${whole}: there's no lp_report pull of Sales Efficiency for ${isPrior ? "the week before" : "this week"}; run lp_report for those dates first`); return whole; }
     const decimals = opt !== undefined && /^\d$/.test(opt.trim()) ? Number(opt.trim()) : undefined;
     if (code === "week") return `${short(pull.start)}–${short(pull.end)}`;
+    // How many reps ran appointments that week ("across 14 reps").
+    if (code === "reps") return String(pull.reps.filter((r) => r.issued > 0).length);
     let row: SalesRow | undefined = pull.team, metric = code;
     let m = code.match(/^rep:(.+)\.([a-z_]+)$/);
     if (m) { row = findRep(pull, m[1]!); metric = m[2]!; if (!row) { errors.push(`${whole}: no rep "${m[1]}" in the ${short(pull.start)}–${short(pull.end)} report (reps: ${pull.reps.map((r) => r.rep).join("; ")})`); return whole; } }
@@ -149,5 +151,5 @@ export function fillNumbers(text: string, pulls: { week?: SalesPull; prior?: Sal
 
 /** The codes, for the agent: every figure with its definition, and the reps in the newest pull. */
 export function numbersHint(): string {
-  return `Numbers on a deck are written by HQ, never typed: put a code where the figure goes and HQ fills it from the last lp_report pull of Sales Efficiency (run lp_report for this week and last week first). Codes: {{close}} {{demo}} … for the team this week; {{prior.close}} for the week before; {{rep:Marino.close}} for one rep (last name is enough); {{top.close.1.rep}} and {{top.close.1}} for a leaderboard's first name and figure (2, 3, … down the board), and {{top.gross.1.gross_share}} for another figure of that same rep; {{week}} and {{prior.week}} for the dates; add |0 to a percentage for no decimal ({{demo|0}}). Figures: ${Object.entries(METRICS).map(([k, v]) => `${k} (${v.says})`).join("; ")}. Text around a code is yours ("Close rate {{close}}").`;
+  return `Numbers on a deck are written by HQ, never typed: put a code where the figure goes and HQ fills it from the last lp_report pull of Sales Efficiency (run lp_report for this week and last week first). Codes: {{close}} {{demo}} … for the team this week; {{prior.close}} for the week before; {{rep:Marino.close}} for one rep (last name is enough); {{top.close.1.rep}} and {{top.close.1}} for a leaderboard's first name and figure (2, 3, … down the board), and {{top.gross.1.gross_share}} for another figure of that same rep; {{week}} and {{prior.week}} for the dates; {{reps}} for how many reps ran appointments; add |0 to a percentage for no decimal ({{demo|0}}). Figures: ${Object.entries(METRICS).map(([k, v]) => `${k} (${v.says})`).join("; ")}. Text around a code is yours ("Close rate {{close}}").`;
 }

@@ -184,6 +184,17 @@ export interface FillResult {
   /** Edits that type a sales figure ($ or %) by hand instead of a code. */
   typed: { slide: number; para?: number; text: string }[];
 }
+/**
+ * A paragraph that holds a figure that changes week to week: a dollar amount, a percentage, a decimal, a number in
+ * the thousands, or a count in words ("across 14 reps"). Not a bare row or step number ("1", "10") and not a year in
+ * a sentence ("Pre-1978 homes"): flagging those as stale was noise (Nov 21).
+ */
+export function isFigure(text: string): boolean {
+  const t = text.trim();
+  if (/^\d{1,2}\.?$/.test(t)) return false;
+  const rest = t.replace(/\b(19|20)\d{2}\b/g, "");
+  return /\$\s?\d|\d\s?%|\d{1,3}(,\d{3})+|\d+\.\d+|\d{3,}|\d/.test(rest) && !/^[^\d]*$/.test(rest);
+}
 /** A dollar amount or a percentage in an edit's own words (not from a code): a figure typed by hand. */
 const TYPED = /\$\s?\d|\d(?:[\d,]*)(?:\.\d+)?\s?%/;
 
@@ -284,7 +295,7 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
     const paras = paragraphs(await zip.file(path)!.async("string")).filter((p) => p.text.trim());
     const edited = new Set((bySlide.get(n) ?? []).filter((e) => !missed.includes(e)).map((e) => e.para));
     const tplParas = paragraphs(await tplZip.file(path)!.async("string")).filter((p) => p.text.trim());
-    tplParas.forEach((p, i) => { if (/\d/.test(p.text) && paras[i]?.text === p.text && !edited.has(i + 1)) stale.push({ slide: n, para: i + 1, text: p.text.trim() }); });
+    tplParas.forEach((p, i) => { if (isFigure(p.text) && paras[i]?.text === p.text && !edited.has(i + 1)) stale.push({ slide: n, para: i + 1, text: p.text.trim() }); });
   }
   const charts = await chartSlides(zip, slides);
   missed.sort((a, b) => spec.edits.indexOf(a) - spec.edits.indexOf(b));
@@ -295,7 +306,13 @@ export async function fillTemplate(store: Store, spec: { title?: string; edits: 
   const deck: Deck = { id: randomUUID(), fileId, name: `${title.replace(/[^\w\s.-]+/g, "").replace(/\s+/g, " ").trim().slice(0, 60) || "Deck"} ${day}.pptx`, title, agentId: by.agentId, venture: by.venture, at: new Date().toISOString(), slides: slides.length };
   const all = await store.settings.get<Deck[]>(DECKS_KEY, []);
   await store.settings.set(DECKS_KEY, [...all, deck].slice(-60));
-  return { deck, missed, done, stale, charts, codeErrors, typed };
+  // Re-stating the template's own text (a target Phil set, "80%") isn't typing a figure: only a changed one counts.
+  const typedNow: FillResult["typed"] = [];
+  for (const t of typed) {
+    const own = t.para ? paragraphs(await tplZip.file(slides[t.slide - 1] ?? "")?.async("string") ?? "").filter((p) => p.text.trim())[t.para - 1]?.text.trim() : undefined;
+    if (own === undefined || own !== t.text) typedNow.push(t);
+  }
+  return { deck, missed, done, stale, charts, codeErrors, typed: typedNow };
 }
 
 /** Tidy an agent's deckfill block. */

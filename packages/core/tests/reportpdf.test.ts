@@ -91,6 +91,7 @@ test("each number lands in the column it sits under, blanks stay blank, and Phil
   const share = Math.round((best.gross / sr.team!.gross) * 100);
   assert.equal(f("{{top.gross.1.rep}} {{top.gross.1.gross_share|0}} {{top.gross.1.sold}}").text, [best.rep, `${share}%`, String(best.sold)].join(" "));
   assert.match(f("{{top.gross.1.nope}}").errors[0]!, /no figure called "nope"/);
+  assert.equal(f("across {{reps}} reps").text, `across ${sr.reps.filter((r) => r.issued > 0).length} reps`);
   const bad = f("{{rep:Nobody.close}} {{closing}}");
   assert.equal(bad.errors.length, 2);
   assert.match(bad.errors[0]!, /no rep "Nobody" in the 11\/09–11\/15 report \(reps: Lane, Avery; Quill, Morgan\)/);
