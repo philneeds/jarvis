@@ -42,7 +42,7 @@ export function salesRows(t: ReportTable): { team?: SalesRow; reps: SalesRow[] }
 /** Each metric HQ can put on a slide: how it's worked out and how it's written. */
 type Kind = "pct" | "money" | "count";
 const ratio = (a: number, b: number) => (b ? a / b : undefined);
-export const METRICS: Record<string, { kind: Kind; of: (r: SalesRow) => number | undefined; says: string }> = {
+export const METRICS: Record<string, { kind: Kind; of: (r: SalesRow, team?: SalesRow) => number | undefined; says: string }> = {
   issued: { kind: "count", of: (r) => r.issued, says: "issued appointments" },
   net_issued: { kind: "count", of: (r) => r.netIssued, says: "net issued" },
   demos: { kind: "count", of: (r) => r.demos, says: "demos" },
@@ -59,7 +59,12 @@ export const METRICS: Record<string, { kind: Kind; of: (r: SalesRow) => number |
   pending_value: { kind: "money", of: (r) => r.pre, says: "pending (pre-net) dollars" },
   net: { kind: "money", of: (r) => r.net, says: "net dollars" },
   projected: { kind: "money", of: (r) => r.net + 0.7 * r.pre, says: "projected net: net + 70% of pre-net" },
+  // A rep's part of the team (Nov 21: the volume board's "% of Team" column).
+  gross_share: { kind: "pct", of: (r, t) => (t ? ratio(r.gross, t.gross) : undefined), says: "a rep's share of the team's gross" },
+  sold_share: { kind: "pct", of: (r, t) => (t ? ratio(r.sold, t.sold) : undefined), says: "a rep's share of the team's sales" },
 };
+/** A figure for a row, with the team it's a share of. */
+const valueOf = (def: (typeof METRICS)[string], row: SalesRow, pull: SalesPull) => def.of(row, pull.team);
 
 const fmt = (kind: Kind, v: number | undefined, decimals?: number) => {
   if (v === undefined || !Number.isFinite(v)) return "n/a";
@@ -119,24 +124,30 @@ export function fillNumbers(text: string, pulls: { week?: SalesPull; prior?: Sal
     let row: SalesRow | undefined = pull.team, metric = code;
     let m = code.match(/^rep:(.+)\.([a-z_]+)$/);
     if (m) { row = findRep(pull, m[1]!); metric = m[2]!; if (!row) { errors.push(`${whole}: no rep "${m[1]}" in the ${short(pull.start)}–${short(pull.end)} report (reps: ${pull.reps.map((r) => r.rep).join("; ")})`); return whole; } }
-    m = code.match(/^top\.([a-z_]+)\.(\d{1,2})(\.rep)?$/);
+    m = code.match(/^top\.([a-z_]+)\.(\d{1,2})(?:\.([a-z_]+))?$/);
     if (m) {
       const def = METRICS[m[1]!];
       if (!def) { errors.push(`${whole}: no figure called "${m[1]}" (there are: ${Object.keys(METRICS).join(", ")})`); return whole; }
-      const ranked = pull.reps.filter((r) => r.issued > 0).map((r) => ({ r, v: def.of(r) })).filter((x) => x.v !== undefined).sort((a, b) => b.v! - a.v! || b.r.issued - a.r.issued);
+      const ranked = pull.reps.filter((r) => r.issued > 0).map((r) => ({ r, v: valueOf(def, r, pull) })).filter((x) => x.v !== undefined).sort((a, b) => b.v! - a.v! || b.r.issued - a.r.issued);
       const hit = ranked[Number(m[2]) - 1];
       if (!hit) return "";
-      return m[3] ? hit.r.rep : fmt(def.kind, hit.v, decimals);
+      if (m[3] === "rep") return hit.r.rep;
+      if (m[3]) {
+        const other = METRICS[m[3]];
+        if (!other) { errors.push(`${whole}: no figure called "${m[3]}" (there are: ${Object.keys(METRICS).join(", ")})`); return whole; }
+        return fmt(other.kind, valueOf(other, hit.r, pull), decimals);
+      }
+      return fmt(def.kind, hit.v, decimals);
     }
     const def = METRICS[metric];
     if (!def) { errors.push(`${whole}: no figure called "${metric}" (there are: ${Object.keys(METRICS).join(", ")})`); return whole; }
     if (!row) { errors.push(`${whole}: the report has no team total row`); return whole; }
-    return fmt(def.kind, def.of(row), decimals);
+    return fmt(def.kind, valueOf(def, row, pull), decimals);
   });
   return { text: out, errors };
 }
 
 /** The codes, for the agent: every figure with its definition, and the reps in the newest pull. */
 export function numbersHint(): string {
-  return `Numbers on a deck are written by HQ, never typed: put a code where the figure goes and HQ fills it from the last lp_report pull of Sales Efficiency (run lp_report for this week and last week first). Codes: {{close}} {{demo}} … for the team this week; {{prior.close}} for the week before; {{rep:Marino.close}} for one rep (last name is enough); {{top.close.1.rep}} and {{top.close.1}} for a leaderboard's first name and figure (2, 3, … down the board); {{week}} and {{prior.week}} for the dates; add |0 to a percentage for no decimal ({{demo|0}}). Figures: ${Object.entries(METRICS).map(([k, v]) => `${k} (${v.says})`).join("; ")}. Text around a code is yours ("Close rate {{close}}").`;
+  return `Numbers on a deck are written by HQ, never typed: put a code where the figure goes and HQ fills it from the last lp_report pull of Sales Efficiency (run lp_report for this week and last week first). Codes: {{close}} {{demo}} … for the team this week; {{prior.close}} for the week before; {{rep:Marino.close}} for one rep (last name is enough); {{top.close.1.rep}} and {{top.close.1}} for a leaderboard's first name and figure (2, 3, … down the board), and {{top.gross.1.gross_share}} for another figure of that same rep; {{week}} and {{prior.week}} for the dates; add |0 to a percentage for no decimal ({{demo|0}}). Figures: ${Object.entries(METRICS).map(([k, v]) => `${k} (${v.says})`).join("; ")}. Text around a code is yours ("Close rate {{close}}").`;
 }

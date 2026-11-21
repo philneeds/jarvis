@@ -86,6 +86,11 @@ test("each number lands in the column it sits under, blanks stay blank, and Phil
   assert.equal(f("{{rep:Lane.close}} {{rep:quill.demos}}").text, "53.8% 6");
   assert.equal(f("1. {{top.close.1.rep}} {{top.close.1}} · 2. {{top.close.2.rep}} {{top.close.2}}").text, "1. Lane, Avery 53.8% · 2. Quill, Morgan 12.5%");
   assert.equal(f("{{top.close.3.rep}}").text, "", "past the end of the board: blank");
+  // A board's other columns for the same rep, and a rep's share of the team (the volume board's "% of Team").
+  const best = sr.reps.slice().sort((a, b) => b.gross - a.gross)[0]!;
+  const share = Math.round((best.gross / sr.team!.gross) * 100);
+  assert.equal(f("{{top.gross.1.rep}} {{top.gross.1.gross_share|0}} {{top.gross.1.sold}}").text, [best.rep, `${share}%`, String(best.sold)].join(" "));
+  assert.match(f("{{top.gross.1.nope}}").errors[0]!, /no figure called "nope"/);
   const bad = f("{{rep:Nobody.close}} {{closing}}");
   assert.equal(bad.errors.length, 2);
   assert.match(bad.errors[0]!, /no rep "Nobody" in the 11\/09–11\/15 report \(reps: Lane, Avery; Quill, Morgan\)/);
