@@ -61,7 +61,8 @@ export async function hlAccounts(store: Pick<Store, "settings">, env: NodeJS.Pro
   const saved = await store.settings.get<HlAccount[] | null>(HL_ACCOUNTS_KEY, null);
   // Once Phil has saved a list in Settings (even an empty one), it's the answer; the environment is only a first default.
   if (saved) return saved;
-  return (env.HYPERLIQUID_ADDRESS ?? "").split(",").map((x, i) => { const [l, a] = x.includes("=") ? x.split("=") : [`Account ${i + 1}`, x]; return { label: l!.trim(), address: (a ?? "").trim() }; }).filter((x) => isHlAddress(x.address));
+  // No read address but a trade address for the API wallet: that's his account.
+  return (env.HYPERLIQUID_ADDRESS || (env.HYPERLIQUID_TRADE_ADDRESS ? `Main=${env.HYPERLIQUID_TRADE_ADDRESS}` : "")).split(",").map((x, i) => { const [l, a] = x.includes("=") ? x.split("=") : [`Account ${i + 1}`, x]; return { label: l!.trim(), address: (a ?? "").trim() }; }).filter((x) => isHlAddress(x.address));
 }
 
 type Position = { coin: string; szi: string; entryPx?: string | null; positionValue?: string; unrealizedPnl?: string; returnOnEquity?: string; liquidationPx?: string | null; marginUsed?: string; leverage?: { type?: string; value?: number }; cumFunding?: { sinceOpen?: string } };
@@ -90,7 +91,12 @@ const et = (ms: number) => new Date(ms).toLocaleString("en-US", { timeZone: "Ame
  * day's fills and spot balances. Five public reads; nothing here can trade.
  */
 export async function accountText(acct: HlAccount, f: typeof fetch = fetch, now = Date.now()): Promise<string> {
-  const user = acct.address.trim();
+  const given = acct.address.trim();
+  // An API wallet holds nothing (Phil saved one, Nov 20, and read $0): read the account it trades for instead.
+  const role = await info<{ role?: string; data?: { user?: string } }>({ type: "userRole", user: given }, f).catch(() => ({}) as { role?: string; data?: { user?: string } });
+  const owner = role.role === "agent" ? role.data?.user : undefined;
+  const user = owner && isHlAddress(owner) ? owner : given;
+  const via = user !== given ? `; ${short(given)}, the address in Settings, is the API wallet that trades for it` : "";
   const [perp, orders, fills, spot] = await Promise.all([
     info<Clearing>({ type: "clearinghouseState", user }, f),
     info<Order[]>({ type: "frontendOpenOrders", user }, f).catch(() => [] as Order[]),
@@ -99,7 +105,7 @@ export async function accountText(acct: HlAccount, f: typeof fetch = fetch, now 
   ]);
   const ms = perp.marginSummary ?? {};
   const equity = num(ms.accountValue), used = num(ms.totalMarginUsed), ntl = num(ms.totalNtlPos);
-  const lines = [`${acct.label} (${short(user)}): perps account value ${usd(equity)}, margin used ${usd(used)}${equity ? ` (${Math.round((used / equity) * 100)}% of it)` : ""}, withdrawable ${usd(num(perp.withdrawable))}, open positions ${usd(ntl)}${equity ? ` (${(ntl / equity).toFixed(1)}x the account)` : ""}.`];
+  const lines = [`${acct.label} (${short(user)}${via}): perps account value ${usd(equity)}, margin used ${usd(used)}${equity ? ` (${Math.round((used / equity) * 100)}% of it)` : ""}, withdrawable ${usd(num(perp.withdrawable))}, open positions ${usd(ntl)}${equity ? ` (${(ntl / equity).toFixed(1)}x the account)` : ""}.`];
   const pos = (perp.assetPositions ?? []).map((x) => x.position).filter((p) => num(p.szi) !== 0).sort((a, b) => num(b.positionValue) - num(a.positionValue));
   if (pos.length) {
     // Any close to liquidation first, then the largest; a long tail is counted, not listed.
@@ -127,7 +133,7 @@ export async function accountText(acct: HlAccount, f: typeof fetch = fetch, now 
 export const HYPERLIQUID_TOOLS: ToolDef[] = [
   defineTool({
     name: "hyperliquid_account",
-    description: "Phil's own Hyperliquid account(s), read-only from the public address he set in Settings: account value, margin, every open position (size, entry, mark, PnL, leverage, liquidation price and how far away), open orders, the last 24h of fills, spot balances. Nothing can be traded through it. Optionally one account by its name.",
+    description: "Phil's own Hyperliquid account(s), read-only from the public address he set in Settings: account value, margin, every open position (size, entry, mark, PnL, leverage, liquidation price and how far away), open orders, the last 24h of fills, spot balances. Nothing can be traded through it (trading is hyperliquid_trading, by approval card). Optionally one account by its name.",
     schema: { account: z.string().max(60).optional().describe("the account's name in Settings, when Phil has more than one") },
     async handler({ account }, ctx) {
       try {

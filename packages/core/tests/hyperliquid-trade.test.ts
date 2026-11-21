@@ -127,3 +127,18 @@ test("the account comes from Hyperliquid, not a guess; closing is never blocked 
   const c = await half.card({ action: "hyperliquid.close", coin: "BTC", pct: -50 });
   assert.match(c.effect ?? "", /^Closes your BTC position/, "-50 reads as the whole position, on the card and when it runs");
 });
+
+test("an order under Hyperliquid's $10 minimum is refused before Phil sees it; a small close isn't", async () => {
+  const { card } = await rig({ position: "0.0001" });
+  const tiny = await card({ action: "hyperliquid.order", coin: "BTC", side: "buy", usd: 1 });
+  assert.equal(tiny.status, "rejected");
+  assert.ok((await card({ action: "hyperliquid.order", coin: "BTC", side: "buy", usd: 12 })).status === "pending");
+  assert.equal((await card({ action: "hyperliquid.order", coin: "BTC", side: "sell", size: 0.0001, reduceOnly: true })).status, "pending");
+});
+
+test("Jarvis's rules know trades go through Pentoshi's cards, not that HQ can't trade", async () => {
+  const { SAFETY_RULES, jarvisSystemPrompt } = await import("../src/index.js");
+  assert.doesNotMatch(SAFETY_RULES, /no private keys in the system/);
+  assert.match(SAFETY_RULES, /hyperliquid_trading/);
+  assert.match(jarvisSystemPrompt([], "ok"), /perps trade on Hyperliquid[^\n]*delegate to pentoshi/);
+});

@@ -27,7 +27,7 @@ function fakeHl() {
 test("Phil's Hyperliquid account in words: value, positions with liquidation distance, orders, the day's fills, spot", async () => {
   const { f, asked } = fakeHl();
   const t = await accountText({ label: "Main", address: ME }, f, Date.parse("2026-11-19T16:00:00Z"));
-  assert.deepEqual(asked.sort(), ["clearinghouseState", "frontendOpenOrders", "spotClearinghouseState", "userFills"], "only public reads");
+  assert.deepEqual(asked.sort(), ["clearinghouseState", "frontendOpenOrders", "spotClearinghouseState", "userFills", "userRole"], "only public reads");
   assert.match(t, /^Main \(0x1111…1111\): perps account value \$10,000, margin used \$2,500 \(25% of it\), withdrawable \$7,500, open positions \$30,000 \(3\.0x the account\)\./);
   // ETH: mark 3,200, liquidation 2,900 → 9.4% away: flagged and listed first.
   assert.match(t, /Positions \(2\):\n- ⚠ CLOSE TO LIQUIDATION · ETH long 5 @ 3,000 · mark 3,200 · \$16,000 · uPnL \+\$1,000 \(\+50\.0% on margin\) · 10x cross · liquidation 2,900 \(9\.4% away\) · funding since open paid \$13/);
@@ -66,4 +66,20 @@ test("an empty list saved in Settings stays empty: removing the last account doe
   assert.deepEqual(await hlAccounts(store, env), []);
   assert.deepEqual(await lighterAccounts(store, env), []);
   assert.deepEqual(await polyAccounts(store, env), []);
+});
+
+test("an API wallet's address in Settings reads the account it trades for; a trade address alone is the default account", async () => {
+  const API = "0x941c000000000000000000000000000000007346", MAIN = "0xec36697c3c8c8e385b37e17df40dbcbe2dbd9ffc";
+  const users: string[] = [];
+  const f = (async (_u: string | URL | Request, init?: RequestInit) => {
+    const b = JSON.parse(String(init?.body)) as { type: string; user: string };
+    if (b.type === "userRole") return Response.json(b.user === API ? { role: "agent", data: { user: MAIN } } : { role: "user" });
+    users.push(b.user);
+    if (b.type === "clearinghouseState") return Response.json({ marginSummary: { accountValue: "40", totalNtlPos: "0", totalMarginUsed: "0" }, withdrawable: "40", assetPositions: [] });
+    return Response.json(b.type === "spotClearinghouseState" ? { balances: [] } : []);
+  }) as typeof fetch;
+  const t = await accountText({ label: "Main", address: API }, f);
+  assert.ok(users.every((u) => u === MAIN), "every read is of the main account");
+  assert.match(t, /^Main \(0xec36…9ffc; 0x941c…7346, the address in Settings, is the API wallet that trades for it\): perps account value \$40/);
+  assert.deepEqual(await hlAccounts(memoryStore(), { HYPERLIQUID_TRADE_ADDRESS: MAIN }), [{ label: "Main", address: MAIN }]);
 });

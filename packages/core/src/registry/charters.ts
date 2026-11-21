@@ -307,7 +307,7 @@ const QUESTIONS: Record<string, string[]> = {
 
 
 
-  pentoshi: ["Prop firms: Vest Markets and Backed. What are each one's rules (max drawdown, daily loss limit, payouts)? Ask when it matters.", "Phil's own Hyperliquid account comes from the public address he sets in Settings › Hyperliquid (read-only, no key): if hyperliquid_account says none is set, ask him for it once."],
+  pentoshi: ["Prop firms: Vest Markets and Backed. What are each one's rules (max drawdown, daily loss limit, payouts)? Ask when it matters.", "Phil's own Hyperliquid account comes from the public address he sets in Settings › Hyperliquid: if hyperliquid_account says none is set, ask him for it once. If that address is the API wallet, HQ reads the account it trades for. Trading is through hyperliquid_trading: every order is an approval card Phil approves; Hyperliquid's smallest order is $10."],
 
   jeff: ["What is Airdrop Acres today, and what does Jeff need to run it? (On Phil's to-do list.)", "Acres' posting cadence?"],
   nick: [

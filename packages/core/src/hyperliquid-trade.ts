@@ -52,6 +52,9 @@ export function readOrder(p: Record<string, unknown>): OrderAsk {
   return { coin, buy: side === "buy" || side === "long", size: size! > 0 ? size : undefined, usd: dollars! > 0 ? dollars : undefined, price, market: String(p.type ?? (price ? "limit" : "market")).toLowerCase() !== "limit", reduceOnly: p.reduceOnly === true, leverage, cross: p.cross !== false, slippagePct: Math.min(Math.max(num(p.slippagePct) || 2, 0.1), 10) };
 }
 
+/** Hyperliquid's smallest new order, in dollars of size. */
+export const MIN_ORDER_USD = 10;
+
 export class HyperliquidTrader {
   readonly id = "hyperliquid-trade";
   private meta?: { at: number; markets: Map<string, HlMarket> };
@@ -136,6 +139,8 @@ export class HyperliquidTrader {
     // A limit price goes out exactly as the card shows it, or not at all.
     if (!ask.market && Number(price) !== ask.price) throw new Error(`${m.coin} prices go in steps here: ${px(ask.price!)} would be sent as ${price}; put ${price} (or the next step) on the card`);
     const notional = num(size) * (ask.market ? m.mark : num(price));
+    // Hyperliquid refuses a new order under $10 (Phil's "$1 test trade", Nov 20): say so before a card is made.
+    if (!ask.reduceOnly && notional < MIN_ORDER_USD) throw new Error(`Hyperliquid's smallest order is ${usd(MIN_ORDER_USD)}; this one is $${notional.toFixed(2)}. Make it at least ${usd(MIN_ORDER_USD)} (with leverage, the margin can be less)`);
     return { m, size, price, notional };
   }
 
@@ -264,6 +269,6 @@ export class HyperliquidTrader {
   }
 
   static promptHint(): string {
-    return 'Hyperliquid trading is connected, and every order waits for Phil\'s approval card (nothing auto-approves). Propose one with an approval block of kind "money": {"kind":"money","title":"<Long|Short> <COIN> <size or $>","body":"<the thesis, the invalidation (where you\'d be wrong) and the risk, in a few lines>","payload":{"action":"hyperliquid.order","coin":"BTC","side":"buy|sell","usd":250,"type":"market|limit","price":<limit only>,"leverage":<optional>,"cross":true,"reduceOnly":false}} (or "size" in coins instead of "usd"). To close: {"action":"hyperliquid.close","coin":"BTC","pct":100}; to cancel resting orders: {"action":"hyperliquid.cancel","coin":"BTC","oid":<optional>}; leverage alone: {"action":"hyperliquid.leverage","coin":"BTC","leverage":5,"cross":true}. Check hyperliquid_account first: never propose something that pushes a position near liquidation without saying so.';
+    return 'Hyperliquid trading is connected, and every order waits for Phil\'s approval card (nothing auto-approves). Propose one with an approval block of kind "money": {"kind":"money","title":"<Long|Short> <COIN> <size or $>","body":"<the thesis, the invalidation (where you\'d be wrong) and the risk, in a few lines>","payload":{"action":"hyperliquid.order","coin":"BTC","side":"buy|sell","usd":250,"type":"market|limit","price":<limit only>,"leverage":<optional>,"cross":true,"reduceOnly":false}} (or "size" in coins instead of "usd"; the smallest order is $10 of size). To close: {"action":"hyperliquid.close","coin":"BTC","pct":100}; to cancel resting orders: {"action":"hyperliquid.cancel","coin":"BTC","oid":<optional>}; leverage alone: {"action":"hyperliquid.leverage","coin":"BTC","leverage":5,"cross":true}. Check hyperliquid_account first: never propose something that pushes a position near liquidation without saying so.';
   }
 }
