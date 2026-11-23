@@ -101,7 +101,8 @@ export function memoryStore(file?: string): Store {
     },
     settings: {
       async get(key, fallback) { return (key in s.settings ? s.settings[key] : fallback) as typeof fallback; },
-      async set(key, value) { s.settings[key] = value; save(); },
+      // Clearing (null) removes the key, as the database store does, so both read back the caller's fallback.
+      async set(key, value) { if (value === null || value === undefined) delete s.settings[key]; else s.settings[key] = value; save(); },
     },
     metrics: {
       async add(m) { s.metrics.push(m); if (s.metrics.length > 100000) s.metrics.splice(0, s.metrics.length - 100000); save(); },

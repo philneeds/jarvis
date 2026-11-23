@@ -52,3 +52,12 @@ test("a routine that reports up the chain: a real failure is told once; the plan
   await new Scheduler(fine.jarvis, [scout]).tick(at);
   assert.equal(fine.phone.filter((x) => /routine failed|didn't run/.test(x)).length, 0, "nothing to say when it worked");
 });
+
+test("clearing a setting removes it, so it reads back as the caller's fallback (the database can't hold a null)", async () => {
+  const store = memoryStore(); await store.init();
+  await store.settings.set("robinhood.pending", { a: 1 });
+  await store.settings.set("robinhood.pending", null);
+  assert.equal(await store.settings.get("robinhood.pending", "fallback"), "fallback");
+  await store.settings.set("x", undefined);
+  assert.equal(await store.settings.get<null | number>("x", null), null);
+});

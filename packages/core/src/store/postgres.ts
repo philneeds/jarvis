@@ -121,6 +121,10 @@ export function postgresStore(url = process.env.DATABASE_URL): Store {
         return (r ? r.value : fallback) as typeof fallback;
       },
       async set(key, value) {
+        // Clearing a setting (null) removes its row: the column can't hold a null, and the insert failed outright
+        // (Nov 23: finishing the Robinhood sign-in died on clearing "robinhood.pending"; disconnecting Spotify or
+        // Robinhood and unpairing the glasses clear the same way). A missing row reads back as the caller's fallback.
+        if (value === null || value === undefined) { await db.delete(t.settings).where(eq(t.settings.key, key)); return; }
         await db.insert(t.settings).values({ key, value, updatedAt: new Date() }).onConflictDoUpdate({ target: t.settings.key, set: { value, updatedAt: new Date() } });
       },
     },

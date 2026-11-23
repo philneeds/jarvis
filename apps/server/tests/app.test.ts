@@ -93,7 +93,7 @@ test("Settings takes the Gemini key: saved sealed, checked with Google, shown as
     // Removing turns it off again.
     assert.equal((await call("/api/video/key", { method: "DELETE", cookie })).status, 200);
     assert.equal((await read()).configured, false);
-    assert.equal(await store.settings.get("secrets.GEMINI_API_KEY", "gone"), null);
+    assert.equal(await store.settings.get("secrets.GEMINI_API_KEY", "gone"), "gone");
 
     // A key Google refuses isn't kept, and Phil is told where to look.
     refuse = true;
@@ -101,7 +101,7 @@ test("Settings takes the Gemini key: saved sealed, checked with Google, shown as
     assert.equal(bad.status, 400);
     assert.match(((await bad.json()) as { error: string }).error, /^Gemini refused the key: .*Nothing was saved; check the key in aistudio\.google\.com\/apikey/);
     assert.equal((await read()).key.set, false);
-    assert.equal(await store.settings.get("secrets.GEMINI_API_KEY", "gone"), null);
+    assert.equal(await store.settings.get("secrets.GEMINI_API_KEY", "gone"), "gone");
   } finally { jarvisInst.useVideo({ env: {} }); }
 });
 

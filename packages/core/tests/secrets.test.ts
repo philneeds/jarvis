@@ -41,7 +41,7 @@ test("a key saved in Settings is sealed in the store: ciphertext at rest, the va
   // Removing forgets it everywhere.
   await changed.clear("GEMINI_API_KEY");
   assert.equal(changed.get("GEMINI_API_KEY"), undefined);
-  assert.equal(await store.settings.get(settingKeyFor("GEMINI_API_KEY"), "gone"), null);
+  assert.equal(await store.settings.get(settingKeyFor("GEMINI_API_KEY"), "gone"), "gone", "cleared means removed");
 });
 
 test("without a server secret nothing can be sealed, and what Phil pastes is checked for shape before it is kept", async () => {
