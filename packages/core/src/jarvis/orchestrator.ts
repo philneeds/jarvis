@@ -21,6 +21,7 @@ import { HEALTH_TOOLS, healthStatus, healthSummary } from "../health.js";
 import { XREAD_TOOLS, expandXLinks, xPostIds, readXTimeline, type XPost } from "../xread.js";
 import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
+import { COINGLASS_TOOLS } from "../coinglass.js";
 import { PREDICTION_TOOLS } from "../predictions.js";
 import { LIGHTER_TOOLS } from "../lighter.js";
 import { GLASSES_HINT } from "../glasses.js";
@@ -455,7 +456,7 @@ export class Jarvis {
   }
 
   /** Every tool an agent could be given: built-in plus connectors. */
-  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...this.videoToolList, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...LIGHTER_TOOLS, ...PREDICTION_TOOLS, ...LOOKUP_TOOLS, ...this.workshopToolList, ...this.connectorTools.values()]; }
+  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...this.videoToolList, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...COINGLASS_TOOLS, ...LIGHTER_TOOLS, ...PREDICTION_TOOLS, ...LOOKUP_TOOLS, ...this.workshopToolList, ...this.connectorTools.values()]; }
 
   // ---- Video --------------------------------------------------------------
   /** Keys Phil saved in Settings rather than .env (GEMINI_API_KEY). Write-only from the outside. */

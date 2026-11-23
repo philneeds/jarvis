@@ -86,6 +86,23 @@ const px = (n: number) => (n < 1 ? n.toPrecision(4) : n.toLocaleString("en-US", 
 const signed = (n: number) => `${n >= 0 ? "+" : "-"}${usd(Math.abs(n))}`;
 const et = (ms: number) => new Date(ms).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
+/** Phil's open perp positions across his saved accounts: the coin, the side, and where it liquidates. For tools that follow his trades. */
+export async function hlOpenPositions(store: Pick<Store, "settings">, f: typeof fetch = fetch): Promise<{ coin: string; long: boolean; value: number; mark: number; liq?: number }[]> {
+  const out: { coin: string; long: boolean; value: number; mark: number; liq?: number }[] = [];
+  for (const acct of (await hlAccounts(store)).slice(0, 5)) {
+    const given = acct.address.trim();
+    const role = await info<{ role?: string; data?: { user?: string } }>({ type: "userRole", user: given }, f).catch(() => ({}) as { role?: string; data?: { user?: string } });
+    const user = role.role === "agent" && role.data?.user && isHlAddress(role.data.user) ? role.data.user : given;
+    const st = await info<Clearing>({ type: "clearinghouseState", user }, f).catch(() => ({}) as Clearing);
+    for (const { position: p } of st.assetPositions ?? []) {
+      const size = num(p.szi), value = num(p.positionValue);
+      if (!size) continue;
+      out.push({ coin: p.coin.toUpperCase(), long: size > 0, value, mark: value / Math.abs(size), liq: num(p.liquidationPx) || undefined });
+    }
+  }
+  return out;
+}
+
 /**
  * One account in words: what it's worth, every open position with its liquidation distance, open orders, the last
  * day's fills and spot balances. Five public reads; nothing here can trade.
