@@ -30,7 +30,7 @@ const SPENT_KEY = "hyperliquid.spent";
 /** Resting orders HQ placed, so a cancel on his own never touches one Phil placed by hand. */
 const OURS_KEY = "hyperliquid.ourOrders";
 /** How placing alone says the last check failed: HQ puts the card back for Phil (orchestrator, aloneChecks). */
-export const NOT_PLACED = "not placed on his own: ";
+export const NOT_PLACED = "not placed on its own: ";
 
 /** The part of Hyperliquid's exchange API HQ uses: nothing that moves money out. */
 export interface HlExchange {

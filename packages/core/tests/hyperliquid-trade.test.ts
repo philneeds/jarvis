@@ -169,7 +169,7 @@ test("on his own: outside the parameters is a card that says why; over a hard ca
   await s.trader.setLimits({ ...PARAMS, maxOpenUsd: 1000, coins: ["BTC", "ETH"] });
   const loss = await s.card(order({ usd: 50 }));
   assert.equal(loss.status, "pending");
-  assert.match(loss.note ?? "", /Waits for you: not placed on his own: the account is down \$250 over the last 24 hours/);
+  assert.match(loss.note ?? "", /Waits for you: not placed on its own: the account is down \$250 over the last 24 hours/);
   const s2 = await rig({ pnl: [[1, "0"], [2, "10"]], openNtl: "900" });
   await s2.trader.setLimits({ ...PARAMS, maxOpenUsd: 1000, coins: ["BTC", "ETH"] });
   assert.match((await s2.card(order({ usd: 200 }))).note ?? "", /over your \$1,000 cap/);
@@ -258,6 +258,6 @@ test("review: $10 is enough; parameters are read strictly; a card the last check
   t.autoRefusal = async (a) => (first ? ((first = false), real(a)) : "trading is paused");
   const late = await s.card(order({ usd: 20 }));
   assert.equal(late.status, "pending");
-  assert.match(late.note ?? "", /^Waits for you: not placed on his own: trading is paused\.$/);
+  assert.match(late.note ?? "", /^Waits for you: not placed on its own: trading is paused\.$/);
   assert.equal((await s.store.approvals.get(late.id))?.status, "pending");
 });

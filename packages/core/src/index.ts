@@ -24,6 +24,7 @@ export * from "./hyperliquid.js";
 export * from "./predictions.js";
 export * from "./lighter.js";
 export * from "./hyperliquid-trade.js";
+export * from "./kalshi-trade.js";
 export * from "./glasses.js";
 export * from "./lookup.js";
 export * from "./xai.js";

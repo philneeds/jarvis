@@ -7,6 +7,7 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { GithubRepos } from "@/components/GithubRepos";
 import { GlassesPairing } from "@/components/GlassesPairing";
 import { HyperliquidAccounts, LighterAccounts, PolymarketAccounts } from "@/components/WalletAccounts";
+import { KalshiTrading } from "@/components/KalshiTrading";
 import { startRegistration } from "@simplewebauthn/browser";
 import { Shell } from "@/components/Shell";
 import { useLive } from "@/lib/live";
@@ -246,6 +247,7 @@ export default function SettingsPage() {
           <HyperliquidAccounts />
           <LighterAccounts />
           <PolymarketAccounts />
+          <KalshiTrading />
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Kubera">
             <div className="flex flex-wrap items-center gap-3">
               <span className={`dot ${conn?.kubera?.lastFetch?.ok ? "dot-working" : conn?.kubera?.lastFetch ? "dot-error" : "dot-idle"}`} />

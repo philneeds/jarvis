@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { HyperliquidTrader } from "@jarvis/core";
+import { HyperliquidTrader, KalshiTrader } from "@jarvis/core";
 import { getAgentConfig, DiscordConnector, EagleViewConnector, LeadPerfectionConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, Watchers, XConnector, Workshop, SHIP_KEY, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
 import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
@@ -59,6 +59,8 @@ jarvis.addConnector(robinhood, RobinhoodConnector.promptHint());
 // Hyperliquid trading through an API wallet (trades, can't withdraw); every order waits for Phil's card.
 const hlTrader = await HyperliquidTrader.fromEnv(store).catch((e: Error) => { console.warn("[hyperliquid]", e.message); return undefined; });
 if (hlTrader) jarvis.addConnector(hlTrader, HyperliquidTrader.promptHint());
+const kalshi = await KalshiTrader.fromEnv(store).catch((e: Error) => { console.warn("[kalshi]", e.message); return undefined; });
+if (kalshi) jarvis.addConnector(kalshi, KalshiTrader.promptHint());
 // The whole money team shares one holdings note, refreshed before any of them runs: Kubera's overall picture, plus
 // each position straight from Robinhood once Phil connects it (Kubera shows the Robinhood account as one total).
 jarvis.holdingsSource = async () => {
@@ -83,7 +85,7 @@ jarvis.onApprovalRequested(async (a) => {
   if ((a.payload as { action?: string } | undefined)?.action !== "trade.execute") return undefined;
   try { const c = await guard.check(parseTrade(a.payload)); return c.ok ? undefined : `Mayne's hard limits: ${c.reason}`; } catch (e) { return (e as Error).message; }
 });
-const app = createApp(jarvis, { google, x, guard, spotify, kubera, ghl, eagleview, leadperfection, discord, github, robinhood, workshop, hlTrader });
+const app = createApp(jarvis, { google, x, guard, spotify, kubera, ghl, eagleview, leadperfection, discord, github, robinhood, workshop, hlTrader, kalshi });
 
 // Live feed for HQ: agent status, chat, approvals, activity, usage, system status.
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });

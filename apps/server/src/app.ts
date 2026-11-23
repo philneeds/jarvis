@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import { glassesKeyOk, glassesReplies, glassesStatus, pairGlasses, unpairGlasses } from "@jarvis/core";
-import { limitsText, hlAccounts, isHlAddress, accountText, HL_ACCOUNTS_KEY, polyAccounts, polyPositionsText, POLY_ACCOUNTS_KEY, lighterAccounts, lighterAccountText, LIGHTER_ACCOUNTS_KEY } from "@jarvis/core";
+import { kalshiLimitsText, limitsText, hlAccounts, isHlAddress, accountText, HL_ACCOUNTS_KEY, polyAccounts, polyPositionsText, POLY_ACCOUNTS_KEY, lighterAccounts, lighterAccountText, LIGHTER_ACCOUNTS_KEY } from "@jarvis/core";
 import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type LeadPerfectionConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type EagleViewConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
@@ -12,7 +12,7 @@ import { authEnabled, clientIp, fromHq, isAuthed, login, loginFailed, loginWait,
 /** A count from the query string: a whole number from 1 to max, else the default ("abc" and -5 used to reach the store). */
 const count = (raw: string | undefined, fallback: number, max: number) => { const n = Math.floor(Number(raw)); return Number.isFinite(n) && n >= 1 ? Math.min(n, max) : fallback; };
 
-export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; spotify?: SpotifyConnector; kubera?: KuberaConnector; ghl?: GoHighLevelConnector; eagleview?: EagleViewConnector; leadperfection?: LeadPerfectionConnector; discord?: DiscordConnector; github?: GithubConnector; robinhood?: RobinhoodConnector; guard?: TradingGuard; workshop?: Workshop ; hlTrader?: import("@jarvis/core").HyperliquidTrader } = {}) {
+export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector; x?: XConnector; spotify?: SpotifyConnector; kubera?: KuberaConnector; ghl?: GoHighLevelConnector; eagleview?: EagleViewConnector; leadperfection?: LeadPerfectionConnector; discord?: DiscordConnector; github?: GithubConnector; robinhood?: RobinhoodConnector; guard?: TradingGuard; workshop?: Workshop ; hlTrader?: import("@jarvis/core").HyperliquidTrader; kalshi?: import("@jarvis/core").KalshiTrader } = {}) {
   const app = new Hono();
   const origins = (process.env.HQ_ORIGIN ?? "http://localhost:3000").split(",").map((s) => s.trim());
   app.use("/api/*", cors({ origin: origins, credentials: true }));
@@ -601,6 +601,17 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
       try { return c.json({ ok: true, summary: (await Promise.all(all.map((x) => w.read(x)))).join("\n\n") }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
     });
   }
+  // Settings › Kalshi: whether trading is set up, what the account holds, and Phil's parameters for Cat.
+  api.get("/kalshi", async (c) => c.json(connectors.kalshi ? await connectors.kalshi.status(true) : { trading: false, problem: "add a Kalshi API key on the server (KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_FILE)", limits: {} }));
+  api.put("/kalshi/limits", async (c) => {
+    if (!connectors.kalshi) return c.json({ error: "Kalshi trading isn't set up (KALSHI_API_KEY_ID)" }, 400);
+    const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    let limits;
+    try { limits = await connectors.kalshi.setLimits({ auto: b.auto === true, maxOrderUsd: b.maxOrderUsd as number | undefined, maxDayUsd: b.maxDayUsd as number | undefined, maxOpenUsd: b.maxOpenUsd as number | undefined }); }
+    catch (e) { return c.json({ error: (e as Error).message }, 400); }
+    await jarvis.router.log("jarvis", "system", `Phil set the Kalshi parameters: ${kalshiLimitsText(limits)}`);
+    return c.json({ limits });
+  });
   // Settings › Hyperliquid: Phil's own trading limits (a cap per trade and per day; empty switches one off).
   api.put("/hyperliquid/limits", async (c) => {
     if (!connectors.hlTrader) return c.json({ error: "Hyperliquid trading isn't set up (HYPERLIQUID_AGENT_KEY)" }, 400);
