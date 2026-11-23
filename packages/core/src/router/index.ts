@@ -59,6 +59,8 @@ export interface RunOutcome extends AgentResult {
   runId: string;
   agentId: string;
   blocked?: string;
+  /** The run was tried and failed (a provider error, a timeout), as against not being started (paused, held). */
+  failed?: boolean;
 }
 
 /** Builds the default provider chains from the environment. */
@@ -239,11 +241,11 @@ export class ModelRouter {
     const err = errors.join(" | ") || `no provider configured for ${model.label}`;
     const finishedAt = new Date().toISOString();
     await this.store.runs.update(runId, { status: "error", error: err, finishedAt });
-    if (opts.background) return { ...base, blocked: err };
+    if (opts.background) return { ...base, blocked: err, failed: true };
     await this.store.agentState.set(agent.id, { status: "error", lastRunAt: finishedAt, lastRunId: runId, lastError: err });
     bus.emitEvent({ type: "agent.status", agentId: agent.id, status: "error", at: finishedAt, detail: err.slice(0, 200) });
     await this.log(agent.id, "error", `${agent.name} failed: ${err.slice(0, 300)}`, runId);
-    return { ...base, blocked: err };
+    return { ...base, blocked: err, failed: true };
   }
 
   async setStatus(agentId: string, status: "idle" | "working" | "waiting" | "error" | "paused", detail?: string) {

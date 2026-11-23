@@ -6,6 +6,7 @@ import { getAgentConfig } from "./config.js";
 import { listDecks } from "./decks.js";
 import { listDataFiles } from "./salesdata.js";
 import { deployPending } from "./deployhold.js";
+import { isUsageLimit } from "./router/claude.js";
 
 export interface Schedule {
   id: string;
@@ -317,6 +318,24 @@ export class Scheduler {
 
   /** Routines running right now, so an overlapping tick never starts the same one twice. */
   private running = new Set<string>();
+  /**
+   * Scheduled work that didn't happen goes on Phil's Needs-you list, which also reaches his phone. One item per
+   * routine while it stays open (raiseAttention keeps a single item per title), so a routine failing every half hour
+   * is one line, not forty. Not told: a job only held for an HQ update (it runs right after), and, for routines
+   * that report up the chain rather than to Phil, a pause he set himself or the plan's usage limit (HQ already says
+   * when routines wait for the limit).
+   */
+  private async tellFailure(s: Schedule, agent: AgentDef, reason: string, tried: boolean): Promise<void> {
+    if (/held until the HQ update/.test(reason)) return;
+    if (!s.push && (!tried || isUsageLimit(reason))) return;
+    const what = (REPORT_TITLE[s.id] ?? "").replace(/^[^:]*:\s*/, "") || s.id;
+    const why = reason.replace(/\s+/g, " ").slice(0, 260);
+    await this.jarvis.raiseAttention({
+      agentId: agent.id,
+      title: s.push ? `${agent.name}'s ${what} didn't run` : `${agent.name}'s routine failed: ${s.id}`,
+      why: s.push ? `${why}. Ask ${agent.name} to run it again, or ask Einstein why.` : `${why}. It tries again on its next turn; if this keeps coming back, ask Einstein to look.`,
+    });
+  }
   /** When each routine last really started (wall clock), so one held for an update that a running tick started anyway isn't run twice. */
   private startedAt = new Map<string, number>();
 
@@ -387,6 +406,11 @@ export class Scheduler {
           const q = s.watch?.length ? await this.jarvis.quiet(`schedule:${s.id}`, agent.id, s.watch) : undefined;
           if (q?.skip) { await this.jarvis.router.log(agent.id, "schedule", `Scheduled: ${s.id} · skipped, ${q.skip}`); continue; }
           const r = await runRoutine(this.jarvis, s, { deliver: false });
+          // Phil is told when scheduled work didn't happen (Nov 23: "if an agent failed ... it would notify me, right?"):
+          // a deliverable he is waiting on that didn't run for any reason, a deck routine that made no deck, and any
+          // routine that was tried and failed.
+          if (r?.blocked) await this.tellFailure(s, agent, r.blocked, !!r.failed);
+          else if (r && s.deck && !("decks" in r && r.decks?.length)) await this.tellFailure(s, agent, "it ran, but no deck came out of it; its message says why", true);
           if (r && !r.blocked) {
             await q?.ran();
             await done(`${agent.name} reported back`, r.runId);
@@ -395,6 +419,7 @@ export class Scheduler {
         }
       } catch (e) {
         await this.jarvis.router.log(agent.id, "error", `Schedule ${s.id} failed: ${(e as Error).message}`);
+        await this.tellFailure(s, agent, (e as Error).message, true).catch(() => undefined);
       } finally { this.running.delete(s.id); }
     }
     // Handing reports to a lead starts the lead's run: while an update waits, they're kept and handed over after it.
