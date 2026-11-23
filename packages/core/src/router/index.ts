@@ -174,17 +174,24 @@ export class ModelRouter {
     // A provider that ignores the abort still can't hold the run: the race ends it.
     const stopped = new Promise<never>((_, rej) => ctl.signal.addEventListener("abort", () => rej(new ProviderError(ctl.signal.reason instanceof Error ? ctl.signal.reason.message : "stopped", "hq")), { once: true }));
     stopped.catch(() => undefined);
+    // Legs: the model's own chain first. When Claude's whole plan is at its limit (the 5-hour cap) and the run needs no
+    // tools, no workshop and no images (Jarvis's notices, a short answer), one more leg on Grok: the SuperGrok plan sits
+    // mostly idle, and a plain answer there beats a failed run. Tool work waits for the plan, as before.
+    const legs: { chain: Provider[]; model: ModelSpec }[] = [{ chain, model }];
+    let limited = false, realError = false;
     try {
-    for (const p of chain) {
+    for (const leg of legs) {
+    const cur = leg.model;
+    for (const p of leg.chain) {
       if (ctl.signal.aborted) break;
       const avail = await p.available();
       if (!avail.ok) { errors.push(`${p.id}: ${avail.reason}`); continue; }
       // When the model's usage limit is hit (Fable's cap), the same provider gets one more go on the model's
       // limitFallback (Opus) before the next provider in the chain. A plan-wide limit fails both; then the chain moves on.
-      let m = model;
+      let m = cur;
       for (;;) {
         try {
-          const sees = model.provider === "claude";
+          const sees = cur.provider === "claude";
           const n = opts.images?.length ?? 0;
           const prompt = (n && !sees ? `${opts.prompt}\n\n(Phil attached ${n} image${n > 1 ? "s" : ""} you can't see. Say so, and hand anything visual to Joi.)` : opts.prompt) + prefetched;
           // Only the model attempt itself failing wipes what it streamed; a hiccup saving the result afterwards doesn't.
@@ -203,21 +210,30 @@ export class ModelRouter {
           return { ...base, ...res, runId, agentId: agent.id };
         } catch (e) {
           const msg = e instanceof ProviderError ? e.message : (e as Error).message;
-          errors.push(`${p.id}${m !== model ? ` on ${m.label}` : ""}: ${msg}`);
+          errors.push(`${p.id}${m !== cur ? ` on ${m.label}` : ""}: ${msg}`);
           console.warn(`[run] ${agent.id} failed on ${p.id} (${m.modelId}): ${msg.slice(0, 300)}`);
           if (ctl.signal.aborted) break;
+          if (isUsageLimit(msg)) limited = true; else realError = true;
           // The plan said stop: remember until when, so scheduled work waits instead of failing run after run.
-          if (model.provider === "claude" && isUsageLimit(msg)) {
+          if (cur.provider === "claude" && isUsageLimit(msg)) {
             const lim = await noteClaudeLimit(this.store, msg).catch(() => undefined);
             if (lim) await this.log(agent.id, "system", `Claude plan limit reached; routines wait until ${new Date(lim.until).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}. Phil's own asks still run.`, runId, { error: msg.slice(0, 300) });
           }
-          const fb = m === model && model.limitFallback && isUsageLimit(msg) ? MODELS[model.limitFallback] : undefined;
-          if (!fb || fb.provider !== model.provider) break;
-          await this.log(agent.id, "system", `${agent.name} hit the ${model.label} usage limit; retrying on ${fb.label}`, runId, { error: msg.slice(0, 300) });
+          const fb = m === cur && cur.limitFallback && isUsageLimit(msg) ? MODELS[cur.limitFallback] : undefined;
+          if (!fb || fb.provider !== cur.provider) break;
+          await this.log(agent.id, "system", `${agent.name} hit the ${cur.label} usage limit; retrying on ${fb.label}`, runId, { error: msg.slice(0, 300) });
           m = fb;
         }
       }
       if (ctl.signal.aborted) break;
+    }
+    if (ctl.signal.aborted) break;
+    // Claude's plan said stop and nothing else went wrong: a run with no tools, files or images gets one leg on Grok.
+    const grokChain = this.providers.grok ?? [];
+    if (leg === legs[0] && cur.provider === "claude" && limited && !realError && grokChain.length && !opts.tools?.length && !opts.workspace && !opts.images?.length) {
+      legs.push({ chain: grokChain, model: MODELS.grok });
+      await this.log(agent.id, "system", `Claude's plan is at its limit; ${agent.name}'s answer goes out on ${MODELS.grok.label} (SuperGrok plan) instead`, runId, { error: errors.join(" | ").slice(0, 300) });
+    }
     }
     } finally { clearTimeout(timer); opts.signal?.removeEventListener("abort", onOuterAbort); }
     const err = errors.join(" | ") || `no provider configured for ${model.label}`;
