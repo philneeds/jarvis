@@ -71,3 +71,55 @@ test("a plan-wide limit stops Opus too; the error names both tries and the missi
   await r2.run(jarvis, { system: "s", prompt: "x", direct: true });
   assert.deepEqual(seen2, [jarvis.model]);
 });
+
+/** A Grok CLI that answers everything, and remembers what it was asked. */
+function fakeGrok() {
+  const seen: string[] = [];
+  const p: Provider = {
+    id: "grok:cli",
+    async available() { return { ok: true }; },
+    async run(req) {
+      seen.push(req.model.key);
+      return { text: `grok says: ${req.prompt}`, provider: "grok:cli", modelId: "grok-4.7", inputTokens: 8, outputTokens: 4, costUsd: 0, durationMs: 1 };
+    },
+  };
+  return { p, seen };
+}
+
+test("Claude's plan at its limit: a run with no tools goes out on Grok, recorded on the SuperGrok plan", async () => {
+  const store = memoryStore(); await store.init();
+  const { p, seen } = fakeClaude({ "claude-opus": LIMIT });
+  const { p: grok, seen: grokSeen } = fakeGrok();
+  const router = new ModelRouter({ store, providers: { claude: [p, noKey], grok: [grok] } });
+  const jarvis = getAgent("jarvis")!;
+  const out = await router.run(jarvis, { system: "s", prompt: "The card went through", direct: true });
+  assert.equal(out.blocked, undefined);
+  assert.deepEqual(seen, ["claude-opus"]);
+  assert.deepEqual(grokSeen, ["grok"]);
+  assert.equal(out.provider, "grok:cli");
+  assert.equal(out.text, "grok says: The card went through");
+  const run = (await store.runs.get(out.runId))!;
+  assert.equal(run.status, "done");
+  assert.equal(run.provider, "grok:cli");
+  const usage = await store.usage.since(new Date(Date.now() - 60_000));
+  assert.deepEqual(usage.map((u) => u.plan), ["supergrok"]);
+  const log = await store.activity.list({ agentId: "jarvis" });
+  assert.ok(log.some((e) => e.kind === "system" && /Claude's plan is at its limit; Jarvis's answer goes out on Grok/.test(e.summary)));
+  assert.ok(!log.some((e) => e.kind === "error"));
+});
+
+test("Claude's plan at its limit: a run with tools, or a real error, does not go to Grok", async () => {
+  const store = memoryStore(); await store.init();
+  const { p } = fakeClaude({ "claude-opus": LIMIT });
+  const { p: grok, seen: grokSeen } = fakeGrok();
+  const router = new ModelRouter({ store, providers: { claude: [p, noKey], grok: [grok] } });
+  const tool = { name: "web_status", description: "", schema: {}, handler: async () => "" };
+  const withTools = await router.run(getAgent("jarvis")!, { system: "s", prompt: "x", direct: true, tools: [tool] });
+  assert.match(withTools.blocked!, /5-hour limit/);
+  // Fable's own cap, then a real failure on Opus: that is a bug to surface, not a plan limit to route around.
+  const { p: p2 } = fakeClaude({ "claude-fable": LIMIT, "claude-opus": "Claude Agent SDK failed: something broke" });
+  const r2 = new ModelRouter({ store, providers: { claude: [p2, noKey], grok: [grok] } });
+  const broke = await r2.run(getAgent("einstein")!, { system: "s", prompt: "x", direct: true });
+  assert.match(broke.blocked!, /something broke/);
+  assert.deepEqual(grokSeen, []);
+});
