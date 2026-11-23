@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineTool, type ToolDef } from "./tools/index.js";
 import type { Store } from "./store/types.js";
 import { hlOpenPositions } from "./hyperliquid.js";
+import { coinalyzeLiquidationsText } from "./coinalyze.js";
 
 /**
  * Liquidation data from CoinGlass, for Pentoshi (Phil, Nov 23 2026: "add liquidation data for Pentoshi and his
@@ -111,9 +112,16 @@ export async function liquidationsText(store: Pick<Store, "settings">, coins?: s
 export const COINGLASS_TOOLS: ToolDef[] = [
   defineTool({
     name: "liquidations",
-    description: "Liquidation data from CoinGlass (read-only): what was liquidated over the last 1, 4 and 24 hours across exchanges, longs against shorts, for the market and for each coin; for the coins Phil holds on Hyperliquid, how far his own liquidation price is, and (when the plan has it) the price levels where liquidations cluster above and below. With no coins: his open positions, then BTC, ETH and SOL.",
+    description: "Liquidation data (read-only; Coinalyze's free API, or CoinGlass when Phil has that plan): what was liquidated over the last 1, 4 and 24 hours across the big venues, longs against shorts, for each coin; for the coins Phil holds on Hyperliquid, how far his own liquidation price is. With no coins: his open positions, then BTC, ETH and SOL.",
     schema: { coins: z.array(z.string().max(20)).max(8).optional().describe("tickers like BTC, ETH, SOL") },
-    async handler({ coins }, ctx) { try { return await liquidationsText(ctx.store, coins); } catch (e) { return `Liquidations: ${(e as Error).message}`; } },
+    async handler({ coins }, ctx) {
+      // The free source when its key is there (Phil, Nov 23: "i need a free plan"); CoinGlass if he ever takes that plan.
+      try {
+        if (process.env.COINALYZE_API_KEY?.trim()) return await coinalyzeLiquidationsText(ctx.store, coins);
+        if (process.env.COINGLASS_API_KEY?.trim()) return await liquidationsText(ctx.store, coins);
+        return "Liquidations: not connected yet (Phil adds a free Coinalyze key, COINALYZE_API_KEY, on the server). Work without it, and don't bring it up unless he asks about liquidations.";
+      } catch (e) { return `Liquidations: ${(e as Error).message}`; }
+    },
   }),
 ];
 /** For tests: forget what was kept. */
