@@ -56,6 +56,9 @@ export default function SettingsPage() {
     try {
       const r = await api<{ url: string; pasteBack?: boolean }>("/api/connectors/robinhood/auth");
       if (!r.pasteBack) { location.href = r.url; return; }
+      // Said before he leaves this tab (Phil, Nov 23: he approved at Robinhood, landed on "can't connect" and took it
+      // for a failure; the instructions were only here, on the tab he had left).
+      if (!confirm("Robinhood opens in a new tab. Log in and approve there.\n\nYou will then land on a page that says it can't connect (its address starts with http://localhost:8765). That page is EXPECTED, not an error.\n\nCopy that page's whole address from the address bar, come back to this tab, paste it in the box under Robinhood and press Finish.")) return;
       window.open(r.url, "_blank", "noopener");
       setRhPaste(""); setRhMsg(undefined);
     } catch (e) { setRhMsg((e as Error).message); }
@@ -232,12 +235,16 @@ export default function SettingsPage() {
                 ? <><span style={{ color: "var(--dim)" }}>connected{conn.robinhood.connectedAt ? ` · ${fmtTime(conn.robinhood.connectedAt)}` : ""}</span><button className="btn btn-sm" onClick={() => void testSimple("/api/connectors/robinhood/test", setRhMsg)}>Check now</button><button className="btn btn-sm btn-danger ml-auto" onClick={disconnectRobinhood}>Disconnect</button></>
                 : <button className="btn btn-sm btn-primary ml-auto" onClick={connectRobinhood}>{rhPaste !== null ? "Open Robinhood again" : "Connect Robinhood"}</button>}
             </div>
-            {rhPaste !== null && !conn?.robinhood?.connected && (
+            {/* Always there while it isn't connected: coming back to this page later, the box to finish in is still here. */}
+            {conn && !conn.robinhood?.connected && (
               <form className="flex flex-col gap-2 pl-6" onSubmit={(e) => { e.preventDefault(); void finishRobinhood(); }}>
-                <p className="m-0" style={{ color: "var(--ink)" }}>Robinhood opened in a new tab. Log in and approve. You&apos;ll land on a page that says it can&apos;t be reached (an address starting with <code>http://localhost:8765</code>): that&apos;s expected. Copy that whole address from the address bar and paste it here.</p>
+                <p className="m-0" style={{ color: rhPaste !== null ? "var(--ink)" : "var(--muted)" }}>
+                  {rhPaste !== null ? "Robinhood opened in a new tab. Log in and approve. " : "Two steps: press Connect and approve at Robinhood; then finish here. "}
+                  After you approve, Robinhood sends you to a page that says it <b>can&apos;t connect</b> (its address starts with <code>http://localhost:8765</code>). <b>That page is expected, not a failure.</b> Copy its whole address from the address bar, paste it here and press Finish. Do it within a few minutes; if it&apos;s been longer, press Connect again.
+                </p>
                 <div className="flex gap-2">
-                  <input className="input h-9 flex-1" placeholder="http://localhost:8765/robinhood/callback?code=…" aria-label="Address Robinhood sent you to" value={rhPaste} onChange={(e) => setRhPaste(e.target.value)} />
-                  <button className="btn btn-sm btn-primary h-9" disabled={!rhPaste.trim()}>Finish</button>
+                  <input className="input h-9 flex-1" placeholder="http://localhost:8765/robinhood/callback?code=…" aria-label="Address Robinhood sent you to" value={rhPaste ?? ""} onChange={(e) => setRhPaste(e.target.value)} />
+                  <button className="btn btn-sm btn-primary h-9" disabled={!(rhPaste ?? "").trim()}>Finish</button>
                 </div>
               </form>
             )}
