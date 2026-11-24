@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { bus, type AgentSetup, type Approval, type AttentionItem, type AutoDone, type BaseSummary, type ChatMessage, type Goal, type Benchmark, type Horizon, type SystemStatus, type Today, type Trophy } from "../events.js";
+import { bus, type AgentSetup, type Approval, type AttentionItem, type AutoDone, type BaseSummary, type BenchmarkCheck, type ChatMessage, type Goal, type Benchmark, type Horizon, type SystemStatus, type Today, type Trophy } from "../events.js";
+import { describeCheck, evaluateCheck, parseCheck, tickFor, type KuberaDay, type KuberaReadStatus } from "../goalchecks.js";
 import { ALL_CONNECTIONS, connectionsFor, OPTIONAL_CONNECTIONS, type Connection } from "../readiness.js";
 import { HORIZONS, philDay, pickToday, playerLevel, reconcileToday, streakOf, syncTrophies, ventureLevels, type TodayLog } from "../progress.js";
 import { AGENTS, CHARTERS, findAgent, getAgent, type AgentDef } from "../registry/index.js";
@@ -328,11 +329,14 @@ export class Jarvis {
     this.executors.set("goals.benchmarks", async (a) => {
       const p = (a.payload ?? {}) as { id?: unknown; benchmarks?: unknown };
       if (typeof p.id !== "string" || !Array.isArray(p.benchmarks)) throw new Error("goals.benchmarks needs the goal id and a list of benchmarks");
-      const list = (p.benchmarks as { text?: unknown; weight?: unknown; done?: unknown }[]).filter((b) => b && typeof b.text === "string" && b.text.trim()).map((b) => ({ text: String(b.text), weight: Number(b.weight), ...(typeof b.done === "boolean" ? { done: b.done } : {}) }));
+      // A benchmark may carry a check (Kubera net worth, a Kubera account, a board figure): HQ then ticks it itself.
+      const list = (p.benchmarks as { text?: unknown; weight?: unknown; done?: unknown; check?: unknown }[]).filter((b) => b && typeof b.text === "string" && b.text.trim()).map((b) => ({ text: String(b.text), weight: Number(b.weight), ...(typeof b.done === "boolean" ? { done: b.done } : {}), ...(b.check ? { check: parseCheck(b.check) ?? null } : {}) }));
       if (!list.length) throw new Error("no benchmarks in the proposal");
       const g = await this.updateGoal(p.id, { benchmarks: list }, a.agentId);
       if (!g) throw new Error("no goal with that id; check goals_list");
-      return `"${g.name}" has ${g.benchmarks?.length ?? 0} benchmarks; it's ${g.pct}% done.`;
+      const checked = g.benchmarks?.filter((b) => b.check).length ?? 0;
+      if (checked) void this.syncGoalChecks(g.id).catch(() => undefined);
+      return `"${g.name}" has ${g.benchmarks?.length ?? 0} benchmarks${checked ? ` (${checked} checked by HQ against live data)` : ""}; it's ${g.pct}% done.`;
     });
     // David's three for today, picked from the goals and from what's waiting on Phil. Only a list on Phil's own screen.
     this.executors.set("today.set", async (a) => {
@@ -343,7 +347,7 @@ export class Jarvis {
       return `Today's three: ${t.items.map((x) => x.text).join("; ")}.`;
     });
     this.describers.set("today.set", (p) => `Sets today's three on your home screen (${Array.isArray(p.items) ? Math.min(3, p.items.length) : 3} items). Nothing leaves HQ.`);
-    this.describers.set("goals.benchmarks", (p) => `Sets ${Array.isArray(p.benchmarks) ? p.benchmarks.length : "the"} benchmarks for a goal on your home screen; ticking them moves its bar. Nothing leaves HQ.`);
+    this.describers.set("goals.benchmarks", (p) => { const checked = Array.isArray(p.benchmarks) ? p.benchmarks.filter((b) => parseCheck((b as { check?: unknown })?.check)).length : 0; return `Sets ${Array.isArray(p.benchmarks) ? p.benchmarks.length : "the"} benchmarks for a goal on your home screen; ticking them moves its bar.${checked ? ` ${checked} of them HQ ticks itself from live data (Kubera, the boards).` : ""} Nothing leaves HQ.`; });
     // A scout's own idea for the stock watchlist, added once Phil approves.
     this.executors.set("watchlist.add", async (a) => {
       const p = (a.payload ?? {}) as { symbol?: unknown; sector?: unknown; thesis?: unknown };
@@ -1280,7 +1284,7 @@ export class Jarvis {
    * Rename, move progress, set or clear the deadline, make it the primary goal, replace its benchmarks, or tick them.
    * With benchmarks, the percent is the done benchmarks' share of the total weight.
    */
-  async updateGoal(id: string, patch: { name?: string; pct?: number; deadline?: string | null; primary?: true; benchmarks?: { text: string; weight?: number; done?: boolean }[]; benchmarksDone?: { done?: string[]; undone?: string[] }; horizon?: Horizon | null; venture?: string | null; parent?: string | null }, by = "phil"): Promise<Goal | undefined> {
+  async updateGoal(id: string, patch: { name?: string; pct?: number; deadline?: string | null; primary?: true; benchmarks?: { text: string; weight?: number; done?: boolean; check?: BenchmarkCheck | null }[]; benchmarksDone?: { done?: string[]; undone?: string[] }; benchmarkChecks?: Record<string, BenchmarkCheck | null>; horizon?: Horizon | null; venture?: string | null; parent?: string | null }, by = "phil"): Promise<Goal | undefined> {
     const list = await this.goalList();
     const goal = list.find((g) => g.id === id);
     if (!goal) return undefined;
@@ -1309,15 +1313,29 @@ export class Jarvis {
       goal.benchmarks = patch.benchmarks.filter((b) => { const k = b.text.trim().slice(0, 200).toLowerCase(); if (!k || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 12).map((b) => {
         const text = b.text.trim().slice(0, 200), old = was.get(text.toLowerCase());
         const done = b.done ?? old?.done ?? false;
-        return { id: old?.id ?? randomUUID().slice(0, 8), text, weight: Math.max(1, Math.min(100, Math.round(Number.isFinite(b.weight) ? b.weight! : 1))), done, doneAt: done ? old?.doneAt ?? now : undefined };
+        // A check named here replaces the old one (null clears it); left out, the old check and its last reading stay.
+        const check = b.check === undefined ? old?.check : b.check ?? undefined;
+        const keep = check && check === old?.check ? { auto: old?.auto, paused: old?.paused } : {};
+        return { id: old?.id ?? randomUUID().slice(0, 8), text, weight: Math.max(1, Math.min(100, Math.round(Number.isFinite(b.weight) ? b.weight! : 1))), done, doneAt: done ? old?.doneAt ?? now : undefined, ...(check ? { check } : {}), ...(keep.auto ? { auto: keep.auto } : {}), ...(keep.paused ? { paused: true } : {}) };
       });
+    }
+    if (patch.benchmarkChecks && goal.benchmarks) {
+      for (const [key, check] of Object.entries(patch.benchmarkChecks)) {
+        const b = goal.benchmarks.find((x) => x.id === key);
+        if (!b) continue;
+        // Setting (or re-setting) a check also resumes it after Phil's hand paused it; clearing it drops the reading.
+        if (check) { b.check = check; delete b.paused; } else { delete b.check; delete b.auto; delete b.paused; }
+      }
     }
     if (patch.benchmarksDone && goal.benchmarks) {
       const hit = (key: string) => (b: Benchmark) => b.id === key || b.text.toLowerCase() === key.trim().toLowerCase();
-      for (const key of patch.benchmarksDone.done ?? []) { const b = goal.benchmarks.find(hit(key)); if (b && !b.done) { b.done = true; b.doneAt = now; } }
-      for (const key of patch.benchmarksDone.undone ?? []) { const b = goal.benchmarks.find(hit(key)); if (b) { b.done = false; b.doneAt = undefined; } }
+      // Phil's hand on a benchmark HQ checks itself wins: the check pauses until he resumes it (the hourly check
+      // would otherwise put the tick straight back).
+      const touch = (b: Benchmark) => { if (b.check && by === "phil") b.paused = true; };
+      for (const key of patch.benchmarksDone.done ?? []) { const b = goal.benchmarks.find(hit(key)); if (b && !b.done) { b.done = true; b.doneAt = now; touch(b); } }
+      for (const key of patch.benchmarksDone.undone ?? []) { const b = goal.benchmarks.find(hit(key)); if (b) { b.done = false; b.doneAt = undefined; touch(b); } }
     }
-    if ((patch.benchmarks || patch.benchmarksDone) && goal.benchmarks?.length && patch.pct === undefined) {
+    if ((patch.benchmarks || patch.benchmarksDone || patch.benchmarkChecks) && goal.benchmarks?.length && patch.pct === undefined) {
       const total = goal.benchmarks.reduce((n, b) => n + b.weight, 0);
       goal.pct = clampPct((goal.benchmarks.filter((b) => b.done).reduce((n, b) => n + b.weight, 0) / total) * 100);
     }
@@ -1325,8 +1343,51 @@ export class Jarvis {
     await this.saveGoals(list);
     await this.awardTrophies(goal);
     const who = by === "phil" ? "Phil" : getAgent(by)?.name ?? by;
-    await this.router.log(by === "phil" ? "jarvis" : by, "memory", `${who} updated goal "${goal.name}"${patch.primary ? " and made it primary" : ""}${patch.benchmarks ? ` with ${goal.benchmarks?.length ?? 0} benchmarks` : ""}${patch.pct !== undefined || patch.benchmarksDone || patch.benchmarks ? ` (${goal.pct}%)` : ""}`);
+    await this.router.log(by === "phil" ? "jarvis" : by, "memory", `${who} updated goal "${goal.name}"${patch.primary ? " and made it primary" : ""}${patch.benchmarks ? ` with ${goal.benchmarks?.length ?? 0} benchmarks` : ""}${patch.benchmarkChecks ? ` (checks: ${Object.values(patch.benchmarkChecks).map((c) => (c ? describeCheck(c) : "cleared")).join("; ")})` : ""}${patch.pct !== undefined || patch.benchmarksDone || patch.benchmarks ? ` (${goal.pct}%)` : ""}`);
     return goal;
+  }
+
+  /** Reads Kubera again before a goal check, so the figure is today's (set when Kubera is connected; cached 20 minutes there). */
+  goalDataRefresh?: () => Promise<void>;
+
+  /**
+   * Tick and untick the benchmarks that carry a check, from the data HQ reads: Kubera's daily snapshot (net worth,
+   * each account) and the venture boards. Hourly, at start, and right after a check is set. A read that failed or is
+   * stale changes no tick: the row shows the error instead. A benchmark Phil paused by hand is left alone. Returns a
+   * line for the log and whether any tick moved.
+   */
+  async syncGoalChecks(goalId?: string): Promise<{ summary: string; changed: boolean }> {
+    const goals = (await this.goalList()).filter((g) => (!goalId || g.id === goalId) && g.benchmarks?.some((b) => b.check && !b.paused));
+    if (!goals.length) return { summary: "no checked benchmarks", changed: false };
+    try { await this.goalDataRefresh?.(); } catch (e) { console.warn("[goals] refresh:", (e as Error).message); }
+    const data = {
+      kubera: { status: await this.store.settings.get<KuberaReadStatus | null>("kubera.status", null), history: await this.store.settings.get<KuberaDay[]>("kubera.history", []) },
+      metrics: (venture: string, key: string, limit?: number) => this.store.metrics.series(venture, key, limit),
+    };
+    let ticked = 0, unticked = 0, errors = 0, checked = 0;
+    for (const g of goals) {
+      const done: string[] = [], undone: string[] = [];
+      for (const b of g.benchmarks ?? []) {
+        if (!b.check || b.paused) continue;
+        checked++;
+        const r = await evaluateCheck(b.check, data);
+        if (r.error) errors++;
+        const next = tickFor(b.done, r);
+        if (next && !b.done) done.push(b.id); else if (!next && b.done) undone.push(b.id);
+        b.auto = r;
+      }
+      // The readings are saved with the goal; ticks go through updateGoal so the percent, trophies and log follow.
+      const list = await this.goalList();
+      const live = list.find((x) => x.id === g.id);
+      if (live) { for (const b of live.benchmarks ?? []) { const mine = g.benchmarks?.find((x) => x.id === b.id); if (mine?.auto) b.auto = mine.auto; } await this.saveGoals(list, !done.length && !undone.length); }
+      if (done.length || undone.length) {
+        await this.updateGoal(g.id, { benchmarksDone: { done, undone } }, "jarvis");
+        ticked += done.length; unticked += undone.length;
+        const names = (ids: string[]) => ids.map((id) => g.benchmarks?.find((b) => b.id === id)?.text ?? id).join("; ");
+        await this.router.log("jarvis", "memory", `Goal check on "${g.name}": ${done.length ? `met ${names(done)}` : ""}${done.length && undone.length ? "; " : ""}${undone.length ? `no longer met ${names(undone)}` : ""} (${[...done, ...undone].map((id) => g.benchmarks?.find((b) => b.id === id)?.auto?.figure).filter(Boolean).join("; ")})`);
+      }
+    }
+    return { summary: `goal checks: ${checked} benchmark${checked === 1 ? "" : "s"} read${ticked ? `, ${ticked} ticked` : ""}${unticked ? `, ${unticked} unticked` : ""}${errors ? `, ${errors} source${errors === 1 ? "" : "s"} couldn't be read` : ""}`, changed: ticked + unticked > 0 };
   }
 
   /** Delete a goal; if it was primary, the next one takes over. Undoable for a while. */

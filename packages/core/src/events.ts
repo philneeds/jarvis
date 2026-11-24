@@ -72,7 +72,31 @@ export interface BaseSummary { trophies: Trophy[]; levels: Record<string, Ventur
 /** Phil's own level, from what he actually got done (see playerXp). `xp` is into this level, `next` what it takes to reach the next. */
 export interface PlayerLevel { level: number; total: number; xp: number; next: number; from: { trophies: number; fullDays: number; todosDone: number; decisions: number } }
 
-export interface Benchmark { id: string; text: string; weight: number; done: boolean; doneAt?: string }
+export interface Benchmark {
+  id: string; text: string; weight: number; done: boolean; doneAt?: string;
+  /** A rule HQ checks against data it already reads (Kubera, the boards); when set, HQ ticks and unticks this itself. */
+  check?: BenchmarkCheck;
+  /** The last check: when, which source, the figure it read, and whether the rule was met (or why it couldn't tell). */
+  auto?: AutoCheck;
+  /** Phil ticked or unticked this by hand: his word stands and HQ stops checking until he resumes it. */
+  paused?: boolean;
+}
+
+/**
+ * What a benchmark is checked against. `op` compares the figure with `value`; `days` means the rule must have held on
+ * every daily reading over the last N days (a "maintain" goal), not just the latest one.
+ */
+export type BenchmarkCheck =
+  /** Net worth as Kubera reports it (assets minus debts, every account in the portfolio). */
+  | { kind: "kubera_networth"; op: CheckOp; value: number; days?: number }
+  /** One account or asset in Kubera, matched by name (case-insensitive, partial). Debts read as negative numbers. */
+  | { kind: "kubera_item"; name: string; op: CheckOp; value: number }
+  /** A figure on a venture's board (the metrics agents record), by venture id and key. */
+  | { kind: "metric"; venture: string; key: string; op: CheckOp; value: number; days?: number };
+export type CheckOp = ">=" | "<=";
+
+/** The result of one check. `met` is absent when the source couldn't be read (then `error` says why). */
+export interface AutoCheck { at: string; source: string; figure?: string; met?: boolean; error?: string }
 
 /** Something Phil has to act on. Lives until he ticks it off; raised by agents or by Phil. */
 export interface AttentionItem {

@@ -41,6 +41,8 @@ export const SCHEDULES: Schedule[] = [
   // Code on GitHub that HQ isn't running yet becomes one "Update HQ" card under Needs you: no SSH to update.
   { id: "hq-update-check", agentId: "jarvis", task: "update-check", when: "every:60", phase: 0 },
   { id: "setup-check", agentId: "jarvis", task: "setup-check", when: "every:60", phase: 0 },
+  // Benchmarks with a rule against live data (Kubera, the boards) tick and untick themselves.
+  { id: "goal-check", agentId: "jarvis", task: "goal-check", when: "every:60", phase: 0 },
   { id: "einstein-weekly", agentId: "einstein", task: "Weekly review for Phil, short enough to read on his phone. Call web_health for the last 7 days. Then: the three changes you'd make this week and why (errors to fix, slow or idle agents, usage, approvals Phil keeps rejecting); where each of Phil's ideas on your list stands; anything to cut, for Oscar. Changes to HQ's own code: build them in your workshop, verify, and submit (workshop_submit) so Phil can ship each one from Needs you. Anything else you want changed (a setting, a plan, a key Phil must add): an approval (kind config) so Phil can say yes or no.", when: "weekly:sun@19:00", phase: 0 },
   { id: "adam-monthly", agentId: "adam", task: "Monthly goals session with Phil. Call goals_list for where his current goals stand, and look at each venture's board. Then: one line on how last month went against each goal; then propose this month's goals (one primary, up to two more), each specific and measurable with a deadline, and why each matters now. Put the proposal in one approval with payload {\"action\":\"goals.set\",\"add\":[{\"name\":\"...\",\"deadline\":\"YYYY-MM-DD\",\"primary\":true}],\"retire\":[\"<id of a goal that is done or dropped>\"]}. Phil will question or change it on the card before approving.", when: "monthly:1@08:00", phase: 0 },
   { id: "buffett-weekly", agentId: "buffett", task: "Weekly holdings review after Friday's close, short enough to read on a phone. Read the holdings (kubera_items; everything is at Robinhood). Say how each did this week, what the scouts flagged, and at most three suggested changes, each as an approval with the reason. Then keep the scouts informed: a remember block with scope venture:money and key holdings listing the tickers by sector. And add any stock Phil talked about this week (chat_recent) to the watchlist as a record with status watch.", when: "weekly:fri@16:45", phase: 2 },
@@ -130,7 +132,7 @@ export function nextRun(when: string, now: Date, last?: number): Date | undefine
 }
 
 /** Built-in jobs that aren't an agent's routine: no report goes up the chain, /run leaves them out. */
-export const HOUSEKEEPING = new Set(["brief", "condense", "backup", "update-check", "setup-check"]);
+export const HOUSEKEEPING = new Set(["brief", "condense", "backup", "update-check", "setup-check", "goal-check"]);
 
 export interface ScheduleView { id: string; agentId: string; when: string; whenText: string; summary: string; task: string; phase: number; active: boolean; push: boolean; custom: boolean; deck: boolean; to?: string; lastRun?: string; nextRun?: string }
 
@@ -141,6 +143,7 @@ const SUMMARY: Record<string, string> = {
   "backup-nightly": "Backs up the database, keeps 14 days, copies to Google Drive.",
   "hq-update-check": "Checks GitHub for code HQ isn't running yet; if there is some, an Update HQ card waits under Needs you.",
   "setup-check": "Checks every live agent has its connections and has been tried once; keeps the Command center's setup goal up to date.",
+  "goal-check": "Ticks goal benchmarks that carry a rule against Kubera or a board figure; unticks them when the rule stops holding.",
   "oscar-inbox": "Inbox cleanup plan for each account, sent to you as approvals. Never trashes.",
   "einstein-weekly": "Weekly review: what to fix or improve, where your ideas stand, what to cut.",
   "adam-monthly": "Goals session: how last month went, and this month's goals for your OK.",
@@ -177,7 +180,7 @@ export async function scheduleView(store: Store, now = new Date(), schedules: Sc
     return {
       id: s.id, agentId: s.agentId, when: s.when, whenText: describeWhen(s.when),
       summary: SUMMARY[s.id] ?? (s.task.length > 140 ? `${s.task.slice(0, 140).replace(/\s+\S*$/, "")}…` : s.task),
-      task: s.task === "brief" ? "The morning brief: each lead's report, what's waiting on Phil, today's calendar." : s.task === "condense" ? "Tidy memory: merge duplicates and drop what's stale (when memory passes 20 items)." : s.task === "backup" ? "Nightly backup of the database, kept 14 days, with a copy to Google Drive." : s.task === "update-check" ? "Hourly check for new code on HQ's branch; an Update HQ card when there is some." : s.task === "setup-check" ? "Hourly check that every live agent is connected and tried; updates the setup goal." : s.task,
+      task: s.task === "brief" ? "The morning brief: each lead's report, what's waiting on Phil, today's calendar." : s.task === "condense" ? "Tidy memory: merge duplicates and drop what's stale (when memory passes 20 items)." : s.task === "backup" ? "Nightly backup of the database, kept 14 days, with a copy to Google Drive." : s.task === "update-check" ? "Hourly check for new code on HQ's branch; an Update HQ card when there is some." : s.task === "setup-check" ? "Hourly check that every live agent is connected and tried; updates the setup goal." : s.task === "goal-check" ? "Hourly: benchmarks with a rule against Kubera or a board figure are ticked or unticked from the live number." : s.task,
       phase: s.phase, active, push: !!s.push || s.task === "brief", custom: s.id.startsWith("custom:"), deck: !!s.deck, to: s.push || HOUSEKEEPING.has(s.task) ? undefined : s.to ?? getAgent(s.agentId)?.parent ?? "jarvis",
       lastRun: last[s.id] ? new Date(last[s.id]!).toISOString() : undefined, nextRun: n?.toISOString(),
     };
@@ -389,6 +392,10 @@ export class Scheduler {
           await done("daily brief sent");
         } else if (s.task === "setup-check") {
           await done(await this.jarvis.syncSetupGoal());
+        } else if (s.task === "goal-check") {
+          // Logged only when a tick moved: an hourly "nothing changed" line would bury the log.
+          const r = await this.jarvis.syncGoalChecks();
+          if (r.changed) await done(r.summary);
         } else if (s.task === "backup" || s.task === "update-check") {
           const fn = this.jarvis.tasks.get(s.task);
           if (fn) { const r = await fn(); await done(r); }

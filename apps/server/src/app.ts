@@ -278,18 +278,32 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     if (!p.success) return c.json({ error: p.error.issues[0]?.message ?? "name required" }, 400);
     try { return c.json({ goal: await jarvis.addGoal(p.data), goals: await jarvis.goals() }); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
   });
+  // A benchmark's rule against live data: HQ ticks it itself. The shape is checked here so a typo can't be saved.
+  const checkOp = z.enum([">=", "<="]);
+  const checkDays = z.number().int().min(2).max(400).optional();
+  const goalCheck = z.union([
+    z.object({ kind: z.literal("kubera_networth"), op: checkOp, value: z.number().finite(), days: checkDays }).strict(),
+    z.object({ kind: z.literal("kubera_item"), name: z.string().trim().min(1).max(80), op: checkOp, value: z.number().finite() }).strict(),
+    z.object({ kind: z.literal("metric"), venture: goalVenture, key: z.string().trim().min(1).max(60), op: checkOp, value: z.number().finite(), days: checkDays }).strict(),
+  ]);
   api.put("/goals/:id", async (c) => {
     const p = z.object({ name: z.string().trim().min(1).max(160).optional(), pct: z.number().min(0).max(100).optional(), deadline: z.union([goalDate, z.literal(""), z.null()]).optional(), primary: z.literal(true).optional(),
       horizon: goalHorizon.nullable().optional(), venture: goalVenture.nullable().optional(), parent: z.string().max(64).nullable().optional(),
-      benchmarks: z.array(z.object({ text: z.string().trim().min(1).max(200), weight: z.number().min(1).max(100).optional(), done: z.boolean().optional() })).max(12).optional(),
-      benchmarksDone: z.object({ done: z.array(z.string().max(200)).max(12).optional(), undone: z.array(z.string().max(200)).max(12).optional() }).optional() })
+      benchmarks: z.array(z.object({ text: z.string().trim().min(1).max(200), weight: z.number().min(1).max(100).optional(), done: z.boolean().optional(), check: goalCheck.nullable().optional() })).max(12).optional(),
+      benchmarksDone: z.object({ done: z.array(z.string().max(200)).max(12).optional(), undone: z.array(z.string().max(200)).max(12).optional() }).optional(),
+      benchmarkChecks: z.record(z.string().max(64), goalCheck.nullable()).optional() })
       .strict().refine((v) => Object.keys(v).length > 0, "nothing to change").safeParse(await c.req.json().catch(() => null));
     if (!p.success) return c.json({ error: p.error.issues[0]?.message ?? "bad body" }, 400);
     try {
-      const goal = await jarvis.updateGoal(c.req.param("id"), p.data as Parameters<typeof jarvis.updateGoal>[1]);
-      return goal ? c.json({ goal, goals: await jarvis.goals() }) : c.json({ error: "not found" }, 404);
+      let goal = await jarvis.updateGoal(c.req.param("id"), p.data as Parameters<typeof jarvis.updateGoal>[1]);
+      if (!goal) return c.json({ error: "not found" }, 404);
+      // A check just set (or resumed) is read straight away, so Phil sees the figure beside it without waiting an hour.
+      if (p.data.benchmarkChecks && Object.values(p.data.benchmarkChecks).some(Boolean)) { await jarvis.syncGoalChecks(goal.id); goal = (await jarvis.goals()).find((g) => g.id === goal!.id) ?? goal; }
+      return c.json({ goal, goals: await jarvis.goals() });
     } catch (e) { return c.json({ error: (e as Error).message }, 400); }
   });
+  // Read every checked benchmark now (the hourly routine does the same).
+  api.post("/goals/check", async (c) => { const r = await jarvis.syncGoalChecks(); return c.json({ ...r, goals: await jarvis.goals() }); });
   // Beside the goals: trophies, each venture's level, today's three and the streak. For Phil's screens only.
   api.get("/base", async (c) => c.json(await jarvis.baseSummary()));
   api.post("/today/repick", async (c) => { await jarvis.repickToday(); return c.json(await jarvis.baseSummary()); });

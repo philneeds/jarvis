@@ -1,5 +1,7 @@
 import { z } from "zod";
 import type { Store } from "../store/types.js";
+import type { Benchmark, Goal } from "../events.js";
+import { describeCheck } from "../goalchecks.js";
 import { AGENTS, getAgent } from "../registry/index.js";
 import { VENTURE_DASH } from "../ventures/dashboards.js";
 import { usageSummary } from "../usage/caps.js";
@@ -63,15 +65,19 @@ export function buildTools(): ToolDef[] {
     }),
     defineTool({
       name: "goals_list",
-      description: "Phil's goals as they stand: id, name, percent done, deadline, which one is primary, its horizon (long, mid or short term), the venture it belongs to, the longer-term goal it feeds, and each goal's benchmarks (id, done or not, weight).",
+      description: "Phil's goals as they stand: id, name, percent done, deadline, which one is primary, its horizon (long, mid or short term), the venture it belongs to, the longer-term goal it feeds, and each goal's benchmarks (id, done or not, weight, and for one HQ checks itself the rule, the figure read and when). A benchmark HQ checks (kubera_networth, kubera_item, metric) needs no goals.update from you: tick by hand only the ones without a check.",
       schema: {},
       async handler(_args, { store }) {
-        const goals = await store.settings.get<{ id: string; name: string; pct: number; deadline?: string; primary: boolean; updatedAt: string; horizon?: string; venture?: string; parent?: string; benchmarks?: { id: string; text: string; weight: number; done: boolean; doneAt?: string }[] }[] | null>("goals", null);
+        const goals = await store.settings.get<Goal[] | null>("goals", null);
         if (!goals?.length) return "No goals set yet.";
-        return goals.map((g) => [
-          `[${g.id}] ${g.primary ? "PRIMARY " : ""}${g.name} · ${g.pct}% done${g.deadline ? ` · due ${g.deadline}` : ""}${g.horizon ? ` · ${g.horizon} term` : ""}${g.venture ? ` · venture ${g.venture}` : ""}${g.parent ? ` · feeds [${g.parent}]` : ""} · updated ${g.updatedAt.slice(0, 10)}`,
-          ...(g.benchmarks?.length ? g.benchmarks.map((b) => `  ${b.done ? "[x]" : "[ ]"} (${b.id}) ${b.text} · weight ${b.weight}${b.doneAt ? ` · met ${b.doneAt.slice(0, 10)}` : ""}`) : ["  No benchmarks yet."]),
-        ].join("\n")).join("\n");
+        const auto = (b: Benchmark) => !b.check ? "" : ` · HQ checks: ${describeCheck(b.check)}${b.paused ? " (paused by Phil)" : ""}${b.auto ? ` · ${b.auto.error ? `couldn't read: ${b.auto.error}` : `${b.auto.met ? "met" : "not met"}, ${b.auto.figure}`}` : ""}`;
+        return [
+          ...goals.map((g) => [
+            `[${g.id}] ${g.primary ? "PRIMARY " : ""}${g.name} · ${g.pct}% done${g.deadline ? ` · due ${g.deadline}` : ""}${g.horizon ? ` · ${g.horizon} term` : ""}${g.venture ? ` · venture ${g.venture}` : ""}${g.parent ? ` · feeds [${g.parent}]` : ""} · updated ${g.updatedAt.slice(0, 10)}`,
+            ...(g.benchmarks?.length ? g.benchmarks.map((b) => `  ${b.done ? "[x]" : "[ ]"} (${b.id}) ${b.text} · weight ${b.weight}${b.doneAt ? ` · met ${b.doneAt.slice(0, 10)}` : ""}${auto(b)}`) : ["  No benchmarks yet."]),
+          ].join("\n")),
+          `A benchmark can carry "check" in goals.benchmarks so HQ ticks it from live data: {"kind":"kubera_networth","op":">=","value":100000,"days":30} (net worth as Kubera reports it, held every day for 30 days; leave days out for the latest reading), {"kind":"kubera_item","name":"Robinhood","op":">=","value":90000} (one Kubera account; debts are negative), {"kind":"metric","venture":"money","key":"net_worth","op":">=","value":100000} (a figure on a venture board). Only where the data really is in HQ; income that lands in an account HQ can't see stays a benchmark for Phil's word.`,
+        ].join("\n");
       },
     }),
     defineTool({

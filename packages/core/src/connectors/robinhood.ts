@@ -241,10 +241,40 @@ export class RobinhoodConnector {
     const parts: string[] = [];
     // Pretty-printed JSON wastes the room: compact it, and drop empty and null fields.
     const tight = (x: string) => { try { return JSON.stringify(JSON.parse(x), (_k, v) => (v === null || v === "" ? undefined : v)); } catch { return x.replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n"); } };
+    // Robinhood's position tools want the account number (get_equity_positions: account_number; get_crypto_positions:
+    // rhs_account_number). Called bare they fail, so the accounts are listed first and each one is read (up to three).
+    let accounts: Promise<Record<string, string[]>> | undefined;
+    const accountArgs = async (t: McpTool): Promise<Record<string, unknown>[]> => {
+      const need = requiredFields(t).filter((f) => /account/i.test(f));
+      if (!need.length) return [{}];
+      accounts ??= this.accountNumbers(reads);
+      const found = await accounts;
+      const sets = need.map((f) => found[f] ?? found[Object.keys(found).find((k) => k.endsWith(f) || f.endsWith(k)) ?? ""] ?? []);
+      const n = Math.min(3, Math.max(...sets.map((s) => s.length)));
+      if (!n) return [{}];
+      return Array.from({ length: n }, (_, i) => Object.fromEntries(need.map((f, j) => [f, sets[j]![i] ?? sets[j]![0]])));
+    };
     for (const [i, t] of picks.entries()) {
-      try { parts.push(`${t.name}:\n${tight(await this.call(t.name, {})).slice(0, i === 0 ? 2800 : 500)}`); } catch (e) { parts.push(`${t.name}: couldn't be read (${(e as Error).message.slice(0, 160)})`); }
+      try {
+        const args = await accountArgs(t);
+        const texts: string[] = [];
+        for (const a of args) texts.push(`${Object.keys(a).length ? `${Object.values(a).join("/")}: ` : ""}${tight(await this.call(t.name, a))}`);
+        parts.push(`${t.name}:\n${texts.join("\n").slice(0, i === 0 ? 2800 : 500)}`);
+      } catch (e) { parts.push(`${t.name}: couldn't be read (${(e as Error).message.slice(0, 160)})`); }
     }
     return `Phil's positions straight from Robinhood (all his Robinhood accounts; read-only):\n${parts.join("\n\n")}`.slice(0, 3400);
+  }
+
+  /** Account numbers from the accounts tool, keyed by the field name each appears under (account_number, rhs_account_number). */
+  private async accountNumbers(reads: McpTool[]): Promise<Record<string, string[]>> {
+    const t = reads.find((x) => /^(get_|list_)?accounts?$/i.test(x.name)) ?? reads.find((x) => /account/i.test(x.name) && !/position|order|history/i.test(x.name));
+    if (!t) return {};
+    try {
+      const text = await this.call(t.name, {});
+      const out: Record<string, string[]> = {};
+      for (const m of text.matchAll(/"?([a-z_]*account_number)"?\s*[:=]\s*"?([A-Za-z0-9-]{4,})/gi)) { const k = m[1]!.toLowerCase(); out[k] = [...new Set([...(out[k] ?? []), m[2]!])]; }
+      return out;
+    } catch { return {}; }
   }
 
   async check(): Promise<string> {
@@ -282,6 +312,12 @@ export class RobinhoodConnector {
   static promptHint(): string {
     return "Robinhood is connected (its official agent access). robinhood_tools lists what it offers; robinhood_read runs any read-only tool (positions, balances, orders, quotes, history) by name with JSON args. Anything that places, changes or cancels an order is never run directly: put it in an approval block, kind \"money\", payload {\"action\":\"robinhood.call\",\"tool\":\"<name>\",\"args\":{...}}, with the reasoning in body. Robinhood only lets agents trade in Phil's dedicated Agentic account.";
   }
+}
+
+/** The fields a tool's input schema marks required. */
+export function requiredFields(t: McpTool): string[] {
+  const s = t.inputSchema as { required?: unknown } | undefined;
+  return Array.isArray(s?.required) ? s!.required.filter((x): x is string => typeof x === "string") : [];
 }
 
 /** The matching JSON-RPC response out of a server-sent-events body. */

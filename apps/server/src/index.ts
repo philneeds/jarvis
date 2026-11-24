@@ -38,6 +38,8 @@ const kubera = KuberaConnector.fromEnv(store);
 if (kubera) {
   jarvis.addConnector(kubera, KuberaConnector.promptHint());
   kubera.onDaily = async (nw) => { await jarvis.recordMetric("money", "net_worth", Math.round(nw), "munger"); };
+  // Goal benchmarks checked against Kubera read today's figure, not yesterday's snapshot (cached 20 minutes).
+  jarvis.goalDataRefresh = async () => { await kubera.portfolio(); };
 }
 // JD PM's GoHighLevel (read-only): contacts, conversations, pipeline, invoices, appointments.
 const ghl = GoHighLevelConnector.fromEnv(store);
@@ -168,6 +170,8 @@ if (workshop) jarvis.tasks.set("update-check", () => jarvis.checkForUpdate());
 if (stale.length) console.log(`[boot] cleared stale work: ${stale.join(", ")}`);
 // The Command center's setup goal, brought up to date once at start (then hourly by the setup-check routine).
 void jarvis.syncSetupGoal().catch((e) => console.warn("[setup]", (e as Error).message));
+// Benchmarks with a rule against live data, checked once at start (then hourly by the goal-check routine).
+void jarvis.syncGoalChecks().catch((e) => console.warn("[goals]", (e as Error).message));
 if (process.env.SCHEDULER !== "0") scheduler.start();
 // Watchers: cheap looks at GoHighLevel and the markets every few minutes; a lead wakes only when something new happened.
 const watchers = new Watchers(jarvis, { ghl, google });

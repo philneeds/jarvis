@@ -18,6 +18,7 @@ export * from "./xread.js";
 export * from "./video.js";
 export * from "./secrets.js";
 export * from "./progress.js";
+export * from "./goalchecks.js";
 export * from "./decks.js";
 export * from "./salesnumbers.js";
 export * from "./hyperliquid.js";
