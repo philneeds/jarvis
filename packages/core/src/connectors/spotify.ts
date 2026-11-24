@@ -72,6 +72,12 @@ export class SpotifyConnector {
   async disconnect() { await this.store.settings.set(KEY, null); }
   async status() { const t = await this.store.settings.get<SpotifyTokens | null>(KEY, null); return { connected: !!t, name: t?.name, connectedAt: t?.connectedAt }; }
 
+  /** For Settings › Check: Spotify is asked whose account this is. */
+  async check(): Promise<string> {
+    const me = await this.api<{ display_name?: string; id?: string; product?: string }>("/me");
+    return `Signed in as ${me.display_name ?? me.id ?? "your account"}${me.product ? ` (${me.product})` : ""}.`;
+  }
+
   private async token(): Promise<string> {
     const t = await this.store.settings.get<SpotifyTokens | null>(KEY, null);
     if (!t) throw new Error("Spotify isn't connected. Connect it under Settings.");

@@ -44,6 +44,14 @@ async function get<T>(path: string, opts: Opts, keep: Map<string, { at: number; 
   return j;
 }
 
+/** For Settings › Check: the key is asked afresh (a kept answer would hide a key that stopped working). One of the minute's 40 calls. */
+export async function coinalyzeCheck(opts: Opts = {}): Promise<string> {
+  const ex = await get<{ name: string }[]>("/exchanges", opts, new Map(), 0);
+  if (!Array.isArray(ex) || !ex.length) throw new Error("Coinalyze answered, but with no venues; its API may have changed");
+  const have = VENUES.filter((v) => ex.some((e) => (e.name ?? "").toLowerCase().includes(v)));
+  return `Coinalyze accepted the key: ${ex.length} venues, ${have.length} of the ${VENUES.length} HQ sums liquidations over (${have.join(", ")}).`;
+}
+
 /** A coin's main perpetual markets on the big venues: stable-margined, quoted in a dollar, one per venue, five at most. */
 export function marketsFor(coin: string, markets: Market[], exchanges: { name: string; code: string }[]): { symbol: string; venue: string }[] {
   const name = new Map(exchanges.map((e) => [e.code, e.name]));

@@ -22,6 +22,7 @@ import { XREAD_TOOLS, expandXLinks, xPostIds, readXTimeline, type XPost } from "
 import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { COINGLASS_TOOLS } from "../coinglass.js";
+import { connectionTools, type Probe } from "../connections.js";
 import { PREDICTION_TOOLS } from "../predictions.js";
 import { LIGHTER_TOOLS } from "../lighter.js";
 import { GLASSES_HINT } from "../glasses.js";
@@ -456,13 +457,16 @@ export class Jarvis {
   }
 
   /** Every tool an agent could be given: built-in plus connectors. */
-  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...this.videoToolList, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...COINGLASS_TOOLS, ...LIGHTER_TOOLS, ...PREDICTION_TOOLS, ...LOOKUP_TOOLS, ...this.workshopToolList, ...this.connectorTools.values()]; }
+  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...this.videoToolList, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...COINGLASS_TOOLS, ...this.connectionToolList, ...LIGHTER_TOOLS, ...PREDICTION_TOOLS, ...LOOKUP_TOOLS, ...this.workshopToolList, ...this.connectorTools.values()]; }
 
   // ---- Video --------------------------------------------------------------
   /** Keys Phil saved in Settings rather than .env (GEMINI_API_KEY). Write-only from the outside. */
   readonly secrets: Secrets;
   private video!: VideoAnalyzer;
   private videoToolList!: import("../tools/index.js").ToolDef[];
+  /** Every connection's live check, handed in by the server (it holds the connectors). Settings and connections_check run these. */
+  connectionProbes?: () => Probe[] | Promise<Probe[]>;
+  private connectionToolList = connectionTools(() => this.connectionProbes?.());
   /** Swap the video reader (tests hand it a fake model). Keys saved in Settings stay in reach unless the test brings its own. */
   useVideo(deps: VideoDeps = {}) {
     this.video = new VideoAnalyzer({ secrets: this.secrets, ...deps });

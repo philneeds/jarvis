@@ -130,6 +130,31 @@ export class GoogleConnector {
     return { connected: live.length > 0, email: live[0]?.email, accounts: live.map((t) => ({ email: t.email ?? "(unknown)", connectedAt: t.connectedAt })) };
   }
 
+  /**
+   * For Settings › Check: each connected account's token is refreshed if it has run out, then Google is asked what
+   * the token may do. A revoked or expired sign-in fails here rather than in the middle of someone's work.
+   */
+  async check(): Promise<string> {
+    const list = (await this.status()).accounts;
+    if (!list.length) throw new Error("No Google account is connected. Press Connect under Settings.");
+    const lines: string[] = [];
+    let bad = 0;
+    for (const a of list) {
+      try {
+        const token = await this.accessToken(a.email);
+        const res = await this.f(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`);
+        if (!res.ok) throw new Error(`Google no longer accepts the sign-in (${res.status}); disconnect it and connect again`);
+        const scope = ((await res.json()) as { scope?: string }).scope ?? "";
+        const can = [["calendar", "Calendar"], ["gmail", "Gmail"], ["drive", "Drive (files HQ makes)"]].filter(([k]) => scope.includes(`/auth/${k}`)).map(([, n]) => n);
+        const missing = GOOGLE_SCOPES.filter((s) => !scope.split(" ").includes(s)).map((s) => s.split("/").pop());
+        lines.push(`${a.email}: signed in; can use ${can.join(", ") || "nothing HQ needs"}${missing.length ? `. Missing: ${missing.join(", ")} (disconnect and connect again to grant it)` : ""}`);
+        if (missing.length) bad++;
+      } catch (e) { bad++; lines.push(`${a.email}: ${(e as Error).message}`); }
+    }
+    if (bad) throw new Error(lines.join("\n"));
+    return lines.join("\n");
+  }
+
   /** The accounts an agent may use: its settings' list, or every connected account. */
   private async allowedFor(ctx?: ToolContext): Promise<string[] | undefined> {
     if (!ctx) return undefined;

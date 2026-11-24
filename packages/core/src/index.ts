@@ -27,6 +27,7 @@ export * from "./hyperliquid-trade.js";
 export * from "./kalshi-trade.js";
 export * from "./coinglass.js";
 export * from "./coinalyze.js";
+export * from "./connections.js";
 export * from "./glasses.js";
 export * from "./lookup.js";
 export * from "./xai.js";

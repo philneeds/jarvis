@@ -8,6 +8,7 @@ import { GithubRepos } from "@/components/GithubRepos";
 import { GlassesPairing } from "@/components/GlassesPairing";
 import { HyperliquidAccounts, LighterAccounts, PolymarketAccounts } from "@/components/WalletAccounts";
 import { KalshiTrading } from "@/components/KalshiTrading";
+import { ConnectionsCheck } from "@/components/ConnectionsCheck";
 import { startRegistration } from "@simplewebauthn/browser";
 import { Shell } from "@/components/Shell";
 import { useLive } from "@/lib/live";
@@ -196,6 +197,8 @@ export default function SettingsPage() {
           {state && Object.entries(state.providers).map(([id, s]) => <div key={id} className="flex items-center gap-2 text-[12px]"><span className={`dot ${s.ok ? "dot-working" : "dot-idle"}`} /><BrandLogo name={id.split(":")[0] ?? id} size={18} /><span>{id}</span><span style={{ color: "var(--muted)" }}>{s.ok ? "ready" : s.reason}</span></div>)}
           <p className="m-0 text-[11px]" style={{ color: "var(--muted)" }}>Sign-ins and keys live in <code>.env</code> on the server; see the README.</p>
         </section>
+
+        <ConnectionsCheck onChecked={() => void load()} />
 
         <section className="card flex flex-col gap-3" aria-label="Connectors">
           <span className="label">Connectors</span>

@@ -446,3 +446,24 @@ test("glasses: a pairing key made in Settings (only its hash kept) asks Jarvis a
   await call("/api/glasses/pair", { method: "DELETE", cookie });
   assert.equal((await dev("/api/glasses/device/ping", again.key)).status, 401);
 });
+
+test("Settings › Connections check: every connection is listed; a check runs the ones asked for and what it saw is kept", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  assert.equal((await call("/api/connectors/check")).status, 401);
+  type Row = { id: string; name: string; state?: string; summary?: string };
+  const before = (await (await call("/api/connectors/check", { cookie })).json()) as { results: Row[] };
+  for (const id of ["google", "telegram", "robinhood", "hyperliquid", "hyperliquid-trading", "kalshi", "liquidations", "leadperfection", "backup"]) assert.ok(before.results.some((r) => r.id === id), id);
+  assert.ok(before.results.every((r) => r.state === undefined), "nothing has been checked yet");
+  // Two that read only HQ's own store, asked side by side the way the page asks (each on its own).
+  const [a, b] = await Promise.all(["backup", "kalshi"].map(async (id) => (await (await call("/api/connectors/check", { method: "POST", cookie, body: JSON.stringify({ only: [id] }) })).json()) as { results: Row[]; checked: string[] }));
+  assert.deepEqual([a!.checked, b!.checked], [["backup"], ["kalshi"]]);
+  const after = (await (await call("/api/connectors/check", { cookie })).json()) as { results: Row[] };
+  const row = (id: string) => after.results.find((r) => r.id === id)!;
+  assert.equal(row("backup").state, "unchecked");
+  assert.match(row("backup").summary!, /No backup has run yet/);
+  assert.equal(row("kalshi").state, "off", "neither save overwrote the other");
+  assert.match(row("kalshi").summary!, /KALSHI_API_KEY_ID/);
+  assert.equal(row("google").state, undefined);
+  assert.equal((await call("/api/connectors/check", { method: "POST", cookie, body: JSON.stringify({ only: ["nope"] }) })).status, 400);
+});

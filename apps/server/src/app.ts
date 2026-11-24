@@ -5,6 +5,8 @@ import { randomBytes } from "node:crypto";
 import { glassesKeyOk, glassesReplies, glassesStatus, pairGlasses, unpairGlasses } from "@jarvis/core";
 import { kalshiLimitsText, limitsText, hlAccounts, isHlAddress, accountText, HL_ACCOUNTS_KEY, polyAccounts, polyPositionsText, POLY_ACCOUNTS_KEY, lighterAccounts, lighterAccountText, LIGHTER_ACCOUNTS_KEY } from "@jarvis/core";
 import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type LeadPerfectionConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type EagleViewConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
+import { lastChecks, runChecks, saveChecks } from "@jarvis/core";
+import { connectionProbes } from "./checks.js";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
 import { authEnabled, clientIp, fromHq, isAuthed, login, loginFailed, loginWait, logout, requireAuth } from "./auth.js";
@@ -459,6 +461,31 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     telegram: { configured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) },
     ntfy: { configured: !!process.env.NOTIFY_WEBHOOK_URL },
   }));
+  // Settings › Connections check: one real read-only call to every connection (or the ones named), and what was
+  // last seen for each. The same probes are behind Einstein's connections_check.
+  const probes = connectionProbes(jarvis, connectors);
+  jarvis.connectionProbes = () => probes;
+  api.get("/connectors/check", async (c) => {
+    const seen = await lastChecks(jarvis.store);
+    return c.json({ results: probes.map((p) => seen.find((r) => r.id === p.id) ?? { id: p.id, name: p.name, what: p.what }) });
+  });
+  let checking: Promise<unknown> | undefined;
+  let saving: Promise<Awaited<ReturnType<typeof saveChecks>>> = Promise.resolve([]);
+  api.post("/connectors/check", async (c) => {
+    const { only } = (await c.req.json().catch(() => ({}))) as { only?: unknown };
+    const ids = Array.isArray(only) ? only.filter((x): x is string => typeof x === "string").slice(0, 40) : undefined;
+    if (ids?.length && !probes.some((p) => ids.includes(p.id))) return c.json({ error: "no connection by that name" }, 400);
+    // A second press while a full check runs waits for it rather than signing in to everything twice.
+    if (!ids?.length && checking) await checking.catch(() => undefined);
+    const work = runChecks(probes, { only: ids });
+    if (!ids?.length) checking = work.finally(() => { checking = undefined; });
+    const results = await work;
+    // Settings asks for each connection on its own, side by side: the saves go one at a time so none overwrites another.
+    const all = await (saving = saving.catch(() => []).then(() => saveChecks(jarvis.store, results, probes.map((p) => p.id))));
+    const bad = results.filter((r) => r.state === "failed");
+    if (!ids?.length) await jarvis.router.log("jarvis", "system", `Phil checked every connection: ${results.filter((r) => r.state === "ok").length} working${bad.length ? `, ${bad.length} not (${bad.map((r) => r.name).join(", ")})` : ""}`);
+    return c.json({ results: probes.map((p) => all.find((r) => r.id === p.id) ?? { id: p.id, name: p.name, what: p.what }), checked: results.map((r) => r.id) });
+  });
   api.get("/connectors/google/auth", (c) => {
     if (!connectors.google) return c.json({ error: "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set" }, 400);
     const state = randomBytes(16).toString("base64url");

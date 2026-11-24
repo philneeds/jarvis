@@ -96,6 +96,23 @@ export class XConnector {
   async disconnect(handle: string) { await this.store.settings.set(ACCOUNTS_KEY, (await this.accounts()).filter((a) => a.handle !== handle)); }
   async status() { return { accounts: (await this.accounts()).map((a) => ({ handle: a.handle, name: a.name, connectedAt: a.connectedAt })) }; }
 
+  /**
+   * For Settings › Check: each account's session, refreshed when it has run out (X's last two hours, so this is
+   * nearly always a real round trip). Nothing is read or posted: reads on X are billed, a refresh isn't.
+   */
+  async check(): Promise<string> {
+    const all = await this.accounts();
+    if (!all.length) throw new Error("No X account is connected. Press Connect under Settings.");
+    const lines: string[] = [];
+    let bad = 0;
+    for (const a of all) {
+      try { const live = await this.account(a.handle); lines.push(`@${a.handle}: session good for ${Math.max(1, Math.round((live.expires_at - this.now()) / 60_000))} more minutes, and it renews itself`); }
+      catch (e) { bad++; lines.push(`@${a.handle}: ${(e as Error).message}`); }
+    }
+    if (bad) throw new Error(lines.join("\n"));
+    return `${lines.join("\n")}\n(Checked by renewing the session; nothing was read, so it cost nothing.)`;
+  }
+
   private async account(handle?: string): Promise<XAccount> {
     const all = await this.accounts();
     if (!all.length) throw new Error("No X account is connected. Connect one under Settings.");
