@@ -300,7 +300,8 @@ export class Jarvis {
       for (const g of p.add ?? []) {
         if (typeof g.name !== "string" || !g.name.trim()) continue;
         // Benchmarks can come on the same card (Phil, Nov 20: his goals set in one approval, not a relay through Adam).
-        const marks = (Array.isArray(g.benchmarks) ? g.benchmarks : []).filter((b): b is { text: string; weight?: unknown } => !!b && typeof (b as { text?: unknown }).text === "string" && !!(b as { text: string }).text.trim()).slice(0, 12).map((b) => ({ text: b.text.trim(), weight: Number(b.weight) }));
+        // A benchmark's check (Kubera net worth, a Kubera item, a board metric) rides along too, as on goals.benchmarks.
+        const marks = (Array.isArray(g.benchmarks) ? g.benchmarks : []).filter((b): b is { text: string; weight?: unknown; check?: unknown } => !!b && typeof (b as { text?: unknown }).text === "string" && !!(b as { text: string }).text.trim()).slice(0, 12).map((b) => ({ text: b.text.trim(), weight: Number(b.weight), ...(b.check ? { check: parseCheck(b.check) ?? null } : {}) }));
         const deadline = typeof g.deadline === "string" && /^\d{4}-\d{2}-\d{2}$/.test(g.deadline) ? g.deadline : undefined;
         const made = await this.addGoal({ name: g.name, deadline, pct: typeof g.pct === "number" ? g.pct : 0, primary: g.primary === true, horizon: HORIZONS.find((h) => h === g.horizon), venture: typeof g.venture === "string" ? g.venture : undefined, parent: typeof g.parent === "string" ? g.parent : undefined });
         added.push(g.name.trim());
@@ -361,7 +362,8 @@ export class Jarvis {
     this.describers.set("goals.set", (p) => {
       const add = (Array.isArray(p.add) ? p.add : []) as { name?: string; primary?: boolean; deadline?: string; benchmarks?: unknown[] }[];
       const retire = Array.isArray(p.retire) ? p.retire.length : 0;
-      return `Sets your goals on the home screen: ${add.map((g) => `${g.name}${g.primary ? " (primary)" : ""}${g.deadline ? `, by ${g.deadline}` : ""}${Array.isArray(g.benchmarks) && g.benchmarks.length ? `, with ${g.benchmarks.length} benchmarks` : ""}`).join("; ") || "none new"}${retire ? `, and retires ${retire} old goal(s)` : ""}. Nothing leaves HQ.`;
+      const checked = add.reduce((n, g) => n + (Array.isArray(g.benchmarks) ? g.benchmarks.filter((b) => parseCheck((b as { check?: unknown })?.check)).length : 0), 0);
+      return `Sets your goals on the home screen: ${add.map((g) => `${g.name}${g.primary ? " (primary)" : ""}${g.deadline ? `, by ${g.deadline}` : ""}${Array.isArray(g.benchmarks) && g.benchmarks.length ? `, with ${g.benchmarks.length} benchmarks` : ""}`).join("; ") || "none new"}${retire ? `, and retires ${retire} old goal(s)` : ""}.${checked ? ` ${checked} benchmark${checked > 1 ? "s" : ""} HQ ticks itself from live data (Kubera, the boards).` : ""} Nothing leaves HQ.`;
     });
     this.describers.set("memory.replace", (p) => `Jarvis's memory is replaced with the ${Array.isArray(p.keep) ? p.keep.length : "listed"} items above${typeof p.before === "number" ? `, dropping ${p.before - (Array.isArray(p.keep) ? p.keep.length : 0)}` : ""}. The old list is gone.`);
   }
