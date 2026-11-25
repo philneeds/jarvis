@@ -22,7 +22,7 @@ export function connectionProbes(jarvis: Jarvis, c: Connectors, env: NodeJS.Proc
   return [
     {
       id: "google", name: "Google", what: "calendar, Gmail and the Drive folder for backups and decks",
-      off: async () => (!c.google ? "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET aren't set on the server." : (await c.google.status()).accounts.length ? undefined : "No account connected. Press Connect under Google below."),
+      off: async () => (!c.google ? "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET aren't set on the server." : (await c.google.status()).accounts.length || (await c.google.status()).problem ? undefined : "No account connected. Press Connect under Google below."),
       run: () => c.google!.check(),
     },
     {
@@ -99,7 +99,7 @@ export function connectionProbes(jarvis: Jarvis, c: Connectors, env: NodeJS.Proc
     },
     {
       id: "x", name: "X", what: "posting from your accounts, after your approval",
-      off: async () => (!c.x ? "X_CLIENT_ID isn't set on the server (it needs an X developer app)." : (await c.x.status()).accounts.length ? undefined : "No account connected. Press Connect under X below."),
+      off: async () => (!c.x ? "X_CLIENT_ID isn't set on the server (it needs an X developer app)." : (await c.x.status()).accounts.length || (await c.x.status()).problem ? undefined : "No account connected. Press Connect under X below."),
       run: () => c.x!.check(),
     },
     {
@@ -114,7 +114,7 @@ export function connectionProbes(jarvis: Jarvis, c: Connectors, env: NodeJS.Proc
     },
     {
       id: "spotify", name: "Spotify", what: "playlists and what's playing",
-      off: async () => (!c.spotify ? "SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET aren't set on the server." : (await c.spotify.status()).connected ? undefined : "Not connected. Press Connect under Spotify below."),
+      off: async () => (!c.spotify ? "SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET aren't set on the server." : (await c.spotify.status()).connected || (await c.spotify.status()).problem ? undefined : "Not connected. Press Connect under Spotify below."),
       run: () => c.spotify!.check(),
     },
     {

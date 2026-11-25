@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { Store } from "../store/types.js";
+import { readSealedSetting, writeSealedSetting, SIGN_IN_LOCKED } from "../secrets.js";
 import { defineTool, type ToolDef } from "../tools/index.js";
 import type { Executor, Describer } from "../jarvis/orchestrator.js";
 
@@ -88,13 +89,15 @@ export class XConnector {
     const u = ((await me.json()) as { data: { id: string; username: string; name?: string } }).data;
     const acct: XAccount = { handle: u.username, userId: u.id, name: u.name, access_token: j.access_token, refresh_token: j.refresh_token, expires_at: this.now() + (j.expires_in - 60) * 1000, connectedAt: new Date().toISOString() };
     const all = await this.accounts();
-    await this.store.settings.set(ACCOUNTS_KEY, [...all.filter((a) => a.userId !== acct.userId), acct]);
+    await writeSealedSetting(this.store, ACCOUNTS_KEY, [...all.filter((a) => a.userId !== acct.userId), acct]);
     return acct;
   }
 
-  async accounts(): Promise<XAccount[]> { return this.store.settings.get<XAccount[]>(ACCOUNTS_KEY, []); }
-  async disconnect(handle: string) { await this.store.settings.set(ACCOUNTS_KEY, (await this.accounts()).filter((a) => a.handle !== handle)); }
-  async status() { return { accounts: (await this.accounts()).map((a) => ({ handle: a.handle, name: a.name, connectedAt: a.connectedAt })) }; }
+  /** Sealed at rest: the tokens can post as Phil. A row saved before sealing is sealed on first read. */
+  async accounts(): Promise<XAccount[]> { const r = await readSealedSetting<XAccount[]>(this.store, ACCOUNTS_KEY); this.locked = r.locked; return r.value ?? []; }
+  private locked = false;
+  async disconnect(handle: string) { await writeSealedSetting(this.store, ACCOUNTS_KEY, (await this.accounts()).filter((a) => a.handle !== handle)); }
+  async status() { const list = await this.accounts(); return { accounts: list.map((a) => ({ handle: a.handle, name: a.name, connectedAt: a.connectedAt })), ...(this.locked ? { problem: SIGN_IN_LOCKED } : {}) }; }
 
   /**
    * For Settings › Check: each account's session, refreshed when it has run out (X's last two hours, so this is
@@ -102,7 +105,7 @@ export class XConnector {
    */
   async check(): Promise<string> {
     const all = await this.accounts();
-    if (!all.length) throw new Error("No X account is connected. Press Connect under Settings.");
+    if (!all.length) throw new Error(this.locked ? `X: ${SIGN_IN_LOCKED}.` : "No X account is connected. Press Connect under Settings.");
     const lines: string[] = [];
     let bad = 0;
     for (const a of all) {
@@ -115,7 +118,7 @@ export class XConnector {
 
   private async account(handle?: string): Promise<XAccount> {
     const all = await this.accounts();
-    if (!all.length) throw new Error("No X account is connected. Connect one under Settings.");
+    if (!all.length) throw new Error(this.locked ? `X: ${SIGN_IN_LOCKED}.` : "No X account is connected. Connect one under Settings.");
     const h = handle?.replace(/^@/, "").toLowerCase();
     const a = h ? all.find((x) => x.handle.toLowerCase() === h) : all[0];
     if (!a) throw new Error(`@${handle} isn't connected. Connected: ${all.map((x) => "@" + x.handle).join(", ")}.`);
@@ -125,7 +128,7 @@ export class XConnector {
     if (!res.ok) throw new Error(`X token refresh failed for @${a.handle}: ${res.status}`);
     const j = (await res.json()) as { access_token: string; refresh_token?: string; expires_in: number };
     const next: XAccount = { ...a, access_token: j.access_token, refresh_token: j.refresh_token ?? a.refresh_token, expires_at: this.now() + (j.expires_in - 60) * 1000 };
-    await this.store.settings.set(ACCOUNTS_KEY, all.map((x) => (x.userId === a.userId ? next : x)));
+    await writeSealedSetting(this.store, ACCOUNTS_KEY, all.map((x) => (x.userId === a.userId ? next : x)));
     return next;
   }
 

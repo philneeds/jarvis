@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { Store } from "../store/types.js";
+import { readSealedSetting, writeSealedSetting, SIGN_IN_LOCKED } from "../secrets.js";
 import { defineTool, type ToolDef } from "../tools/index.js";
 import type { Executor, Describer } from "../jarvis/orchestrator.js";
 
@@ -65,12 +66,14 @@ export class SpotifyConnector {
     if (!me.ok) throw new Error(me.status === 403 ? "Spotify refused: the app's owner needs Spotify Premium, and this account must be added under the app's users in the Spotify dashboard." : `Spotify /me failed: ${me.status}`);
     const u = (await me.json()) as { id: string; display_name?: string };
     const t: SpotifyTokens = { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: this.now() + (j.expires_in - 60) * 1000, scope: j.scope, userId: u.id, name: u.display_name, connectedAt: new Date().toISOString() };
-    await this.store.settings.set(KEY, t);
+    await writeSealedSetting(this.store, KEY, t);
     return t;
   }
 
-  async disconnect() { await this.store.settings.set(KEY, null); }
-  async status() { const t = await this.store.settings.get<SpotifyTokens | null>(KEY, null); return { connected: !!t, name: t?.name, connectedAt: t?.connectedAt }; }
+  async disconnect() { await writeSealedSetting(this.store, KEY, null); }
+  /** Sealed at rest; a row saved before sealing is sealed on first read. */
+  private async saved() { return readSealedSetting<SpotifyTokens>(this.store, KEY); }
+  async status() { const r = await this.saved(); const t = r.value; return { connected: !!t, name: t?.name, connectedAt: t?.connectedAt, ...(r.locked ? { problem: SIGN_IN_LOCKED } : {}) }; }
 
   /** For Settings › Check: Spotify is asked whose account this is. */
   async check(): Promise<string> {
@@ -79,14 +82,14 @@ export class SpotifyConnector {
   }
 
   private async token(): Promise<string> {
-    const t = await this.store.settings.get<SpotifyTokens | null>(KEY, null);
-    if (!t) throw new Error("Spotify isn't connected. Connect it under Settings.");
+    const r = await this.saved(), t = r.value;
+    if (!t) throw new Error(r.locked ? `Spotify: ${SIGN_IN_LOCKED}.` : "Spotify isn't connected. Connect it under Settings.");
     if (t.expires_at > this.now()) return t.access_token;
     const res = await this.f(`${ACCOUNTS}/api/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", authorization: this.basic() }, body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: t.refresh_token }) });
     if (!res.ok) throw new Error(`Spotify session expired (${res.status}); reconnect under Settings.`);
     const j = (await res.json()) as { access_token: string; refresh_token?: string; expires_in: number };
     // Spotify may rotate the refresh token; keep whichever is newest.
-    await this.store.settings.set(KEY, { ...t, access_token: j.access_token, refresh_token: j.refresh_token ?? t.refresh_token, expires_at: this.now() + (j.expires_in - 60) * 1000 });
+    await writeSealedSetting(this.store, KEY, { ...t, access_token: j.access_token, refresh_token: j.refresh_token ?? t.refresh_token, expires_at: this.now() + (j.expires_in - 60) * 1000 });
     return j.access_token;
   }
 

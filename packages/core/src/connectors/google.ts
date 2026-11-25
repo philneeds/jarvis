@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Store } from "../store/types.js";
+import { readSealedSetting, writeSealedSetting, SIGN_IN_LOCKED } from "../secrets.js";
 import { defineTool, type ToolDef } from "../tools/index.js";
 import type { Executor, Describer } from "../jarvis/orchestrator.js";
 import { getAgentConfig } from "../config.js";
@@ -75,16 +76,20 @@ export class GoogleConnector {
 
   // ---- Accounts ----------------------------------------------------------------
 
+  /** Sealed at rest (readSealedSetting): the tokens can read and send Phil's mail, so a dump or backup shows ciphertext. */
   async accounts(): Promise<Tokens[]> {
-    const list = await this.store.settings.get<Tokens[] | null>(ACCOUNTS_KEY, null);
-    if (list) return list;
-    // One-time move from the single-account layout.
-    const legacy = await this.store.settings.get<Tokens | null>(LEGACY_KEY, null);
-    const migrated = legacy ? [legacy] : [];
-    await this.store.settings.set(ACCOUNTS_KEY, migrated);
+    const r = await readSealedSetting<Tokens[]>(this.store, ACCOUNTS_KEY);
+    this.locked = r.locked;
+    if (r.present) return r.value ?? [];
+    // One-time move from the single-account layout, which is cleared once moved.
+    const legacy = await readSealedSetting<Tokens>(this.store, LEGACY_KEY);
+    const migrated = legacy.value ? [legacy.value] : [];
+    await this.saveAccounts(migrated);
+    if (legacy.present && !legacy.locked) await this.store.settings.set(LEGACY_KEY, null);
     return migrated;
   }
-  private async saveAccounts(list: Tokens[]) { await this.store.settings.set(ACCOUNTS_KEY, list); }
+  private locked = false;
+  private async saveAccounts(list: Tokens[]) { await writeSealedSetting(this.store, ACCOUNTS_KEY, list); this.locked = false; }
 
   authUrl(state: string): string {
     const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -124,10 +129,10 @@ export class GoogleConnector {
     await this.saveAccounts((await this.accounts()).filter((a) => a.email?.toLowerCase() !== email.toLowerCase()));
   }
 
-  async status(): Promise<{ connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }> {
+  async status(): Promise<{ connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[]; problem?: string }> {
     const list = await this.accounts();
     const live = list.filter((t) => !!t.refresh_token || t.expires_at > this.now());
-    return { connected: live.length > 0, email: live[0]?.email, accounts: live.map((t) => ({ email: t.email ?? "(unknown)", connectedAt: t.connectedAt })) };
+    return { connected: live.length > 0, email: live[0]?.email, accounts: live.map((t) => ({ email: t.email ?? "(unknown)", connectedAt: t.connectedAt })), ...(this.locked ? { problem: SIGN_IN_LOCKED } : {}) };
   }
 
   /**
@@ -136,7 +141,7 @@ export class GoogleConnector {
    */
   async check(): Promise<string> {
     const list = (await this.status()).accounts;
-    if (!list.length) throw new Error("No Google account is connected. Press Connect under Settings.");
+    if (!list.length) throw new Error(this.locked ? `Google: ${SIGN_IN_LOCKED}.` : "No Google account is connected. Press Connect under Settings.");
     const lines: string[] = [];
     let bad = 0;
     for (const a of list) {
@@ -166,7 +171,7 @@ export class GoogleConnector {
   private async pick(account?: string, allowed?: string[]): Promise<Tokens> {
     let list = await this.accounts();
     if (allowed) list = list.filter((a) => a.email && allowed.includes(a.email.toLowerCase()));
-    if (!list.length) throw new Error(allowed ? "None of the Google accounts this agent may use is connected." : "Google isn't connected. Connect it under Settings.");
+    if (!list.length) throw new Error(this.locked ? `Google: ${SIGN_IN_LOCKED}.` : allowed ? "None of the Google accounts this agent may use is connected." : "Google isn't connected. Connect it under Settings.");
     if (!account) return list[0]!;
     const q = account.toLowerCase().replace(/^@/, "");
     const hit = list.find((a) => a.email?.toLowerCase() === q) ?? list.find((a) => a.email?.toLowerCase().includes(q));

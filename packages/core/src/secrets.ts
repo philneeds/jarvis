@@ -124,3 +124,27 @@ export function openJson<T>(raw: unknown, env: NodeJS.ProcessEnv = process.env):
 }
 /** Whether a stored value is sealed. */
 export const isSealedValue = (x: unknown) => isSealed(x);
+
+/** Said when a saved sign-in is there but sealed under a server secret HQ no longer has. */
+export const SIGN_IN_LOCKED = "the saved sign-in can't be opened (the server secret it was sealed with, HQ_PASSWORD or HQ_SECRETS_KEY, has changed); connect again under Settings";
+
+/**
+ * A settings row that holds sign-in tokens, sealed at rest (Google, X, Spotify; Phil, Nov 25 2026: they were plain
+ * JSON, so a database dump or the nightly backup in Drive could have been used to read his mail).
+ *   present  a row is there at all
+ *   locked   it is sealed under a secret HQ no longer has: nothing can be read, and the caller must not write over
+ *            it as though it were empty (reconnecting replaces it)
+ * A row saved before sealing is read as it is and sealed in place, once.
+ */
+export async function readSealedSetting<T>(store: Pick<Store, "settings">, key: string, env: NodeJS.ProcessEnv = process.env): Promise<{ value?: T; present: boolean; locked: boolean }> {
+  const raw = await store.settings.get<unknown>(key, null);
+  if (raw === null || raw === undefined) return { present: false, locked: false };
+  const value = openJson<T>(raw, env);
+  if (value === undefined) return { present: true, locked: true };
+  if (!isSealed(raw)) { const sealed = sealJson(value, env); if (isSealed(sealed)) await store.settings.set(key, sealed); }
+  return { value, present: true, locked: false };
+}
+/** Save sign-in tokens sealed (plain only in an open dev HQ with no server secret); null or undefined clears the row. */
+export async function writeSealedSetting(store: Pick<Store, "settings">, key: string, value: unknown, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  await store.settings.set(key, value === null || value === undefined ? null : sealJson(value, env));
+}
