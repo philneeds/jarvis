@@ -23,7 +23,7 @@ import { XREAD_TOOLS, expandXLinks, xPostIds, readXTimeline, type XPost } from "
 import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { COINGLASS_TOOLS } from "../coinglass.js";
-import { connectionTools, type Probe } from "../connections.js";
+import { connectionTools, watchConnections, type Probe } from "../connections.js";
 import { PREDICTION_TOOLS } from "../predictions.js";
 import { LIGHTER_TOOLS } from "../lighter.js";
 import { GLASSES_HINT, GLASSES_TOOLS } from "../glasses.js";
@@ -1590,6 +1590,25 @@ export class Jarvis {
    * so getting the team set up levels the Command building; today's three pick the next one. If Phil deletes the
    * goal it stays deleted.
    */
+  /**
+   * Every connection checked on a timer (the connections-watch routine). Phil hears only when one that worked stops,
+   * twice in a row, and when it's back.
+   */
+  async watchConnections(): Promise<string | undefined> {
+    const probes = await this.connectionProbes?.();
+    if (!probes?.length) return undefined;
+    const r = await watchConnections({
+      probes, store: this.store,
+      raise: async (title, why) => (await this.raiseAttention({ title, why, agentId: "einstein", venture: "command" })).id,
+      resolve: async (id, name, summary) => {
+        await this.attentionUpdate(id, "done");
+        await this.notify?.(`${name} is working again`, summary.split("\n")[0]!.slice(0, 200)).catch(() => undefined);
+      },
+    });
+    // The log gets a line only when something changed: a "still fine" every three hours would bury it.
+    return r.down.length || r.back.length ? r.summary : undefined;
+  }
+
   async syncSetupGoal(): Promise<string> {
     const status = await this.setupStatus();
     if (!status.length) return "no live agents yet";

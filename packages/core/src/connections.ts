@@ -129,3 +129,57 @@ export function connectionTools(probes: () => Probe[] | undefined | Promise<Prob
     }),
   ];
 }
+
+// ---- The watch: the same checks on a timer, and a word to Phil only when something that worked stops ---------------
+
+/** Per connection: failed checks in a row, whether it has ever worked, and the Needs-you item raised for it. */
+interface Watch { fails: number; seenOk: boolean; itemId?: string; since?: string }
+export const CONNECTIONS_WATCH_KEY = "connections.watch";
+/** Failed checks in a row before Phil hears of it: one blip (a rate limit, a slow sign-in) isn't news. */
+export const WATCH_AFTER = 2;
+
+export interface WatchDeps {
+  probes: Probe[];
+  store: Pick<Store, "settings">;
+  /** Raise a Needs-you item (it reaches his phone); returns its id. */
+  raise(title: string, why: string): Promise<string>;
+  /** Close the item and say it's back. */
+  resolve(itemId: string, title: string, summary: string): Promise<void>;
+  now?: () => number;
+}
+
+/**
+ * Check every connection and compare with the last time. Phil hears about a connection only when one that has worked
+ * fails twice in a row (Needs you, so his phone), and again when it is back (the item closes). What has never worked,
+ * or isn't set up, never alerts: Settings shows those, and he decides when they matter.
+ */
+export async function watchConnections(d: WatchDeps): Promise<{ checked: number; down: string[]; back: string[]; summary: string }> {
+  const results = await runChecks(d.probes, { now: d.now });
+  await saveChecks(d.store, results, d.probes.map((p) => p.id));
+  const was = await d.store.settings.get<Record<string, Watch>>(CONNECTIONS_WATCH_KEY, {});
+  const next: Record<string, Watch> = {};
+  const down: string[] = [], back: string[] = [];
+  for (const r of results) {
+    const w: Watch = { ...(was[r.id] ?? { fails: 0, seenOk: false }) };
+    if (r.state === "ok") {
+      if (w.itemId) { await d.resolve(w.itemId, r.name, r.summary).catch(() => undefined); back.push(r.name); }
+      next[r.id] = { fails: 0, seenOk: true };
+    } else if (r.state === "failed") {
+      w.fails++;
+      w.since ??= r.at;
+      if (w.seenOk && w.fails >= WATCH_AFTER && !w.itemId) {
+        w.itemId = await d.raise(`${r.name} stopped working`, `${r.summary.slice(0, 600)}\n\nIt worked before; HQ has seen it fail ${w.fails} checks in a row, three hours apart. Settings › Connections check has a Check button to try it again after you fix it.`).catch(() => undefined);
+        if (w.itemId) down.push(r.name);
+      }
+      next[r.id] = w;
+    } else {
+      // Not set up any more, or not checkable: no alarm, and an open item about it is closed.
+      if (w.itemId) await d.resolve(w.itemId, r.name, r.summary).catch(() => undefined);
+      next[r.id] = { fails: 0, seenOk: w.seenOk };
+    }
+  }
+  await d.store.settings.set(CONNECTIONS_WATCH_KEY, next);
+  const failing = results.filter((r) => r.state === "failed").map((r) => r.name);
+  const summary = `${results.filter((r) => r.state === "ok").length} working${failing.length ? `, not working: ${failing.join(", ")}` : ""}${down.length ? `; told Phil: ${down.join(", ")} stopped` : ""}${back.length ? `; back: ${back.join(", ")}` : ""}`;
+  return { checked: results.length, down, back, summary };
+}

@@ -143,3 +143,64 @@ test("X renews the session and reads nothing (reads are billed); Spotify is aske
   status = 401;
   await assert.rejects(sp.check(), /Spotify GET \/me failed: 401/);
 });
+
+test("the watch: one that worked and fails twice in a row is told once; a blip, or one that never worked, isn't; back closes it", async () => {
+  const { watchConnections, CONNECTIONS_WATCH_KEY } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const state: Record<string, "ok" | "fail" | "off"> = { robinhood: "ok", health: "fail", kalshi: "off", google: "ok" };
+  const probes: Probe[] = Object.keys(state).map((id) => ({
+    id, name: id[0]!.toUpperCase() + id.slice(1),
+    off: () => (state[id] === "off" ? "not set up" : undefined),
+    run: async () => { if (state[id] === "fail") throw new Error(`${id} refused the sign-in`); return `${id} fine`; },
+  }));
+  const raised: string[] = [], resolved: string[] = [];
+  const deps = { probes, store, raise: async (title: string, why: string) => { raised.push(`${title} | ${why.split("\n")[0]}`); return `item-${raised.length}`; }, resolve: async (id: string, name: string) => { resolved.push(`${id} ${name}`); } };
+  const r1 = await watchConnections(deps);
+  assert.deepEqual([r1.down, r1.back], [[], []]);
+  assert.equal(r1.summary, "2 working, not working: Health");
+  // Robinhood drops once: a blip, nothing said. Apple Health has never worked: never said, however often it fails.
+  state.robinhood = "fail";
+  await watchConnections(deps);
+  assert.deepEqual(raised, []);
+  const r3 = await watchConnections(deps);
+  assert.deepEqual(raised, ["Robinhood stopped working | robinhood refused the sign-in"]);
+  assert.match(r3.summary, /told Phil: Robinhood stopped/);
+  // Still down: not said again.
+  await watchConnections(deps);
+  assert.equal(raised.length, 1);
+  // A blip on Google that clears by the next check: nothing.
+  state.google = "fail"; await watchConnections(deps); state.google = "ok";
+  // Robinhood back: the item is closed and he hears it.
+  state.robinhood = "ok";
+  const r6 = await watchConnections(deps);
+  assert.deepEqual(resolved, ["item-1 Robinhood"]);
+  assert.deepEqual(r6.back, ["Robinhood"]);
+  assert.equal(raised.length, 1);
+  assert.equal((await store.settings.get<Record<string, { fails: number }>>(CONNECTIONS_WATCH_KEY, {})).health!.fails, 6);
+  // Settings shows what the watch last saw.
+  assert.deepEqual((await lastChecks(store)).map((x) => `${x.id}:${x.state}`), ["robinhood:ok", "health:failed", "kalshi:off", "google:ok"]);
+});
+
+test("the watch runs every three hours as housekeeping, on the Schedules screen, and says nothing in the log while all is the same", async () => {
+  const { SCHEDULES, Jarvis, ModelRouter, mockProvider } = await import("../src/index.js");
+  const { HOUSEKEEPING } = await import("../src/scheduler.js");
+  const s = SCHEDULES.find((x) => x.id === "connections-watch")!;
+  assert.equal(s.when, "every:180");
+  assert.ok(HOUSEKEEPING.has(s.task));
+  const store = memoryStore(); await store.init();
+  const phone: string[] = [];
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }), notify: async (t, b) => { phone.push(`${t} | ${b}`); } });
+  assert.equal(await jarvis.watchConnections(), undefined, "no probes wired: nothing to do");
+  let up = true;
+  jarvis.connectionProbes = () => [{ id: "rh", name: "Robinhood", run: async () => { if (!up) throw new Error("token expired"); return "Connected."; } }];
+  assert.equal(await jarvis.watchConnections(), undefined);
+  up = false;
+  await jarvis.watchConnections();
+  assert.match((await jarvis.watchConnections())!, /told Phil: Robinhood stopped/);
+  assert.deepEqual(phone.map((p) => p.split(" | ")[0]), ["Needs you: Robinhood stopped working"]);
+  assert.ok((await jarvis.attentionList()).some((i) => i.title === "Robinhood stopped working" && i.status === "open"));
+  up = true;
+  assert.match((await jarvis.watchConnections())!, /back: Robinhood/);
+  assert.equal(phone.at(-1), "Robinhood is working again | Connected.");
+  assert.ok((await jarvis.attentionList()).some((i) => i.title === "Robinhood stopped working" && i.status === "done"));
+});
