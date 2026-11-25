@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { glassesKeyOk, glassesReplies, glassesStatus, pairGlasses, unpairGlasses } from "@jarvis/core";
+import { glassesKeyOk, glassesReplies, glassesStatus, pairGlasses, unpairGlasses, glassesOptions, setGlassesOptions, glassesCard, saveHeard, forgetHeard, heardDays, alwaysWaits } from "@jarvis/core";
+import { cardPrint } from "./telegram.js";
 import { kalshiLimitsText, limitsText, hlAccounts, isHlAddress, accountText, HL_ACCOUNTS_KEY, polyAccounts, polyPositionsText, POLY_ACCOUNTS_KEY, lighterAccounts, lighterAccountText, LIGHTER_ACCOUNTS_KEY } from "@jarvis/core";
 import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type LeadPerfectionConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type EagleViewConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
 import { lastChecks, runChecks, saveChecks } from "@jarvis/core";
@@ -47,7 +48,39 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   // key can ask Jarvis something and read the replies to it, nothing else.
   const glassesAsks = new Map<string, { done: boolean; at: number }>();
   const glassesKey = async (c: { req: { header(n: string): string | undefined } }) => glassesKeyOk(jarvis.store, (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "") || undefined);
-  app.get("/api/glasses/device/ping", async (c) => ((await glassesKey(c)) ? c.json({ ok: true, name: "Jarvis HQ" }) : c.json({ error: "bad or missing pairing key" }, 401)));
+  // The ping also says what Phil has switched on for the glasses (approvals by voice, all-day memory).
+  app.get("/api/glasses/device/ping", async (c) => ((await glassesKey(c)) ? c.json({ ok: true, name: "Jarvis HQ", ...(await glassesOptions(jarvis.store)) }) : c.json({ error: "bad or missing pairing key" }, 401)));
+  // Cards waiting on Phil, read out on the glasses; only once he has switched approvals on in Settings › Glasses.
+  const NO_GLASSES_APPROVALS = "Approvals from the glasses are off. Turn them on in HQ › Settings › Glasses.";
+  app.get("/api/glasses/device/approvals", async (c) => {
+    if (!(await glassesKey(c))) return c.json({ error: "bad or missing pairing key" }, 401);
+    if (!(await glassesOptions(jarvis.store)).approvals) return c.json({ error: NO_GLASSES_APPROVALS }, 403);
+    const pending = (await jarvis.store.approvals.list("pending")).sort((a, b) => a.at.localeCompare(b.at)).slice(0, 20);
+    return c.json({ cards: pending.map((a) => glassesCard(a, findAgent(a.agentId)?.name ?? a.agentId, cardPrint(a), !alwaysWaits(a))) });
+  });
+  // Approve or reject by voice. Runs only the card exactly as it was read out (its fingerprint), only while it still
+  // waits, and never approves what moves money, trades, or changes code or HQ: those are approved where the whole card shows.
+  app.post("/api/glasses/device/decide", async (c) => {
+    if (!(await glassesKey(c))) return c.json({ error: "bad or missing pairing key" }, 401);
+    if (!(await glassesOptions(jarvis.store)).approvals) return c.json({ error: NO_GLASSES_APPROVALS }, 403);
+    const b = z.object({ id: z.string().min(1).max(100), print: z.string().min(1).max(40), decision: z.enum(["approved", "rejected"]) }).safeParse(await c.req.json().catch(() => ({})));
+    if (!b.success) return c.json({ error: "id, print and decision (approved or rejected)" }, 400);
+    const a = await jarvis.store.approvals.get(b.data.id);
+    if (!a) return c.json({ error: "That card is gone." }, 404);
+    if (a.status !== "pending") return c.json({ error: `Already ${a.status}${a.note ? ` (${a.note.slice(0, 80)})` : ""}.`, status: a.status }, 409);
+    if (cardPrint(a) !== b.data.print) return c.json({ error: "This card changed since it was read to you. Nothing ran; ask for the cards again." }, 409);
+    if (b.data.decision === "approved" && alwaysWaits(a)) return c.json({ error: "This one moves money, trades, or changes code or HQ. Approve it in HQ or Telegram. Nothing ran." }, 403);
+    const done = await jarvis.decide(a.id, b.data.decision, "via glasses (voice)");
+    return c.json({ status: done?.status ?? b.data.decision, title: a.title, note: done?.note });
+  });
+  // All-day memory: what the glasses heard between questions, kept (sealed) on HQ for 14 days, only while Phil has it on.
+  app.post("/api/glasses/device/heard", async (c) => {
+    if (!(await glassesKey(c))) return c.json({ error: "bad or missing pairing key" }, 401);
+    if (!(await glassesOptions(jarvis.store)).listen) return c.json({ error: "All-day memory is off in HQ › Settings › Glasses; nothing was kept.", listen: false }, 403);
+    const b = z.object({ segments: z.array(z.object({ at: z.string().max(40), text: z.string().max(4000) })).max(500) }).safeParse(await c.req.json().catch(() => ({})));
+    if (!b.success) return c.json({ error: "segments: up to 500 of { at, text }" }, 400);
+    return c.json(await saveHeard(jarvis.store, b.data.segments));
+  });
   app.post("/api/glasses/device/ask", async (c) => {
     if (!(await glassesKey(c))) return c.json({ error: "bad or missing pairing key" }, 401);
     const b = z.object({ text: z.string().trim().min(1).max(2000), spoken: z.boolean().optional() }).safeParse(await c.req.json().catch(() => ({})));
@@ -604,16 +637,30 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     try { return c.json({ ok: true, summary: await connectors.discord.check() }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
   });
   // Settings › Glasses: pair (the key is shown once), see when they were last heard from, unpair.
-  api.get("/glasses", async (c) => c.json(await glassesStatus(jarvis.store)));
+  const glassesAll = async () => ({ ...(await glassesStatus(jarvis.store)), options: await glassesOptions(jarvis.store), heardDays: (await heardDays(jarvis.store)).length });
+  api.get("/glasses", async (c) => c.json(await glassesAll()));
+  api.put("/glasses/options", async (c) => {
+    const b = z.object({ approvals: z.boolean().optional(), listen: z.boolean().optional() }).safeParse(await c.req.json().catch(() => ({})));
+    if (!b.success) return c.json({ error: "approvals and listen: true or false" }, 400);
+    const was = await glassesOptions(jarvis.store);
+    const now = await setGlassesOptions(jarvis.store, b.data);
+    for (const [k, label] of [["approvals", "approvals by voice from the glasses"], ["listen", "the glasses' all-day memory"]] as const) if (was[k] !== now[k]) await jarvis.router.log("jarvis", "system", `Phil turned ${now[k] ? "on" : "off"} ${label}`);
+    return c.json(await glassesAll());
+  });
+  api.delete("/glasses/heard", async (c) => {
+    const n = await forgetHeard(jarvis.store);
+    await jarvis.router.log("jarvis", "system", `Phil erased what the glasses heard (${n} day${n === 1 ? "" : "s"})`);
+    return c.json(await glassesAll());
+  });
   api.post("/glasses/pair", async (c) => {
     const key = await pairGlasses(jarvis.store);
     await jarvis.router.log("jarvis", "system", "Phil paired his glasses (a new pairing key; any earlier one stopped working)");
-    return c.json({ key, ...(await glassesStatus(jarvis.store)) });
+    return c.json({ key, ...(await glassesAll()) });
   });
   api.delete("/glasses/pair", async (c) => {
     await unpairGlasses(jarvis.store);
     await jarvis.router.log("jarvis", "system", "Phil unpaired his glasses");
-    return c.json(await glassesStatus(jarvis.store));
+    return c.json(await glassesAll());
   });
   // Settings › Hyperliquid and › Polymarket: wallets agents read by public address (never a key), and a check that reads them.
   const wallets = [

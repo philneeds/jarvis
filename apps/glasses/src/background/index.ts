@@ -29,6 +29,11 @@ registerMiniapp<Channels>(async (session) => {
     },
     clear() { void session.display.render([]).catch(() => undefined); },
     listen(on) { return session.transcription.on((d) => on({ text: d.text, isFinal: d.isFinal })); },
+    // The all-day memory has its own listener: MentraOS hands each listener its own copy of what is heard.
+    hearAll(on) { return session.transcription.on((d) => on({ text: d.text, isFinal: d.isFinal })); },
+    // MentraOS's voice: the cloud one when connected, else the phone's own. Resolves when it finishes or is stopped.
+    async say(text) { await session.speaker.speak(text, { stopOtherAudio: true }); },
+    hush() { session.speaker.stop(); },
     store: { get: (k) => session.storage.get(k), set: (k, v) => session.storage.set(k, v) },
     notify(state) { if (session.ui.isOpen()) session.ui.send("state", state); },
     fetch: fetch as unknown as Fetch,
@@ -48,4 +53,6 @@ registerMiniapp<Channels>(async (session) => {
   session.ui.on("ask", ({ text }) => void jarvis.ask(text, false));
   session.ui.on("talk", () => jarvis.talk());
   session.ui.on("dismiss", () => jarvis.dismiss());
+  session.ui.on("speak", ({ on }) => void jarvis.setSpeak(on));
+  session.ui.on("cards", () => void jarvis.ask("what needs me", false));
 });

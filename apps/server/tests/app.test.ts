@@ -497,3 +497,49 @@ test("Settings › Connections check: every connection is listed; a check runs t
   assert.equal(row("google").state, undefined);
   assert.equal((await call("/api/connectors/check", { method: "POST", cookie, body: JSON.stringify({ only: ["nope"] }) })).status, 400);
 });
+
+test("glasses: approvals by voice and all-day memory are refused until Phil switches them on; a voice approve runs only the card as read, never one that moves money", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const { key } = (await (await call("/api/glasses/pair", { method: "POST", cookie })).json()) as { key: string };
+  const dev = (path: string, init: RequestInit = {}) => app.request(`http://hq${path}`, { ...init, headers: { authorization: `Bearer ${key}`, ...(init.body ? { "content-type": "application/json" } : {}) } });
+  const post = (path: string, body: unknown) => dev(path, { method: "POST", body: JSON.stringify(body) });
+  assert.deepEqual(await (await dev("/api/glasses/device/ping")).json(), { ok: true, name: "Jarvis HQ", approvals: false, listen: false });
+  assert.equal((await dev("/api/glasses/device/approvals")).status, 403);
+  assert.equal((await post("/api/glasses/device/heard", { segments: [{ at: new Date().toISOString(), text: "hello" }] })).status, 403);
+  // The switches are Phil's, behind the login; the pairing key can't flip them.
+  assert.equal((await dev("/api/glasses/options", { method: "PUT", body: JSON.stringify({ approvals: true }) })).status, 401);
+  const on = (await (await call("/api/glasses/options", { method: "PUT", cookie, body: JSON.stringify({ approvals: true, listen: true }) })).json()) as { options: { approvals: boolean; listen: boolean } };
+  assert.deepEqual(on.options, { approvals: true, listen: true });
+
+  const at = new Date().toISOString();
+  await store.approvals.add({ id: "g-note", at, agentId: "stella", kind: "record", status: "pending", title: "Glasses test: book Myra", body: "Adds an appointment.", payload: { action: "glasses.test" } } as never);
+  await store.approvals.add({ id: "g-trade", at, agentId: "pentoshi", kind: "money", status: "pending", title: "Glasses test: buy ETH", body: "A market order.", payload: { action: "hyperliquid.order" } } as never);
+  type Card = { id: string; print: string; who: string; approvable: boolean; why?: string };
+  const { cards } = (await (await dev("/api/glasses/device/approvals")).json()) as { cards: Card[] };
+  const note = cards.find((c) => c.id === "g-note")!, trade = cards.find((c) => c.id === "g-trade")!;
+  assert.equal(note.who, "Stella");
+  assert.equal(note.approvable, true);
+  assert.equal(trade.approvable, false);
+  assert.match(trade.why!, /approve it in HQ or Telegram/);
+  // Money from the glasses: refused, and nothing ran; a stale fingerprint: refused, and nothing ran.
+  assert.equal((await post("/api/glasses/device/decide", { id: trade.id, print: trade.print, decision: "approved" })).status, 403);
+  assert.equal((await store.approvals.get("g-trade"))!.status, "pending");
+  assert.equal((await post("/api/glasses/device/decide", { id: note.id, print: "0000000000", decision: "approved" })).status, 409);
+  assert.equal((await store.approvals.get("g-note"))!.status, "pending");
+  // The real thing.
+  const r = await post("/api/glasses/device/decide", { id: note.id, print: note.print, decision: "approved" });
+  assert.equal(r.status, 200);
+  assert.notEqual((await store.approvals.get("g-note"))!.status, "pending");
+  assert.match((await store.approvals.get("g-note"))!.note ?? "", /via glasses/);
+  // Deciding it again says it's already done; the money card can be rejected from the glasses.
+  assert.equal((await post("/api/glasses/device/decide", { id: note.id, print: note.print, decision: "rejected" })).status, 409);
+  assert.equal((await post("/api/glasses/device/decide", { id: trade.id, print: trade.print, decision: "rejected" })).status, 200);
+  assert.equal((await store.approvals.get("g-trade"))!.status, "rejected");
+
+  // All-day memory: kept, counted in Settings, erased on request.
+  assert.deepEqual(await (await post("/api/glasses/device/heard", { segments: [{ at, text: "Mike said Friday" }] })).json(), { kept: 1 });
+  assert.equal(((await (await call("/api/glasses", { cookie })).json()) as { heardDays: number }).heardDays, 1);
+  assert.equal(((await (await call("/api/glasses/heard", { method: "DELETE", cookie })).json()) as { heardDays: number }).heardDays, 0);
+  await call("/api/glasses/options", { method: "PUT", cookie, body: JSON.stringify({ approvals: false, listen: false }) });
+});

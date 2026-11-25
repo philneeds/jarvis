@@ -3,8 +3,9 @@
 A MentraOS miniapp for Phil's Even G2: hold to talk, the words go to Jarvis HQ, the answer shows in view.
 MentraOS runs it on the phone (the glasses are the screen and the microphone).
 
-**This is the bones.** What works, in tests with stand-in glasses: pairing with HQ, hold to talk, the answer in view a
-page at a time, a phone screen to pair and to ask by typing. It has not run on real glasses yet.
+What works, in tests with stand-in glasses: pairing with HQ, hold to talk, the answer in view a page at a time and read
+aloud, approvals by voice, all-day memory, and a phone screen to pair, ask by typing and switch the voice off. It has not
+run on real glasses yet.
 
 ## How it fits together
 
@@ -35,7 +36,17 @@ in MentraOS, and enter HQ's address and the pairing key from HQ › Settings ›
 
 ## On the glasses
 
-Hold to talk · tap for the next page · double tap to clear.
+Hold to talk · tap for the next page · double tap to clear (and stop talking).
+
+- **Spoken replies.** The answer to a spoken question is said aloud as well as shown (MentraOS's voice). "Read answers
+  aloud" on the phone screen turns it off.
+- **Approvals by voice** (off until Phil turns it on in HQ › Settings › Glasses). Say "what needs me": the cards are read
+  one at a time. Hold and say "approve", "reject", "next" or "stop". HQ runs only the card exactly as it was read (its
+  fingerprint, as Telegram does), and never approves one that moves money, trades, ships code or updates HQ: those can
+  be rejected from the glasses and are approved in HQ or Telegram.
+- **All-day memory** (off until Phil turns it on there too). Between questions, the finished lines the glasses hear go
+  to HQ every two minutes, sealed and kept 14 days; Lip reads them (glasses_heard) when Phil asks what was said. The
+  glasses look at the switch every ten minutes, and drop anything unsent when it's turned off.
 
 ## To check on the real G2
 
@@ -43,8 +54,11 @@ Hold to talk · tap for the next page · double tap to clear.
 - Whether the always-on half keeps running with the MentraOS app in the background or the phone locked.
 - The page size (`src/shared/pages.ts` estimates it from the display's pixels).
 - Where MentraOS keeps the app's storage (the pairing key is stored there).
+- That the speaker's voice comes through the G2 (or the phone) and that the memory's listener doesn't pick it up.
+- Whether two transcription listeners (a question and the all-day memory) both get every line, as the SDK says.
+- How much the all-day listening costs in battery over a day.
 
 ## Not built yet
 
-Spoken replies, all-day listening that feeds Jarvis's memory, approvals from the glasses, and HQ hosting the install
-link itself.
+HQ hosting the install link itself, Jarvis's own (ElevenLabs) voice on the glasses, and a nightly summary of the day's
+memory.

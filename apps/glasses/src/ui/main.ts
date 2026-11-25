@@ -12,6 +12,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const status = $("status"), you = $("you"), reply = $("reply");
 const url = $<HTMLInputElement>("url"), key = $<HTMLInputElement>("key"), question = $<HTMLInputElement>("question");
 const talk = $<HTMLButtonElement>("talk");
+const speak = $<HTMLInputElement>("speak"), switches = $("switches");
 
 function show(s: AppState) {
   status.textContent = s.status;
@@ -21,6 +22,10 @@ function show(s: AppState) {
   if (s.url && document.activeElement !== url) url.value = s.url;
   key.placeholder = s.paired ? "saved (enter a new one to replace it)" : "from HQ › Settings › Glasses";
   talk.textContent = s.phase === "listening" ? "Listening… (tap to stop)" : "Talk through the glasses";
+  speak.checked = s.speak;
+  switches.textContent = s.paired
+    ? `Approvals by voice: ${s.approvals ? "on" : "off"} · All-day memory: ${s.listen ? `on${s.unsent ? ` (${s.unsent} line${s.unsent === 1 ? "" : "s"} waiting to send)` : ""}` : "off"}. Change these in HQ › Settings › Glasses.`
+    : "";
 }
 
 mentra.on("state", show);
@@ -29,6 +34,8 @@ $("test").addEventListener("click", () => mentra.send("test", {}));
 $("ask").addEventListener("submit", (e) => { e.preventDefault(); const text = question.value.trim(); if (text) { mentra.send("ask", { text }); question.value = ""; } });
 talk.addEventListener("click", () => mentra.send("talk", {}));
 $("dismiss").addEventListener("click", () => mentra.send("dismiss", {}));
+speak.addEventListener("change", () => mentra.send("speak", { on: speak.checked }));
+$("cards").addEventListener("click", () => mentra.send("cards", {}));
 
 // Tells MentraOS the screen is up, so the always-on half's first "state" gets through.
 mentra.ready();

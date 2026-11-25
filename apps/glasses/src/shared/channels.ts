@@ -13,6 +13,13 @@ export interface AppState {
   /** The last thing Phil asked and the answer so far. */
   you: string;
   reply: string;
+  /** Answers to spoken questions are read aloud as well as shown (Phil's switch, on the phone). */
+  speak: boolean;
+  /** What HQ says is switched on in Settings › Glasses, as last heard. */
+  approvals: boolean;
+  listen: boolean;
+  /** Lines heard for the all-day memory and not yet sent to HQ. */
+  unsent: number;
 }
 export interface Channels {
   // screen → background
@@ -21,6 +28,8 @@ export interface Channels {
   "ask": { text: string };
   "talk": Record<string, never>;
   "dismiss": Record<string, never>;
+  "speak": { on: boolean };
+  "cards": Record<string, never>;
   // background → screen
   "state": AppState;
 }

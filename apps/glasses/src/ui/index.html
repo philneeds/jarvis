@@ -19,7 +19,9 @@
         <div class="row">
           <button id="talk" type="button">Talk through the glasses</button>
           <button id="dismiss" type="button" class="quiet">Clear the glasses</button>
+          <button id="cards" type="button" class="quiet">What needs me</button>
         </div>
+        <label class="check"><input id="speak" type="checkbox" checked /> Read answers aloud</label>
         <p id="you" class="you"></p>
         <p id="reply" class="reply"></p>
       </section>
@@ -37,7 +39,8 @@
         </form>
       </section>
 
-      <p class="hint">On the glasses: hold to talk, tap for the next page, double tap to clear.</p>
+      <p id="switches" class="hint"></p>
+      <p class="hint">On the glasses: hold to talk, tap for the next page, double tap to clear. Say "what needs me" to hear the cards waiting on you; then hold and say approve, reject, next or stop.</p>
     </main>
     <script src="./main.js"></script>
   </body>

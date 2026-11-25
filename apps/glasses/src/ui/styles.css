@@ -19,3 +19,5 @@ button.quiet { background: transparent; color: var(--ink); border: 1px solid var
 .you { margin: 0; color: var(--dim); }
 .reply { margin: 0; white-space: pre-wrap; }
 .you:empty, .reply:empty { display: none; }
+label.check { flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); }
+label.check input { width: 20px; height: 20px; }
