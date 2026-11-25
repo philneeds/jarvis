@@ -97,8 +97,13 @@ test("every parent, link and venture resolves", () => {
 
 test("team sizes match the scope doc", () => {
   assert.equal(teamSize("stella"), 6);
-  assert.equal(teamSize("mantis"), 10);
-  assert.equal(teamSize("munger"), 7);
+  // Pentoshi moved from Mantis to Mayne on Nov 24 2026 (Phil: "Mayne, you are in charge of him").
+  assert.equal(teamSize("mantis"), 9);
+  assert.equal(teamSize("munger"), 8);
+  assert.equal(teamSize("mayne"), 1);
+  assert.equal(AGENT_BY_ID.pentoshi!.parent, "mayne");
+  assert.equal(AGENT_BY_ID.pentoshi!.layer, 3, "one layer under Mayne, who is layer 2");
+  assert.ok(AGENT_BY_ID.pentoshi!.links?.includes("mantis"), "still works with Mantis for the market view");
   assert.equal(teamSize("poseidon"), 8);
   assert.equal(teamSize("stevon"), 2);
 });

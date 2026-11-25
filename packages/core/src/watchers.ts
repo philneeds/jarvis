@@ -28,6 +28,8 @@ export interface Watcher {
   /** Most wakes per day; past it, events are parked in the agent's memory for its next run. */
   maxPerDay: number;
   summary: string;
+  /** Who gets a copy of the agent's answer after its lead (its parent) has it; the lead handles what's actionable. */
+  cc?: string[];
   /** One look at the source, no model: the event text for the agent when something is new, and the cursor to keep. */
   check(cursor: unknown, deps: WatchDeps): Promise<WatchResult>;
 }
@@ -98,14 +100,14 @@ export const WATCHERS: Watcher[] = [
     },
   },
   {
-    id: "hl-funding", agentId: "pentoshi", every: 30, phase: 2, maxPerDay: 6,
-    summary: "Hyperliquid funding goes extreme or a big market moves 10% in a day: Pentoshi wakes with the numbers and reports to Mantis.",
+    id: "hl-funding", agentId: "pentoshi", every: 30, phase: 2, maxPerDay: 6, cc: ["mantis"],
+    summary: "Hyperliquid funding goes extreme or a big market moves 10% in a day: Pentoshi wakes with the numbers and reports to Mayne, with a copy to Mantis.",
     async check(cursor, deps) {
       const rows = await hyperliquidPerps(deps.fetch ?? fetch);
       const r = fundingExtremes(rows, cursor);
       if (!r.coins.length) return { cursor: r.cursor };
       const th = thresholds();
-      return { cursor: r.cursor, event: `Hyperliquid just went extreme on ${r.coins.join(", ")} (funding past ${th.fundingHr}%/h or a 24h move past ${th.movePct}%, open interest over $${Math.round(th.oiMinUsd / 1e6)}M):\n${perpsText(rows, r.coins)}\n\nSay what it means for positioning, with the numbers; this goes to Mantis, not Phil.` };
+      return { cursor: r.cursor, event: `Hyperliquid just went extreme on ${r.coins.join(", ")} (funding past ${th.fundingHr}%/h or a 24h move past ${th.movePct}%, open interest over $${Math.round(th.oiMinUsd / 1e6)}M):\n${perpsText(rows, r.coins)}\n\nSay what it means for positioning and for Phil's own positions (hyperliquid_account), with the numbers, and the trade you'd make or none; this goes to Mayne, who directs your trading, with a copy to Mantis, not to Phil. File no order from this alone unless Mayne has already called it.` };
     },
   },
 ];
@@ -194,7 +196,10 @@ export class Watchers {
     if (r.blocked) { await this.park(w, event, r.blocked); return; }
     await this.jarvis.router.log(agent.id, "schedule", `Watcher ${w.id}: ${agent.name} woke on ${headline}`, r.runId);
     const report: RoutineReport = { agent, scheduleId: `watch:${w.id}`, text: r.text, runId: r.runId };
-    await deliverReports(this.jarvis, agent.parent ?? "jarvis", [report]);
+    const toId = agent.parent ?? "jarvis";
+    await deliverReports(this.jarvis, toId, [report]);
+    // Copies (Mantis on Pentoshi's funding alerts) are for the reader's own view; the lead handles what's actionable.
+    for (const id of new Set(w.cc ?? [])) if (id !== toId && id !== agent.id && (id === "jarvis" || getAgent(id))) await deliverReports(this.jarvis, id, [{ ...report, copyOf: toId }]);
   }
 
   /** The event waits in the agent's own memory, so its next run (routine or on demand) starts from it. */

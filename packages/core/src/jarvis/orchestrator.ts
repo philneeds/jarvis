@@ -1941,16 +1941,17 @@ export class Jarvis {
       }
       case "run": {
         // Run a scheduled routine now, by its id or the agent's name; it reports up the chain as it would on its timer.
-        const { withCustom, runRoutine, HOUSEKEEPING } = await import("../scheduler.js");
+        const { withCustom, runRoutine, HOUSEKEEPING, reportRecipients } = await import("../scheduler.js");
         const all = (await withCustom(this.store)).filter((s) => !HOUSEKEEPING.has(s.task));
         const q = arg.toLowerCase().replace(/^@/, "");
         if (!q) return `Routines: ${all.map((s) => `${s.id} (${getAgent(s.agentId)?.name ?? s.agentId})`).join(", ")}. Say /run <id> or /run <agent>.`;
         const s = all.find((x) => x.id === q) ?? all.find((x) => x.agentId === q || (getAgent(x.agentId)?.name ?? "").toLowerCase() === q || (getAgent(x.agentId)?.name ?? "").toLowerCase().split(" ").includes(q));
         if (!s) return `No routine or agent called "${arg}". /run alone lists them.`;
         const agent = getAgent(s.agentId)!;
-        const toId = s.push ? undefined : s.to ?? agent.parent ?? "jarvis";
+        const up = s.push ? undefined : reportRecipients(s, agent);
         void runRoutine(this, s, { direct: true }).catch((e) => this.router.log(agent.id, "error", `/run ${s.id} failed: ${(e as Error).message}`));
-        return `Running ${agent.name}'s ${s.id} now. It reports to ${toId === undefined ? "you" : toId === "jarvis" ? "me (and the next brief)" : getAgent(toId)?.name ?? toId}; the full text lands under More → Reports.`;
+        const who = (id: string) => (id === "jarvis" ? "me (and the next brief)" : getAgent(id)?.name ?? id);
+        return `Running ${agent.name}'s ${s.id} now. It reports to ${up === undefined ? "you" : who(up.toId)}${up?.cc.length ? `, with a copy to ${up.cc.map(who).join(" and ")}` : ""}; the full text lands under More → Reports.`;
       }
       case "status": {
         const s = await this.systemStatus();

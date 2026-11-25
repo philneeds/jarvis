@@ -705,7 +705,30 @@ test("a routine that reports to another agent stays out of Phil's chat: the reci
   assert.ok(log.some((e) => e.agentId === "house" && /House → Charlie Munger \(house-open\)/.test(e.summary)));
   assert.ok(log.some((e) => e.agentId === "munger" && /took House's report/.test(e.summary)));
   for (const id of ["marcus-open", "exxon-open", "altman-open", "armstrong-open"]) assert.equal(SCHEDULES.find((s) => s.id === id)!.to, "munger");
-  for (const id of ["ansem-scan", "pentoshi-scan"]) assert.equal(SCHEDULES.find((s) => s.id === id)!.to, "mantis");
+  assert.equal(SCHEDULES.find((s) => s.id === "ansem-scan")!.to, "mantis");
+});
+
+test("Pentoshi's scan goes to Mayne, who directs his trading, with a copy to Mantis for the market view; the copy hands nothing off", async () => {
+  const { jarvis, store } = make();
+  const { runRoutine, SCHEDULES, reportRecipients, WATCHERS } = await import("../src/index.js");
+  const scan = SCHEDULES.find((s) => s.id === "pentoshi-scan")!;
+  assert.equal(scan.to, undefined, "follows his parent in the registry");
+  assert.deepEqual(reportRecipients(scan), { toId: "mayne", cc: ["mantis"] });
+  assert.deepEqual(WATCHERS.find((w) => w.id === "hl-funding")!.cc, ["mantis"]);
+  const before = (await store.chat.list(50)).length;
+  const r = await runRoutine(jarvis, scan, { direct: true });
+  assert.ok(r && !r.blocked);
+  assert.equal((await store.chat.list(50)).length, before, "nothing said to Phil");
+  const log = await store.activity.list({ limit: 40 });
+  assert.ok(log.some((e) => e.agentId === "pentoshi" && /Pentoshi → Mayne \(pentoshi-scan\)/.test(e.summary)));
+  assert.ok(log.some((e) => e.agentId === "pentoshi" && /Pentoshi → Mantis \(pentoshi-scan, a copy; it went to Mayne\)/.test(e.summary)));
+  assert.ok(log.some((e) => e.agentId === "mayne" && /Mayne took Pentoshi's report/.test(e.summary)));
+  const copy = log.find((e) => e.agentId === "mantis" && /Mantis took a copy of Pentoshi's report/.test(e.summary));
+  assert.ok(copy, "Mantis got the copy");
+  const run = await store.runs.get(copy!.runId!);
+  assert.match(run!.prompt, /a copy for you[\s\S]*already handed to Mayne, who handles anything to be done about it[\s\S]*hand nothing off/);
+  const logged = await store.settings.get<{ agentId: string; toId: string }[]>("reports.log", []);
+  assert.deepEqual(logged.filter((x) => x.agentId === "pentoshi").map((x) => x.toId).sort(), ["mantis", "mayne"], "both sides are in the Reports log");
 });
 
 test("leads report to Jarvis's inbox, not Phil; the next daily brief folds them in and clears the inbox", async () => {

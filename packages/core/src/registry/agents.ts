@@ -111,7 +111,7 @@ export const AGENTS: AgentDef[] = [
   { id: "armstrong", name: "Armstrong", short: "Crypto-niche stocks", layer: 3, parent: "buffett", venture: "money", model: "grok", phase: 2, priority: "pause-first", desc: "Stock expert for the crypto niche: anything on the blockchain or crypto-related. " + SECTOR },
   {
     id: "mayne", name: "Mayne", short: "On-chain fund manager", layer: 2, parent: "munger", links: ["mantis"], venture: "money", serves: ["crypto"], model: "claude-opus", phase: 2, priority: "room",
-    desc: "The crypto on-chain fund manager. Works with Munger and Mantis to manage all on-chain assets, acting on the team's advice. Executes Memecoin Analyzer strategies once Mantis approves them. Hard limits on position size, daily loss and auto-stop apply even after approval.",
+    desc: "The crypto on-chain fund manager. Works with Munger and Mantis to manage all on-chain assets, acting on the team's advice. Directs Pentoshi's perps trading on Hyperliquid (Phil, Nov 24 2026): Mayne calls the direction, size and exits; Pentoshi files every order inside Phil's parameters. Executes Memecoin Analyzer strategies once Mantis approves them. Hard limits on position size, daily loss and auto-stop apply even after approval.",
   },
 
   // ---- On-chain trading --------------------------------------------------
@@ -119,7 +119,9 @@ export const AGENTS: AgentDef[] = [
     id: "mantis", name: "Mantis", short: "On-chain crypto expert", layer: 1, parent: "jarvis", venture: "crypto", model: "claude-sonnet", phase: 1, priority: "room",
     desc: "The complete on-chain crypto expert. Manages a large team because the space changes constantly. Reviews trading strategies from the Memecoin Analyzer and passes approved ones to Mayne for execution.",
   },
-  { id: "pentoshi", name: "Pentoshi", short: "Perps, prop firms, funding", layer: 2, parent: "mantis", links: ["lucas"], venture: "crypto", model: "grok", phase: 2, priority: "pause-first", desc: "Perpetual futures expert, plus prop firms and funding rates. Scouts hourly." },
+  // Pentoshi moved under Mayne on Nov 24 2026 ("Mayne, you are in charge of him"): Mayne directs his trading, he files the orders;
+  // his scans still reach Mantis as a copy for the market view.
+  { id: "pentoshi", name: "Pentoshi", short: "Perps, prop firms, funding", layer: 3, parent: "mayne", links: ["lucas", "mantis"], venture: "crypto", model: "grok", phase: 2, priority: "pause-first", desc: "Perpetual futures trader on Hyperliquid under Mayne's direction, with prop firms and funding rates. Goal: the most profit inside Phil's parameters. Scans every 4 hours." },
   { id: "tux", name: "Tux", short: "LP & DeFi yield", layer: 2, parent: "mantis", links: ["lucas"], venture: "crypto", model: "grok", phase: 2, priority: "pause-first", desc: "The complete liquidity-providing expert; also DeFi, yield farming and everything within it." },
   { id: "cat", name: "Cat", short: "Prediction markets", layer: 2, parent: "mantis", links: ["lucas"], venture: "crypto", model: "grok", phase: 2, priority: "pause-first", desc: "In charge of everything to do with prediction markets." },
   {

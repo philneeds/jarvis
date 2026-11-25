@@ -31,6 +31,11 @@ export interface Schedule {
    * daily brief. Phil hears directly only from Jarvis, from Needs you, and from the few routines with push (deliverables).
    */
   to?: string;
+  /**
+   * Who else gets a copy of the answer, after the lead it goes to (Pentoshi's scans go to Mayne, who directs his
+   * trading, with a copy to Mantis for the market view). A copy is for the reader's own view: the lead handles it.
+   */
+  cc?: string[];
 }
 
 /** Scouts and briefs on their timers. Nothing runs before its phase. */
@@ -59,7 +64,7 @@ export const SCHEDULES: Schedule[] = [
   { id: "stella-leads", agentId: "stella", watch: ["ghl", "mail"], task: "Review new leads and open jobs for JD PM; flag anything waiting on a customer reply.", when: "daily@06:50", phase: 1 },
   { id: "mantis-markets", agentId: "mantis", task: "Market read for the day. Call hyperliquid_perps for real numbers: BTC, ETH and SOL, the biggest moves, where funding and open interest are stretched. Say what moved overnight and what the team should watch today. Use only the numbers you were given; if you don't have data on something, say so instead of guessing.", when: "daily@06:55", phase: 1 },
   { id: "ansem-scan", agentId: "ansem", task: "Scan: new memecoins and low caps worth a look, with the reason each is on the list. This goes to Mantis, not Phil.", when: "every:240", phase: 2, to: "mantis" },
-  { id: "pentoshi-scan", agentId: "pentoshi", task: "Scan Hyperliquid with hyperliquid_perps: what changed since your last scan in funding (both extremes), open interest and the biggest moves, and what it says about positioning. Keep it to what's worth Phil's attention, with the numbers; say \"nothing notable\" when that's the truth. Add what traders on X are saying about the biggest moves (x_search), with handles. Then any news from Phil's prop firms (Vest Markets, Backed). Save this scan's key numbers in a remember block (scope agent:pentoshi, key last-scan) so the next scan can compare.", when: "every:240", phase: 2, to: "mantis" },
+  { id: "pentoshi-scan", agentId: "pentoshi", task: "Scan Hyperliquid with hyperliquid_perps: what changed since your last scan in funding (both extremes), open interest and the biggest moves, and what it says about positioning. Then Phil's own positions (hyperliquid_account): each one's PnL, leverage and distance to liquidation, and whether anything should be cut. Keep it to what matters, with the numbers; say \"nothing notable\" when that's the truth. Add what traders on X are saying about the biggest moves (x_search), with handles. Then any news from Phil's prop firms (Vest Markets, Backed). End with the one trade you'd make, or none, and why: this goes to Mayne, who directs your trading, with a copy to Mantis for the market view; file no order from the scan itself unless Mayne has already called it. Save this scan's key numbers in a remember block (scope agent:pentoshi, key last-scan) so the next scan can compare.", when: "every:240", phase: 2, cc: ["mantis"] },
   { id: "marcus-open", agentId: "marcus", task: "Pre-market: tech and infra holdings, catalysts today, suggested changes. This goes to Munger, not Phil.", when: "weekdays@08:30", phase: 2, to: "munger" },
   { id: "house-open", agentId: "house", task: "Pre-market: biotech holdings, catalysts and approvals today, and what the biotech Discord said overnight (discord_recent, quoted as chat, not fact). Suggested changes. This goes to Munger, not Phil.", when: "weekdays@08:30", phase: 2, to: "munger" },
   { id: "exxon-open", agentId: "exxon", task: "Pre-market: energy holdings and catalysts today, suggested changes. This goes to Munger, not Phil.", when: "weekdays@08:30", phase: 2, to: "munger" },
@@ -136,7 +141,16 @@ export function nextRun(when: string, now: Date, last?: number): Date | undefine
 /** Built-in jobs that aren't an agent's routine: no report goes up the chain, /run leaves them out. */
 export const HOUSEKEEPING = new Set(["brief", "condense", "backup", "update-check", "setup-check", "goal-check", "connections-watch"]);
 
-export interface ScheduleView { id: string; agentId: string; when: string; whenText: string; summary: string; task: string; phase: number; active: boolean; push: boolean; custom: boolean; deck: boolean; to?: string; lastRun?: string; nextRun?: string }
+export interface ScheduleView { id: string; agentId: string; when: string; whenText: string; summary: string; task: string; phase: number; active: boolean; push: boolean; custom: boolean; deck: boolean; to?: string; cc?: string[]; lastRun?: string; nextRun?: string }
+
+/**
+ * Where a routine's answer goes: the lead (its `to`, else the agent's parent, else Jarvis) and whoever gets a copy
+ * (`cc`, minus the lead and anyone not in the registry). A deliverable (push) goes to Phil himself and has no lead.
+ */
+export function reportRecipients(s: Schedule, agent: AgentDef = getAgent(s.agentId)!): { toId: string; cc: string[] } {
+  const toId = s.to ?? agent?.parent ?? "jarvis";
+  return { toId, cc: [...new Set(s.cc ?? [])].filter((id) => id !== toId && id !== agent?.id && (id === "jarvis" || !!getAgent(id))) };
+}
 
 /** One plain line per built-in routine for the Schedules screen; the full instructions sit behind "details". */
 const SUMMARY: Record<string, string> = {
@@ -156,7 +170,7 @@ const SUMMARY: Record<string, string> = {
   "bill-installs": "Today's installs and materials, and anything that would delay a job.",
   "mantis-markets": "Market read: what moved on-chain overnight and what to watch.",
   "ansem-scan": "New memecoins and low caps worth a look, each with the reason.",
-  "pentoshi-scan": "Hyperliquid funding, open interest and big moves, plus prop-firm news.",
+  "pentoshi-scan": "Hyperliquid funding, open interest, big moves and your positions, for Mayne; a copy to Mantis.",
   "buffett-weekly": "Holdings review after the close, up to three suggested changes; updates the watchlist.",
   "david-weekly": "Goals check: benchmarks met, where each goal stands, next week's steps.",
   "david-today": "Picks today's three from your goals and what's waiting on you; they open the morning brief.",
@@ -180,11 +194,12 @@ export async function scheduleView(store: Store, now = new Date(), schedules: Sc
   return (await withCustom(store, schedules)).map((s) => {
     const active = s.phase <= phase;
     const n = active ? nextRun(s.when, now, last[s.id]) : undefined;
+    const up = s.push || HOUSEKEEPING.has(s.task) ? undefined : reportRecipients(s);
     return {
       id: s.id, agentId: s.agentId, when: s.when, whenText: describeWhen(s.when),
       summary: SUMMARY[s.id] ?? (s.task.length > 140 ? `${s.task.slice(0, 140).replace(/\s+\S*$/, "")}…` : s.task),
       task: s.task === "brief" ? "The morning brief: each lead's report, what's waiting on Phil, today's calendar." : s.task === "condense" ? "Tidy memory: merge duplicates and drop what's stale (when memory passes 20 items)." : s.task === "backup" ? "Nightly backup of the database, kept 14 days, with a copy to Google Drive." : s.task === "update-check" ? "Hourly check for new code on HQ's branch; an Update HQ card when there is some." : s.task === "setup-check" ? "Hourly check that every live agent is connected and tried; updates the setup goal." : s.task === "goal-check" ? "Hourly: benchmarks with a rule against Kubera or a board figure are ticked or unticked from the live number." : s.task,
-      phase: s.phase, active, push: !!s.push || s.task === "brief", custom: s.id.startsWith("custom:"), deck: !!s.deck, to: s.push || HOUSEKEEPING.has(s.task) ? undefined : s.to ?? getAgent(s.agentId)?.parent ?? "jarvis",
+      phase: s.phase, active, push: !!s.push || s.task === "brief", custom: s.id.startsWith("custom:"), deck: !!s.deck, to: up?.toId, cc: up?.cc.length ? up.cc : undefined,
       lastRun: last[s.id] ? new Date(last[s.id]!).toISOString() : undefined, nextRun: n?.toISOString(),
     };
   });
@@ -199,7 +214,8 @@ export interface QueuedReport { id: string; agentId: string; scheduleId: string;
 let inboxLock: Promise<unknown> = Promise.resolve();
 export function withInbox<T>(fn: () => Promise<T>): Promise<T> { const p = inboxLock.then(fn, fn); inboxLock = p.catch(() => undefined); return p; }
 
-export interface RoutineReport { agent: AgentDef; scheduleId: string; text: string; runId: string }
+/** One agent's answer going up the chain. `copyOf` names the lead it went to when this is a copy for someone else's view. */
+export interface RoutineReport { agent: AgentDef; scheduleId: string; text: string; runId: string; copyOf?: string }
 
 /** Every report that went up the chain in the last few days, for Jarvis to answer from and for the Reports screen. */
 export const REPORTS_LOG_KEY = "reports.log";
@@ -235,10 +251,16 @@ export async function deliverReports(jarvis: Jarvis, toId: string, reports: Rout
   const to = toId === "jarvis" ? undefined : getAgent(toId);
   await logReports(jarvis, toId, reports);
   if (to) {
-    for (const r of reports) await jarvis.router.log(r.agent.id, "run", `${r.agent.name} → ${to.name} (${r.scheduleId}): ${r.text.slice(0, 200)}`, r.runId, { report: r.text });
-    const body = reports.map((r) => `${r.agent.name} reports to you (${r.scheduleId}):\n\n${r.text}`).join("\n\n---\n\n");
-    const rr = await jarvis.runAgent(to, `${body}\n\nThis is for you, not Phil: keep what matters in memory (scope venture:${to.venture}) and on the board, hand anything actionable to whoever owns it, and raise an attention or approval block only if Phil himself must act. Reply in one or two lines on what you did with ${reports.length > 1 ? "these" : "it"}.`, { direct: false, from: reports.length > 1 ? "The team" : reports[0]!.agent.name, parentRunId: reports[0]!.runId });
-    if (!rr.blocked) await jarvis.router.log(to.id, "run", `${to.name} took ${reports.length > 1 ? `${reports.length} reports (${reports.map((r) => r.agent.name).join(", ")})` : `${reports[0]!.agent.name}'s report`}: ${rr.text.slice(0, 200)}`, rr.runId);
+    const leadName = (id: string) => (id === "jarvis" ? "Jarvis" : getAgent(id)?.name ?? id);
+    for (const r of reports) await jarvis.router.log(r.agent.id, "run", `${r.agent.name} → ${to.name} (${r.scheduleId}${r.copyOf ? `, a copy; it went to ${leadName(r.copyOf)}` : ""}): ${r.text.slice(0, 200)}`, r.runId, { report: r.text });
+    const body = reports.map((r) => (r.copyOf ? `${r.agent.name}'s report to ${leadName(r.copyOf)} (${r.scheduleId}), a copy for you:\n\n${r.text}` : `${r.agent.name} reports to you (${r.scheduleId}):\n\n${r.text}`)).join("\n\n---\n\n");
+    // A copy is for the reader's own view: the lead it went to handles what's actionable, so nothing is done twice.
+    const copies = reports.every((r) => r.copyOf);
+    const instruction = copies
+      ? `This is a copy for your own view, not Phil's, and ${reports.length > 1 ? "they were" : "it was"} already handed to ${[...new Set(reports.map((r) => leadName(r.copyOf!)))].join(" and ")}, who ${reports.length > 1 || new Set(reports.map((r) => r.copyOf)).size > 1 ? "handle" : "handles"} anything to be done about it: keep what matters for your own read in memory (scope venture:${to.venture}) and on the board, hand nothing off from it, and raise something for Phil only if he must act and the lead wouldn't know. Reply in one or two lines on what you kept.`
+      : `This is for you, not Phil: keep what matters in memory (scope venture:${to.venture}) and on the board, hand anything actionable to whoever owns it, and raise an attention or approval block only if Phil himself must act. Reply in one or two lines on what you did with ${reports.length > 1 ? "these" : "it"}.`;
+    const rr = await jarvis.runAgent(to, `${body}\n\n${instruction}`, { direct: false, from: reports.length > 1 ? "The team" : reports[0]!.agent.name, parentRunId: reports[0]!.runId });
+    if (!rr.blocked) await jarvis.router.log(to.id, "run", `${to.name} took ${reports.length > 1 ? `${reports.length} reports (${reports.map((r) => r.agent.name).join(", ")})` : `${copies ? "a copy of " : ""}${reports[0]!.agent.name}'s report`}: ${rr.text.slice(0, 200)}`, rr.runId);
     return;
   }
   // A lead's report: into Jarvis's inbox, folded into the next daily brief.
@@ -275,10 +297,11 @@ export async function runRoutine(jarvis: Jarvis, s: Schedule, opts: { direct?: b
     bus.emitEvent({ type: "report", agentId: agent.id, title: REPORT_TITLE[s.id] ?? `${agent.name} report`, text: r.text, at: new Date().toISOString(), files });
     return r;
   }
-  const toId = s.to ?? agent.parent ?? "jarvis";
+  const { toId, cc } = reportRecipients(s, agent);
   const report: RoutineReport = { agent, scheduleId: s.id, text: r.text, runId: r.runId };
-  if (opts.deliver === false) return { ...r, report, toId };
+  if (opts.deliver === false) return { ...r, report, toId, cc };
   await deliverReports(jarvis, toId, [report]);
+  for (const id of cc) await deliverReports(jarvis, id, [{ ...report, copyOf: toId }]);
   return r;
 }
 
@@ -364,10 +387,10 @@ export class Scheduler {
     // approved may have run it).
     const deferred = new Set((await readDeferred(store)).filter((d) => !(d.at > 0 && (this.startedAt.get(d.id) ?? 0) >= d.at)).map((d) => d.id));
     await store.settings.set(DEFERRED_KEY, []);
-    const heldReports = await store.settings.get<{ toId: string; reports: { agentId: string; scheduleId: string; text: string; runId: string }[] }[]>(HELD_REPORTS_KEY, []);
+    const heldReports = await store.settings.get<{ toId: string; reports: { agentId: string; scheduleId: string; text: string; runId: string; copyOf?: string }[] }[]>(HELD_REPORTS_KEY, []);
     if (heldReports.length) {
       await store.settings.set(HELD_REPORTS_KEY, []);
-      for (const h of heldReports) batches.set(h.toId, [...(batches.get(h.toId) ?? []), ...h.reports.flatMap((r) => { const agent = getAgent(r.agentId); return agent ? [{ agent, scheduleId: r.scheduleId, text: r.text, runId: r.runId }] : []; })]);
+      for (const h of heldReports) batches.set(h.toId, [...(batches.get(h.toId) ?? []), ...h.reports.flatMap((r) => { const agent = getAgent(r.agentId); return agent ? [{ agent, scheduleId: r.scheduleId, text: r.text, runId: r.runId, ...(r.copyOf ? { copyOf: r.copyOf } : {}) }] : []; })]);
     }
     // No update waiting: a workshop job held for one that never restarted HQ starts now (after a restart, boot does it).
     void this.jarvis.resumeHeldJobs().catch((e) => console.warn("[workshop] held jobs:", (e as Error).message));
@@ -427,7 +450,10 @@ export class Scheduler {
           if (r && !r.blocked) {
             await q?.ran();
             await done(`${agent.name} reported back`, r.runId);
-            if ("report" in r && r.report) batches.set(r.toId, [...(batches.get(r.toId) ?? []), r.report]);
+            if ("report" in r && r.report) {
+              batches.set(r.toId, [...(batches.get(r.toId) ?? []), r.report]);
+              for (const id of r.cc) batches.set(id, [...(batches.get(id) ?? []), { ...r.report, copyOf: r.toId }]);
+            }
           }
         }
       } catch (e) {
@@ -437,8 +463,8 @@ export class Scheduler {
     }
     // Handing reports to a lead starts the lead's run: while an update waits, they're kept and handed over after it.
     if (batches.size && await deployPending(store, now.getTime())) {
-      const kept = await store.settings.get<{ toId: string; reports: { agentId: string; scheduleId: string; text: string; runId: string }[] }[]>(HELD_REPORTS_KEY, []);
-      await store.settings.set(HELD_REPORTS_KEY, [...kept, ...[...batches].map(([toId, rs]) => ({ toId, reports: rs.map((r) => ({ agentId: r.agent.id, scheduleId: r.scheduleId, text: r.text, runId: r.runId })) }))]);
+      const kept = await store.settings.get<{ toId: string; reports: { agentId: string; scheduleId: string; text: string; runId: string; copyOf?: string }[] }[]>(HELD_REPORTS_KEY, []);
+      await store.settings.set(HELD_REPORTS_KEY, [...kept, ...[...batches].map(([toId, rs]) => ({ toId, reports: rs.map((r) => ({ agentId: r.agent.id, scheduleId: r.scheduleId, text: r.text, runId: r.runId, ...(r.copyOf ? { copyOf: r.copyOf } : {}) })) }))]);
       batches.clear();
     }
     for (const [toId, reports] of batches) {
