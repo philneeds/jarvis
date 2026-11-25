@@ -142,3 +142,26 @@ test("once Robinhood is connected, its positions go in the shared note; only rea
   assert.match(text, /straight from Robinhood[\s\S]*get_equity_positions:\nVOO 100 shares/);
   assert.ok(text.length <= 3400);
 });
+
+test("Robinhood's position tools that want an account number get it from the accounts list, one read per account (Nov 23: get_equity_positions wants account_number, get_crypto_positions rhs_account_number)", async () => {
+  const { RobinhoodConnector } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const rh = new RobinhoodConnector(store, { redirectUri: "http://x/cb", fetch: (async () => { throw new Error("no network"); }) as typeof fetch });
+  await store.settings.set("robinhood.tokens", { access_token: "t", connectedAt: new Date().toISOString() });
+  const called: [string, Record<string, unknown>][] = [];
+  rh.listTools = async () => [
+    { name: "get_accounts", inputSchema: { type: "object", properties: {} } },
+    { name: "get_equity_positions", inputSchema: { type: "object", properties: { account_number: { type: "string" } }, required: ["account_number"] } },
+    { name: "get_crypto_positions", inputSchema: { type: "object", properties: { rhs_account_number: { type: "string" } }, required: ["rhs_account_number"] } },
+  ];
+  rh.call = async (name: string, args: Record<string, unknown> = {}) => {
+    called.push([name, args]);
+    if (name === "get_accounts") return JSON.stringify({ accounts: [{ account_number: "537634453", rhs_account_number: "537634453", type: "agentic" }, { account_number: "1888", type: "margin" }] });
+    if (name === "get_equity_positions") return args.account_number === "537634453" ? "AAPL 10 sh" : "VOO 100 sh";
+    return "BTC 0.1";
+  };
+  const text = (await rh.positionsText())!;
+  assert.deepEqual(called.map(([n, a]) => `${n} ${JSON.stringify(a)}`), ['get_accounts {}', 'get_equity_positions {"account_number":"537634453"}', 'get_equity_positions {"account_number":"1888"}', 'get_crypto_positions {"rhs_account_number":"537634453"}']);
+  assert.match(text, /get_equity_positions:\n537634453: AAPL 10 sh\n1888: VOO 100 sh/);
+  assert.match(text, /get_crypto_positions:\n537634453: BTC 0.1/);
+});

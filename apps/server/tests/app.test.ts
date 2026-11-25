@@ -349,6 +349,36 @@ test("the base summary over the API: goal horizons and ventures, trophies, level
   assert.equal(cleared.goal.venture, undefined);
 });
 
+test("a benchmark's auto-check over the API: set, read at once, a bad shape refused, checked again on demand", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  const json = async <T,>(r: Response | Promise<Response>) => (await (await r).json()) as T;
+  const send = (path: string, method: string, body?: unknown) => call(path, { method, cookie, body: body === undefined ? undefined : JSON.stringify(body) });
+  type G = { goal: { id: string; pct: number; benchmarks: { id: string; done: boolean; check?: unknown; auto?: { met?: boolean; figure?: string; error?: string }; paused?: boolean }[] } };
+  const today = new Date().toISOString().slice(0, 10);
+  await store.settings.set("kubera.status", { ok: true, at: new Date().toISOString() });
+  await store.settings.set("kubera.history", [{ day: today, netWorth: 57_683, assets: 115_533, debts: 57_850, items: { "Robinhood 1888": 96_728 } }]);
+  const made = await json<G>(send("/api/goals", "POST", { name: "Maintain $100k+ net worth", horizon: "mid", venture: "money" }));
+  const marked = await json<G>(send(`/api/goals/${made.goal.id}`, "PUT", { benchmarks: [{ text: "Net worth at $100k+ (Kubera)" }, { text: "Robinhood MCP account at $90k+" }] }));
+  const [nw, rh] = marked.goal.benchmarks;
+  assert.equal((await send(`/api/goals/${made.goal.id}`, "PUT", { benchmarkChecks: { [nw!.id]: { kind: "kubera_networth", op: ">", value: 100000 } } })).status, 400, "only ≥ and ≤");
+  assert.equal((await send(`/api/goals/${made.goal.id}`, "PUT", { benchmarkChecks: { [nw!.id]: { kind: "robinhood", op: ">=", value: 1 } } })).status, 400, "no source HQ can't read");
+  const set = await json<G>(send(`/api/goals/${made.goal.id}`, "PUT", { benchmarkChecks: { [nw!.id]: { kind: "kubera_networth", op: ">=", value: 100000 }, [rh!.id]: { kind: "kubera_item", name: "Robinhood 1888", op: ">=", value: 90000 } } }));
+  const after = (id: string) => set.goal.benchmarks.find((b) => b.id === id)!;
+  assert.equal(after(nw!.id).done, false);
+  assert.equal(after(nw!.id).auto?.met, false, "read the moment the check is set");
+  assert.match(after(nw!.id).auto!.figure!, /^\$57,683, read /);
+  assert.equal(after(rh!.id).done, true);
+  assert.equal(set.goal.pct, 50);
+  // Phil unticks the one HQ ticked: it pauses; Check now leaves it alone.
+  const hand = await json<G>(send(`/api/goals/${made.goal.id}`, "PUT", { benchmarksDone: { undone: [rh!.id] } }));
+  assert.equal(hand.goal.benchmarks.find((b) => b.id === rh!.id)!.paused, true);
+  const again = await json<{ summary: string; goals: G["goal"][] }>(send("/api/goals/check", "POST"));
+  assert.match(again.summary, /goal checks: \d+ benchmarks? read/);
+  assert.equal(again.goals.find((g) => g.id === made.goal.id)!.benchmarks.find((b) => b.id === rh!.id)!.done, false, "paused: Phil's word stands");
+  await send(`/api/goals/${made.goal.id}`, "DELETE");
+});
+
 test("Done for you over the API: the list, Undo, and Phil's switch", async () => {
   const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
   const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;

@@ -27,6 +27,29 @@ test("goals Phil states go in as one card with their benchmarks, no relay throug
   assert.match(CHARTERS.david!.owns.join(" "), /Goals Phil states himself.*never a hand-off to Adam first/);
 });
 
+test("a check on a goals.set benchmark is kept and run, as on goals.benchmarks (David's net worth card, Nov 24)", async () => {
+  const store = memoryStore(); await store.init();
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("m")], grok: [mockProvider("m")] } }) });
+  await store.settings.set("kubera.status", { ok: true, at: new Date().toISOString() });
+  await store.settings.set("kubera.history", [{ day: new Date().toISOString().slice(0, 10), netWorth: 57_683, assets: 57_683, debts: 0, items: {} }]);
+  const card = await jarvis.requestApproval({ agentId: "david", kind: "record", title: "Set your goals", body: "x", payload: { action: "goals.set", add: [
+    { name: "Maintain $100k+ net worth", horizon: "mid", benchmarks: [
+      { text: "Net worth at or above $100k", weight: 40, check: { kind: "kubera_networth", op: ">=", value: 100000 } },
+      { text: "Net worth at or above $75k", weight: 15, check: { kind: "kubera_networth", op: ">=", value: 75000 } },
+      { text: "Monthly savings plan written down", weight: 15 },
+      { text: "Chase balance", weight: 30, check: { kind: "chase", op: ">=", value: 1 } },
+    ] },
+  ] } });
+  assert.match(card.effect ?? "", /with 4 benchmarks\. 2 benchmarks HQ ticks itself from live data/);
+  await jarvis.decide(card.id, "approved");
+  const g = (await jarvis.goals()).find((x) => x.name === "Maintain $100k+ net worth")!;
+  assert.deepEqual(g.benchmarks?.map((b) => !!b.check), [true, true, false, false], "the two Kubera checks are kept; the plain one and the unrunnable one carry none");
+  await jarvis.syncGoalChecks(g.id);
+  const after = (await jarvis.goals()).find((x) => x.id === g.id)!;
+  assert.equal(after.benchmarks?.[0]?.done ?? false, false, "$57,683 is under $100k");
+  assert.match(after.benchmarks?.[0]?.auto?.figure ?? "", /57,683/);
+});
+
 test("benchmarks on a new goal land on that goal, even when an older goal has the same name", async () => {
   const store = memoryStore(); await store.init();
   const jarvis = new Jarvis({ store });
