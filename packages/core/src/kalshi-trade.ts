@@ -40,6 +40,8 @@ const TIMEOUT_MS = 20_000;
 
 /** The request's outcome isn't known: no answer in time, or Kalshi's own error. An order sent this way may have gone out. */
 class Unsure extends Error {}
+/** Kalshi said "too many requests"; `waitMs` is how long it asked HQ to wait, when it said. */
+class RateLimited extends Error { constructor(readonly waitMs?: number) { super("Kalshi's rate limit is hit; try again in a moment"); } }
 
 export interface KalshiLimits {
   /** Cat trades on her own inside the caps below. */
@@ -125,7 +127,7 @@ export class KalshiTrader {
   private ok?: { at: number; v: { trading: boolean; problem?: string; balance?: number; portfolio?: number } };
   /** Orders just sent: Kalshi's lists can lag a write by a moment, so the open cap counts these itself for a while. */
   private recent: { at: number; usd: number }[] = [];
-  constructor(private store: Store, private opts: { keyId: string; key: KeyObject; base?: string; fetch?: typeof fetch; now?: () => number; retryMs?: number }) {}
+  constructor(private store: Store, private opts: { keyId: string; key: KeyObject; base?: string; fetch?: typeof fetch; now?: () => number; retryMs?: number; /** The beat between requests (tests set 0). */ gapMs?: number }) {}
   private now() { return (this.opts.now ?? Date.now)(); }
 
   /** From the environment: the key id and the .pem. Nothing set, or a file that isn't a key, and trading stays off. */
@@ -149,7 +151,39 @@ export class KalshiTrader {
       : cryptoSign("sha256", msg, { key: this.opts.key, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: constants.RSA_PSS_SALTLEN_DIGEST });
     return { "KALSHI-ACCESS-KEY": this.opts.keyId, "KALSHI-ACCESS-TIMESTAMP": ts, "KALSHI-ACCESS-SIGNATURE": sig.toString("base64") };
   }
+  /**
+   * One request to Kalshi at a time, a beat apart. The first real run (Nov 27 2026) had an agent's tools read the
+   * balance, positions and orders side by side, and Kalshi answered "too many requests" to one of them, which read
+   * as "trading is off". Nothing here is urgent enough to need two requests in the air at once.
+   */
+  private gate: Promise<unknown> = Promise.resolve();
+  private lastCall = 0;
+  private pause(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
+  private paced<T>(fn: () => Promise<T>): Promise<T> {
+    const gap = this.opts.gapMs ?? 150;
+    const run = this.gate.catch(() => undefined).then(async () => {
+      const wait = this.lastCall + gap - Date.now();
+      if (wait > 0) await this.pause(wait);
+      try { return await fn(); } finally { this.lastCall = Date.now(); }
+    });
+    this.gate = run;
+    return run;
+  }
+  /**
+   * A read that Kalshi turns away for coming too fast waits as long as Kalshi says (a second or two, five at most)
+   * and asks again, three tries in all. An order or a cancel is never sent twice from here: a refusal goes back to
+   * the caller, which knows what is safe.
+   */
   private async call<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
+    for (let i = 0; ; i++) {
+      try { return await this.paced(() => this.once<T>(method, path, body)); }
+      catch (e) {
+        if (!(e instanceof RateLimited) || method !== "GET" || i >= 2) throw e;
+        await this.pause(Math.min(e.waitMs ?? (this.opts.retryMs ?? 1000) * (i + 1), 5000));
+      }
+    }
+  }
+  private async once<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
     const url = new URL(`${this.opts.base ?? BASE}${path}`);
     // Signed over the path from the API's root, without the query. A request that hangs is given up on, so one stuck
     // call can't hold every order behind it.
@@ -163,7 +197,7 @@ export class KalshiTrader {
     const scope = /insufficient_scope:_?([a-z_:]+?)_required/.exec(String(e.code ?? ""));
     if (res.status === 403 && scope) throw new Error(`Kalshi's key lacks the "${scope[1]}" permission; make a key with read and trade access`);
     if (res.status === 401) throw new Error(`Kalshi refused the key (${said || "401"}); check KALSHI_API_KEY_ID and the .pem, and the server's clock`);
-    if (res.status === 429) throw new Error("Kalshi's rate limit is hit; try again in a moment");
+    if (res.status === 429) { const s = Number(res.headers.get("retry-after")); throw new RateLimited(Number.isFinite(s) && s > 0 ? s * 1000 : undefined); }
     if (res.status === 408 || res.status >= 500) throw new Unsure(`Kalshi answered ${res.status}${said ? `: ${said}` : ""}`);
     throw new Error(`Kalshi answered ${res.status}${said ? `: ${said}` : ""}`);
   }
@@ -432,6 +466,8 @@ export class KalshiTrader {
         schema: {},
         handler: async () => {
           const s = await this.status();
+          // A passing problem is said as one: "trading is off" sent Cat and Phil looking for a fault that wasn't there.
+          if (!s.trading && s.transient) return `Kalshi couldn't be checked just now (${s.problem}). That is a passing problem, not trading being off: the key and Phil's parameters are as they were. Call kalshi_trading again in a minute before filing anything.`;
           if (!s.trading) return `Kalshi trading is off: ${s.problem}.`;
           const l = s.limits;
           const spent = await this.store.settings.get<{ day: string; usd: number }>(SPENT_KEY, { day: day(), usd: 0 });

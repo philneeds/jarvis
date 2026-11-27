@@ -33,7 +33,7 @@ function setup(opts: { yesBid?: string; yesAsk?: string; status?: string; positi
 async function rig(opts: Parameters<typeof setup>[0] = {}) {
   const s = setup(opts);
   const store = memoryStore(); await store.init();
-  const trader = new KalshiTrader(store, { keyId: "key-1", key: privateKey, fetch: s.f, retryMs: 1 });
+  const trader = new KalshiTrader(store, { keyId: "key-1", key: privateKey, fetch: s.f, retryMs: 1, gapMs: 0 });
   const jarvis = new Jarvis({ store });
   jarvis.addConnector(trader, KalshiTrader.promptHint());
   const card = (payload: Record<string, unknown>, agentId = "cat") => jarvis.requestApproval({ agentId, kind: "money", title: "Buy 10 YES FED-26DEC-CUT", body: "thesis", payload });
@@ -219,7 +219,8 @@ test("review: a nearly worthless position still closes (never at 0 or 1); a frac
 });
 
 test("review: one rate-limited balance call doesn't switch trading off; closing on her own is only for positions HQ opened", async () => {
-  const s = await rig({ position: "10.00", balanceFails: { n: 1 }, fill: sold });
+  // Kalshi turns the balance read away three times running (more than HQ's own retries cover).
+  const s = await rig({ position: "10.00", balanceFails: { n: 3 }, fill: sold });
   assert.equal((await s.trader.status()).trading, false, "this call hit the limit");
   const c = await s.card({ action: "kalshi.close", ticker: "FED-26DEC-CUT" });
   assert.match((await s.jarvis.decide(c.id, "approved"))?.note ?? "", /Kalshi: sold 10 YES/, "and the close right after still went through");
@@ -253,4 +254,34 @@ test("review: two orders on one card get different ids; a cancelled order gives 
   assert.equal((await s.store.settings.get<{ usd: number }>("kalshi.spent", { usd: 0 })).usd, 4.2, "the 50¢ order's $5.20 came back");
   await assert.rejects(s.trader.setLimits({ maxOrderUsd: 0.5 }), /must be at least \$1/);
   assert.deepEqual(await s.trader.setLimits({ maxOrderUsd: " " as unknown as number }), { auto: false, maxOrderUsd: undefined, maxDayUsd: undefined, maxOpenUsd: undefined });
+});
+
+test("first real run, Nov 27: requests go to Kalshi one at a time, a rate-limited read asks again by itself, and a passing problem isn't called \"trading is off\"", async () => {
+  // Tools read the balance, positions and orders side by side: at Kalshi they arrive one after another.
+  const s = await rig({ position: "10.00" });
+  let inFlight = 0, most = 0;
+  const slow = (async (url: string | URL | Request, init?: RequestInit) => { inFlight++; most = Math.max(most, inFlight); await new Promise((r) => setTimeout(r, 3)); try { return await s.f(url, init); } finally { inFlight--; } }) as typeof fetch;
+  const paced = new KalshiTrader(s.store, { keyId: "key-1", key: privateKey, fetch: slow, retryMs: 1, gapMs: 0 });
+  const tool = (name: string) => paced.tools().find((t) => t.name === name)!.handler({}, { store: s.store, agentId: "cat" });
+  const [trading, account] = await Promise.all([tool("kalshi_trading"), tool("kalshi_account")]);
+  assert.equal(most, 1, "never two requests in the air");
+  assert.match(trading, /^Kalshi trading is on: \$500 cash/);
+  assert.match(account, /\$500/);
+
+  // Turned away once for coming too fast: the read waits and asks again, and nobody upstream hears about it.
+  const once = await rig({ balanceFails: { n: 1 } });
+  assert.equal((await once.trader.status(true)).trading, true);
+  assert.equal(once.calls.filter((c) => c.path === "/portfolio/balance").length, 2);
+
+  // Turned away every time: said as a passing problem, with the key and the caps as they were.
+  const busy = await rig({ balanceFails: { n: 99 } });
+  const said = await busy.trader.tools().find((t) => t.name === "kalshi_trading")!.handler({}, { store: busy.store, agentId: "cat" });
+  assert.match(said, /^Kalshi couldn't be checked just now \(Kalshi's rate limit is hit; try again in a moment\)\. That is a passing problem, not trading being off/);
+  assert.equal(busy.calls.filter((c) => c.path === "/portfolio/balance").length, 3, "three tries, then it says so");
+  // An order is never sent twice from here: one refusal goes straight back.
+  let posts = 0;
+  const o = await rig({ postFails: () => { posts++; return Response.json({ error: { code: "too_many_requests" } }, { status: 429 }); } });
+  const card = await o.card({ action: "kalshi.order", ticker: "FED-26DEC-CUT", side: "yes", count: 10, price: 0.5 });
+  await o.jarvis.decide(card.id, "approved");
+  assert.equal(posts, 1);
 });
