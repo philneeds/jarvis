@@ -402,11 +402,16 @@ export class GoogleConnector {
       const from = String(raw).replace(/^.*<([^>]+)>.*$/, "$1").trim().toLowerCase();
       if (!from || seen.has(from)) continue;
       seen.add(from);
+      // One plain address, or nothing: it goes into a Gmail search, where "x OR in:anywhere" would pick someone else's mail.
+      if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(from)) { out.push({ from: from.slice(0, 80), result: "failed", detail: "not an email address; nothing was done" }); continue; }
       try {
         const [id] = await this.listMessageIds(`from:${from}`, 1, account);
         if (!id) { out.push({ from, result: "no-mail", detail: "no mail from this address" }); continue; }
-        const j = await this.api<{ payload?: GmailPart }>(account, `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=List-Unsubscribe&metadataHeaders=List-Unsubscribe-Post`);
+        const j = await this.api<{ payload?: GmailPart }>(account, `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=List-Unsubscribe&metadataHeaders=List-Unsubscribe-Post&metadataHeaders=Authentication-Results`);
         const h = (name: string) => j.payload?.headers?.find((x) => x.name.toLowerCase() === name.toLowerCase())?.value;
+        // The card named the sender; the newest mail "from" them decides what happens. Anyone can write that From
+        // line, so the mail must have passed Gmail's own check that it came from that domain (DMARC), or HQ leaves it.
+        if (!cameFrom(from, (j.payload?.headers ?? []).filter((x) => x.name.toLowerCase() === "authentication-results").map((x) => x.value))) { out.push({ from, result: "failed", detail: "its newest mail didn't pass Gmail's check that it really came from that sender, so nothing was sent; unsubscribe from inside one of its emails" }); continue; }
         const u = parseListUnsubscribe(h("List-Unsubscribe"), h("List-Unsubscribe-Post"));
         if (u.oneClick) {
           // The link is a stranger's: it must be a public https address (never this server, the local network or a
@@ -759,7 +764,7 @@ export class GoogleConnector {
       "gmail.archive": (p) => `Archives ${scope(p)} in ${acct(p)}: they leave the inbox but stay in All Mail and search. Nothing is deleted.`,
       "gmail.label": (p) => `Adds the label "${String(p.label ?? "")}" to ${scope(p)} in ${acct(p)}. Nothing moves or is deleted.`,
       "gmail.trash": (p) => `Moves ${scope(p)} in ${acct(p)} to Trash. Gmail empties Trash after 30 days; until then you can restore them.`,
-      "gmail.unsubscribe": (p) => { const s = Array.isArray(p.senders) ? p.senders.map(String) : []; return `Unsubscribes ${acct(p)} from ${s.length} sender(s)${s.length ? ` (${s.slice(0, 8).join(", ")}${s.length > 8 ? ", …" : ""})` : ""} the way their own mail offers: a one-click request or an unsubscribe email, nothing a person has to click through. A sender that only offers a web page is left alone and you get its link. No mail is moved or deleted, and this can't be undone from HQ.`; },
+      "gmail.unsubscribe": (p) => { const s = Array.isArray(p.senders) ? p.senders.map(String) : []; return `Unsubscribes ${acct(p)} from ${s.length} sender(s)${s.length ? ` (${s.slice(0, 50).join(", ")}${s.length > 50 ? `; only these first 50 of ${s.length} are done` : ""})` : ""} the way their own mail offers: a one-click request or an unsubscribe email, nothing a person has to click through. A sender that only offers a web page is left alone and you get its link. No mail is moved or deleted, and this can't be undone from HQ.`; },
       "calendar.create": (p) => `Adds "${String(p.title ?? "")}" to the calendar on ${acct(p)} from ${String(p.start ?? "?")} to ${String(p.end ?? "?")}${p.recurrence ? `, repeating ${String(Array.isArray(p.recurrence) ? p.recurrence.join("; ") : p.recurrence).replace(/^RRULE:/i, "")}` : ""}${Array.isArray(p.attendees) && p.attendees.length ? ` and invites ${p.attendees.join(", ")}` : ""}.`,
       "calendar.update": (p) => `Changes the event "${String(p.title ?? p.id ?? "")}" on ${acct(p)}${p.start ? ` to ${String(p.start)}${p.end ? ` – ${String(p.end)}` : ""}` : ""}.${Array.isArray(p.guests) && p.guests.length ? ` It also changes for ${p.guests.join(", ")}.` : ""}`,
       "calendar.delete": (p) => `Removes the event "${String(p.title ?? p.id ?? "")}" from the calendar on ${acct(p)}.${Array.isArray(p.guests) && p.guests.length ? ` It also disappears for ${p.guests.join(", ")}.` : ""}`,
@@ -818,7 +823,9 @@ export function parseListUnsubscribe(header?: string, post?: string): ListUnsubs
   else if (https) out.link = https;
   if (mail) {
     const m = /^mailto:([^?\s]+)(?:\?(.*))?$/i.exec(mail);
-    const to = m?.[1] ? decodeURIComponent(m[1]) : "";
+    // A broken percent-escape is a stranger's typo (or worse), not a reason to fail the whole read.
+    let to = "";
+    try { to = m?.[1] ? decodeURIComponent(m[1]) : ""; } catch { to = ""; }
     if (/^[^\s@<>,;:"']+@[^\s@<>,;:"']+\.[^\s@<>,;:"']+$/.test(to)) {
       const subject = m?.[2] ? new URLSearchParams(m[2]).get("subject") ?? undefined : undefined;
       out.mailto = { to, subject: unsubscribeSubject(subject) };
@@ -826,6 +833,20 @@ export function parseListUnsubscribe(header?: string, post?: string): ListUnsubs
   }
   out.way = out.oneClick ? "one-click" : out.mailto ? "mailto" : out.link ? "link" : undefined;
   return out;
+}
+
+/**
+ * Did Gmail verify that a message came from this address's domain? True when one of its Authentication-Results
+ * headers says dmarc=pass for the address's domain or a parent of it. Without that, the From line proves nothing.
+ */
+export function cameFrom(address: string, authResults: string[]): boolean {
+  const domain = address.split("@")[1]?.toLowerCase();
+  if (!domain) return false;
+  return authResults.some((v) => {
+    if (!/\bdmarc=pass\b/i.test(v)) return false;
+    const d = /\bheader\.from=([a-z0-9.-]+)/i.exec(v)?.[1]?.toLowerCase();
+    return !!d && (d === domain || domain.endsWith(`.${d}`));
+  });
 }
 
 /**

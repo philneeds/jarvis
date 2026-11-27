@@ -251,7 +251,7 @@ test("List-Unsubscribe headers: one-click needs the Post header, mailto is an ad
 test("unsubscribe sweep: gmail_senders says how each sender unsubscribes; gmail.unsubscribe always waits, then does one-click and mailto, and hands Phil the page-only links", async () => {
   const store = memoryStore(); await store.init();
   const { f, calls } = fakeGoogle();
-  const headers = (from: string, unsub: string, post?: string) => ({ id: "x", labelIds: ["UNREAD"], payload: { headers: [{ name: "From", value: `Shop <${from}>` }, { name: "Subject", value: "Deals" }, { name: "List-Unsubscribe", value: unsub }, ...(post ? [{ name: "List-Unsubscribe-Post", value: post }] : [])] } });
+  const headers = (from: string, unsub: string, post?: string) => ({ id: "x", labelIds: ["UNREAD"], payload: { headers: [{ name: "From", value: `Shop <${from}>` }, { name: "Subject", value: "Deals" }, { name: "Authentication-Results", value: `mx.google.com; dkim=pass header.i=@${from.split("@")[1]}; dmarc=pass (p=REJECT) header.from=${from.split("@")[1]}` }, { name: "List-Unsubscribe", value: unsub }, ...(post ? [{ name: "List-Unsubscribe-Post", value: post }] : [])] } });
   const sweep = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
     const json = (o: unknown) => new Response(JSON.stringify(o), { headers: { "content-type": "application/json" } });
@@ -332,13 +332,13 @@ test("an unsubscribe header is a stranger's: it can't write mail in Phil's name,
   const store = memoryStore(); await store.init();
   const { f } = fakeGoogle();
   const asked: string[] = [];
-  const hdr = (unsub: string) => ({ id: "x", payload: { headers: [{ name: "List-Unsubscribe", value: unsub }, { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" }] } });
+  const hdr = (unsub: string, domain = new URL(unsub.slice(1, -1)).hostname, auth = "pass") => ({ id: "x", payload: { headers: [{ name: "Authentication-Results", value: `mx.google.com; dmarc=${auth} header.from=${domain}` }, { name: "List-Unsubscribe", value: unsub }, { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" }] } });
   const net = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
     const json = (o: unknown) => new Response(JSON.stringify(o), { headers: { "content-type": "application/json" } });
     if (u.includes("/messages?q=from%3Ain%40side.example")) return json({ messages: [{ id: "i1" }] });
     if (u.includes("/messages?q=from%3Ahop%40redir.example")) return json({ messages: [{ id: "r1" }] });
-    if (u.includes("/messages/i1?")) return json(hdr("<https://inside.example/unsub>"));
+    if (u.includes("/messages/i1?")) return json(hdr("<https://inside.example/unsub>", "side.example"));
     if (u.includes("/messages/r1?")) return json(hdr("<https://redir.example/unsub>"));
     if (u.startsWith("https://inside.example") || u.startsWith("https://redir.example")) { asked.push(`${u} ${init?.redirect}`); return new Response(null, { status: 302, headers: { location: "http://169.254.169.254/" } }); }
     return f(url, init);
@@ -349,6 +349,34 @@ test("an unsubscribe header is a stranger's: it can't write mail in Phil's name,
   assert.deepEqual(out[0], { from: "in@side.example", result: "failed", detail: "its one-click link was refused (it points at a private address); nothing was sent" });
   assert.deepEqual(out[1], { from: "hop@redir.example", result: "link", detail: "https://redir.example/unsub" }, "a redirect is handed to Phil as a link, not followed");
   assert.deepEqual(asked, ["https://redir.example/unsub manual"]);
+
+  // The From line alone proves nothing (the second review, Nov 27): mail that didn't pass Gmail's sender check for
+  // that domain decides nothing, and an entry that isn't one plain address never reaches the Gmail search.
+  const { cameFrom } = await import("../src/index.js");
+  assert.equal(cameFrom("deals@store.example", ["mx.google.com; dkim=pass; dmarc=pass (p=REJECT) header.from=store.example"]), true);
+  assert.equal(cameFrom("deals@mail.store.example", ["mx.google.com; dmarc=pass header.from=store.example"]), true, "a parent domain's policy covers it");
+  assert.equal(cameFrom("deals@store.example", ["mx.google.com; dmarc=fail header.from=store.example"]), false);
+  assert.equal(cameFrom("deals@store.example", ["mx.google.com; dmarc=pass header.from=evil.example"]), false, "passing for someone else's domain isn't passing for this one");
+  assert.equal(cameFrom("deals@store.example", ["mx.google.com; dmarc=pass header.from=tore.example"]), false);
+  assert.equal(cameFrom("deals@store.example", []), false);
+  const searched: string[] = [];
+  const spoof = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url);
+    const json = (o: unknown) => new Response(JSON.stringify(o), { headers: { "content-type": "application/json" } });
+    if (u.includes("/messages?q=")) { searched.push(decodeURIComponent(u.split("q=")[1]!.split("&")[0]!)); return json({ messages: [{ id: "s1" }] }); }
+    if (u.includes("/messages/s1?")) return json(hdr("<https://redir.example/unsub>", "legit.example", "fail"));
+    if (u.startsWith("https://redir.example")) { asked.push("spoofed mail acted on"); return new Response("ok"); }
+    return f(url, init);
+  }) as typeof fetch;
+  const g2 = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: spoof, resolveHost: async () => ["93.184.216.34"] });
+  const out2 = await g2.unsubscribe(["news@legit.example", "x OR in:anywhere", "a@b.example c@d.example"]);
+  assert.equal(out2[0]!.result, "failed");
+  assert.match(out2[0]!.detail!, /didn't pass Gmail's check that it really came from that sender, so nothing was sent/);
+  assert.deepEqual(out2.slice(1).map((r) => r.detail), ["not an email address; nothing was done", "not an email address; nothing was done"]);
+  assert.deepEqual(searched, ["from:news@legit.example"], "only the one real address was ever searched for");
+  assert.ok(!asked.includes("spoofed mail acted on"));
+  // A broken percent-escape in a stranger's header doesn't break reading the inbox.
+  assert.deepEqual(parseListUnsubscribe("<mailto:%E0@x.example>"), { way: undefined });
 });
 
 test("Oscar's Sunday 4:00 routine carries Phil's unsubscribe sweep", async () => {

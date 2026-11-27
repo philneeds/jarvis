@@ -67,10 +67,16 @@ test("a change goes workshop → commit → approval → push to the live branch
   const s = await w.status();
   assert.deepEqual(s.files, ["README.md"]); assert.match(s.diff, /\+louder clap/);
   // The submit tool: checks, commit, and the approval block to paste.
-  const tools = workshopTools(w, { logs: async () => "line1\nkey=abcdefghijkl\n", query: async () => ({ rows: [{ id: "1", text: "hi" }] }) });
+  const reviewed: { sha: string; files: string[]; diff: string; whole: boolean }[] = [];
+  const tools = workshopTools(w, { logs: async () => "line1\nkey=abcdefghijkl\n", query: async () => ({ rows: [{ id: "1", text: "hi" }] }), review: async (x) => { reviewed.push(x); return { sha: x.sha, at: "2026-11-07T12:00:00Z", ran: true, whole: x.whole, findings: [] }; } });
   const submit = tools.find((t) => t.name === "workshop_submit")!;
   const out = String(await submit.handler({ title: "Make the clap louder", why: "Phil asked; the gain goes from 1 to 2." }, { store: undefined as never, agentId: "einstein", workshopClaim: st.claim }));
   const block = JSON.parse(out.match(/```approval\n([\s\S]*?)\n```/)![1]!) as { kind: string; title: string; payload: { action: string; sha: string; files: string[]; carries: string[] } };
+  // Before the card exists, a reviewer that didn't write the change is handed the whole diff of what would ship.
+  assert.equal(reviewed.length, 1);
+  assert.match(reviewed[0]!.sha, /^[0-9a-f]{40}$/); assert.deepEqual(reviewed[0]!.files, ["README.md"]); assert.match(reviewed[0]!.diff, /^\+louder clap$/m); assert.equal(reviewed[0]!.whole, true);
+  assert.match((block as unknown as { body: string }).body, /Independent review: a second model read the diff and found nothing to flag\. That is a second opinion, not proof\./);
+  assert.doesNotMatch(out, /independent reviewer read your diff/);
   assert.equal(block.kind, "config"); assert.equal(block.title, "Ship: Make the clap louder"); assert.equal(block.payload.action, "code.ship"); assert.deepEqual(block.payload.files, ["README.md"]);
   assert.deepEqual(block.payload.carries, [], "nothing rides under a first commit");
   assert.equal(git(dir, "rev-parse", "HEAD"), block.payload.sha);

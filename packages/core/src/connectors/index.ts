@@ -1,4 +1,4 @@
-export { GoogleConnector, GOOGLE_SCOPES, PERSONAL_CALENDARS, BUSINESS_CALENDARS, bodyText, rawMail, parseListUnsubscribe, unsubscribeSubject, notPublic, isPrivateAddress, type GoogleOptions, type UnsubscribeWay, type ListUnsubscribe } from "./google.js";
+export { GoogleConnector, GOOGLE_SCOPES, PERSONAL_CALENDARS, BUSINESS_CALENDARS, bodyText, rawMail, parseListUnsubscribe, unsubscribeSubject, notPublic, isPrivateAddress, cameFrom, type GoogleOptions, type UnsubscribeWay, type ListUnsubscribe } from "./google.js";
 export { XConnector, X_SCOPES, xProblem, type XOptions, type XAccount } from "./x.js";
 export { KuberaConnector, type KuberaOptions, type KuberaPortfolio, type KuberaItem } from "./kubera.js";
 export { DiscordConnector, parseChannels, type DiscordOptions } from "./discord.js";

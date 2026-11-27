@@ -79,7 +79,16 @@ test("auto-ship is off until Phil turns it on; then only guardrail-free commits 
   const w = new Workshop({ dir, appDir: app, token: "t0ken", deployCmd: `${process.execPath} -e process.exit(0)`, outcomeFile: path.join(root, "out.json"), waitForRunsMs: 0, verify: async () => ({ ok: true, report: "" }) });
   const { store, jarvis } = make(w);
   const first = await w.prepare("change");
-  const commit = async (file: string, msg: string) => { await fs.mkdir(path.dirname(path.join(dir, file)), { recursive: true }); await fs.writeFile(path.join(dir, file), msg); return (await w.commit(msg))!; };
+  // Each commit gets the independent review a real submit records (shipreview.ts); `review` says how it came out.
+  const { saveShipReview } = await import("../src/index.js");
+  type Rv = "pass" | "none" | "concern" | "minor" | "failed" | "cut";
+  const commit = async (file: string, msg: string, review: Rv = "pass") => {
+    await fs.mkdir(path.dirname(path.join(dir, file)), { recursive: true }); await fs.writeFile(path.join(dir, file), msg);
+    const sha = (await w.commit(msg))!;
+    const full = git(dir, "rev-parse", sha);
+    if (review !== "none") await saveShipReview(store, { sha: full, at: new Date().toISOString(), ran: review !== "failed", whole: review !== "cut", findings: review === "concern" ? [{ severity: "high", file, what: "a stranger's text reaches a send" }] : review === "minor" ? [{ severity: "low", what: "a comment is out of date" }] : [], ...(review === "failed" ? { note: "Claude usage limit reached" } : {}) });
+    return sha;
+  };
   const ship = (sha: string, title: string) => jarvis.requestApproval({ agentId: "einstein", kind: "config", title: `Ship: ${title}`, body: "", payload: { action: "code.ship", sha, title, guardrails: [] }, runId: `r-${title}` });
   const off = await ship(await commit("apps/hq/app/about/page.tsx", "copy tweak"), "copy tweak");
   assert.equal(off.status, "pending", "off by default");
@@ -103,8 +112,19 @@ test("auto-ship is off until Phil turns it on; then only guardrail-free commits 
   // A fresh run starts from the deploy branch again; clean single commits go out, three a day.
   w.release(first.claim);
   await w.prepare("next change");
+  // Green tests aren't enough (Nov 27 2026): with no second opinion on record, one that couldn't run, one that didn't
+  // read all of it, or one that raised something serious, the change waits for Phil and the card says why.
+  // (Each is tried on its own: a change that waits stays under the next one, and that alone would hold the next.)
+  const held: Record<string, RegExp> = { none: /no independent review of it is on record/, failed: /the independent review couldn't run \(Claude usage limit reached\)/, cut: /too large for the independent review to read all of it/, concern: /the independent review raised 1 concern/ };
+  for (const [kind, why] of Object.entries(held)) {
+    const card = await ship(await commit(`apps/hq/app/r-${kind}.tsx`, `r ${kind}`, kind as Rv), `r ${kind}`);
+    assert.equal(card.status, "pending", kind);
+    assert.match((await store.approvals.get(card.id))?.note ?? "", why);
+    git(dir, "reset", "-q", "--hard", "HEAD~1");
+  }
   const ok: string[] = [];
-  for (const t of ["a", "b", "c", "d"]) ok.push((await ship(await commit(`apps/hq/app/x-${t}.tsx`, t), t)).status);
+  // A minor note doesn't hold a change back; it's on the card for Phil to read.
+  for (const t of ["a", "b", "c", "d"]) ok.push((await ship(await commit(`apps/hq/app/x-${t}.tsx`, t, t === "a" ? "minor" : "pass"), t)).status);
   assert.deepEqual(ok, ["approved", "approved", "approved", "pending"], "three a day, then Phil decides");
 });
 
@@ -130,4 +150,75 @@ test("an update that is waiting for an agent to finish is reported as waiting, w
   assert.match(await jarvis.liveWorkText(), /nothing is running, so HQ is rebuilding and restarting now \(two or three minutes\)\.$/m);
   await store.settings.set("workshop.ship", { status: "shipping", title: "Update HQ", at: new Date(Date.now() - 80 * 60_000).toISOString(), sha: "abc1234" });
   assert.match(await jarvis.liveWorkText(), /well past the longest it should take: something is wrong/);
+});
+
+test("every change Einstein submits is read by a second model first: its verdict is on the card, kept by HQ, and decides whether auto-ship may run", async () => {
+  const { parseReview, reviewText, reviewBlocks, shipReview, REVIEW_SYSTEM, AUTO_SHIP_KEY: KEY } = await import("../src/index.js");
+  // The reviewer's answer is read strictly: not JSON is no review; a severity it didn't name clearly counts as serious.
+  assert.equal(parseReview("Looks fine to me!"), undefined);
+  assert.deepEqual(parseReview('Here you go: {"summary":"ok","findings":[{"severity":"LOW","what":"typo"},{"severity":"critical","file":"a.ts","what":"x  y"},{"what":""}]}')!.findings, [{ severity: "low", what: "typo" }, { severity: "medium", file: "a.ts", what: "x y" }]);
+  assert.match(reviewBlocks(undefined)!, /no independent review/);
+  assert.equal(reviewBlocks({ sha: "a".repeat(40), at: "", ran: true, whole: true, findings: [{ severity: "low", what: "n" }] }), undefined);
+  assert.match(reviewText({ sha: "a".repeat(40), at: "", ran: false, whole: true, findings: [], note: "kill switch is on" }), /it couldn't run \(kill switch is on\)\. Nobody but Einstein has read this change\./);
+
+  const { root, app } = await repo();
+  const dir = path.join(root, "workshop");
+  const w = new Workshop({ dir, appDir: app, token: "t0ken", deployCmd: `${process.execPath} -e process.exit(0)`, outcomeFile: path.join(root, "out.json"), waitForRunsMs: 0, verify: async () => ({ ok: true, report: "" }) });
+  // A model that answers the reviewer's question as told, and records what the reviewer was shown.
+  const base = mockProvider("mock-claude");
+  const shown: { system: string; prompt: string; tools: number }[] = [];
+  let answer = '{"summary":"Sends mail built from a stranger\'s header.","findings":[{"severity":"high","file":"apps/hq/lib/mailer.ts","what":"The subject comes from an email header and is written into the outgoing mail without removing line breaks, so a sender can add recipients."},{"severity":"low","file":"README.md","what":"The note is out of date."}]}';
+  const provider = { ...base, async run(req: Parameters<typeof base.run>[0]) {
+    if (req.system === REVIEW_SYSTEM) { shown.push({ system: req.system, prompt: req.prompt, tools: (req.tools ?? []).length }); return { ...(await base.run(req)), text: answer }; }
+    return base.run(req);
+  } };
+  const { store, jarvis } = make(w, provider);
+  await store.settings.set(KEY, true);
+  const st = await w.prepare("mailer");
+  await fs.mkdir(path.join(dir, "apps/hq/lib"), { recursive: true });
+  await fs.writeFile(path.join(dir, "apps/hq/lib/mailer.ts"), "export const send = (h: string) => `Subject: ${h}`;\n");
+  const submit = jarvis.allTools().find((t) => t.name === "workshop_submit")!;
+  const out = String(await submit.handler({ title: "Add a mailer for unsubscribes", why: "Oscar needs to send the unsubscribe email." }, { store, agentId: "einstein", workshopClaim: st.claim }));
+  // The reviewer saw the diff and nothing else: no tools, and none of Einstein's conversation.
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0]!.tools, 0);
+  assert.match(shown[0]!.prompt, /Change: Add a mailer for unsubscribes[\s\S]*<diff>[\s\S]*\+export const send = \(h: string\)/);
+  const block = JSON.parse(out.match(/```approval\n([\s\S]*?)\n```/)![1]!) as { title: string; body: string; kind: string; payload: { action: string; sha: string } };
+  assert.equal(block.title, "Ship (review raised 1 concern): Add a mailer for unsubscribes");
+  assert.match(block.body, /Independent review RAISED 1 CONCERN \(and 1 minor\):\n- HIGH · apps\/hq\/lib\/mailer\.ts: The subject comes from an email header/);
+  assert.match(out, /The independent reviewer read your diff and raised the points below\.[\s\S]*if it is real, fix it in the workshop and call workshop_submit again/);
+  // HQ's own record, against the commit: the card's text is Einstein's to paste, this isn't.
+  const kept = await shipReview(store, block.payload.sha);
+  assert.equal(kept?.ran, true); assert.equal(kept?.findings.length, 2);
+  // The card: auto-ship is on and no guardrail file is touched, yet it waits; and the line HQ writes itself says why,
+  // even if Einstein had left the review out of the body.
+  const card = await jarvis.requestApproval({ agentId: "einstein", kind: "config", title: "Ship: Add a mailer", body: "All good, nothing to see.", payload: block.payload, runId: "r-mailer" });
+  assert.equal(card.status, "pending");
+  assert.match((await store.approvals.get(card.id))?.note ?? "", /Not auto-shipped: the independent review raised 1 concern/);
+  assert.match(card.effect ?? "", /Independent review RAISED 1 CONCERN \(and 1 minor\):$/);
+
+  // Einstein fixes it and submits again: the new commit is reviewed afresh, comes back clean, and goes out on its own.
+  answer = '{"summary":"Nothing to flag.","findings":[]}';
+  await fs.writeFile(path.join(dir, "apps/hq/lib/mailer.ts"), "export const send = (h: string) => `Subject: ${h.replace(/[\\r\\n]+/g, \" \")}`;\n");
+  const out2 = String(await submit.handler({ title: "Add a mailer for unsubscribes, one-line subject", why: "Fixes the reviewer's point." }, { store, agentId: "einstein", workshopClaim: st.claim }));
+  const block2 = JSON.parse(out2.match(/```approval\n([\s\S]*?)\n```/)![1]!) as { title: string; payload: { action: string; sha: string } };
+  assert.equal(shown.length, 2);
+  assert.equal(block2.title, "Ship: Add a mailer for unsubscribes, one-line subject");
+  // It still sits on the first commit, which Phil never shipped: that alone holds it, as before.
+  const card2 = await jarvis.requestApproval({ agentId: "einstein", kind: "config", title: block2.title, body: "", payload: block2.payload, runId: "r-mailer-2" });
+  assert.match((await store.approvals.get(card2.id))?.note ?? "", /Not auto-shipped: it sits on 1 earlier change/);
+  assert.match(card2.effect ?? "", /Independent review: a second model read the diff and found nothing to flag\./);
+
+  // A reviewer that can't be read is a review that didn't run: said on the card, and nothing ships on its own.
+  answer = "I think this is probably fine.";
+  w.release(st.claim);
+  const st3 = await w.prepare("docs");
+  await fs.writeFile(path.join(dir, "README.md"), "hq\ndocs\n");
+  const out3 = String(await submit.handler({ title: "Update the readme note", why: "The note was out of date." }, { store, agentId: "einstein", workshopClaim: st3.claim }));
+  const block3 = JSON.parse(out3.match(/```approval\n([\s\S]*?)\n```/)![1]!) as { title: string; body: string; payload: { action: string; sha: string } };
+  assert.equal(block3.title, "Ship (not reviewed): Update the readme note");
+  assert.match(block3.body, /Independent review: it couldn't run \(the reviewer's answer couldn't be read\)/);
+  const card3 = await jarvis.requestApproval({ agentId: "einstein", kind: "config", title: block3.title, body: block3.body, payload: block3.payload, runId: "r-docs" });
+  assert.equal(card3.status, "pending");
+  assert.match((await store.approvals.get(card3.id))?.note ?? "", /Not auto-shipped: the independent review couldn't run/);
 });

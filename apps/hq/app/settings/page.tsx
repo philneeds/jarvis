@@ -332,7 +332,7 @@ export default function SettingsPage() {
               <div className="flex flex-wrap items-center gap-3 pl-6">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={!!conn.workshop.autoShip} onChange={async (e) => { await post("/api/workshop/autoship", { on: e.target.checked }).catch(() => undefined); await load(); }} />
-                  <span>Auto-ship: Einstein&apos;s changes go out on their own once every check passes, unless they touch his guardrails (approvals, money, connectors, deploy). 3 a day at most; HQ still rolls back by itself if a change breaks it.</span>
+                  <span>Auto-ship: Einstein&apos;s changes go out on their own once every check passes and a second model that didn&apos;t write the change has read all of it and raised nothing serious, unless they touch his guardrails (approvals, money, connectors, deploy). 3 a day at most; HQ still rolls back by itself if a change breaks it.</span>
                 </label>
                 <button className="btn btn-sm ml-auto" onClick={async () => { const r = await post<{ result: string }>("/api/update/check", {}).catch((e) => ({ result: (e as Error).message })); setWsMsg(r.result.replace(/^update check: /, "")); }}>Check for update</button>
               </div>

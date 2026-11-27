@@ -24,6 +24,7 @@ import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { COINGLASS_TOOLS } from "../coinglass.js";
 import { connectionTools, watchConnections, type Probe } from "../connections.js";
+import { REVIEW_SYSTEM, SHIP_REVIEWS_KEY, parseReview, reviewBlocks, reviewPrompt, reviewText, shipReview, type ShipReview } from "../shipreview.js";
 import { PREDICTION_TOOLS } from "../predictions.js";
 import { LIGHTER_TOOLS } from "../lighter.js";
 import { GLASSES_HINT, GLASSES_TOOLS } from "../glasses.js";
@@ -517,7 +518,9 @@ export class Jarvis {
   /** Give Einstein a workshop: a copy of the code to change, with shipping through Phil's approval. */
   useWorkshop(w: Workshop, deps: WorkshopToolDeps = {}) {
     this.workshop = w;
-    this.workshopToolList = workshopTools(w, deps);
+    // Every submitted change is read by a model that didn't write it, unless the caller brings its own reviewer.
+    this.workshopToolList = workshopTools(w, { ...deps, review: deps.review ? async (x) => this.noteReview(await deps.review!(x)) : (x) => this.reviewShip(x) });
+    void this.store.settings.get<ShipReview[]>(SHIP_REVIEWS_KEY, []).then((all) => { for (const r of all) this.shipReviews.set(r.sha, r); }).catch(() => undefined);
     this.executors.set("code.ship", async (a) => {
       const p = (a.payload ?? {}) as { sha?: unknown; title?: unknown };
       if (typeof p.sha !== "string" || !/^[0-9a-f]{7,40}$/.test(p.sha)) throw new Error("code.ship needs the commit sha from workshop_submit");
@@ -528,7 +531,7 @@ export class Jarvis {
       return w.update(this.store, String(p.sha ?? ""), a.title, a.id);
     });
     this.describers.set("hq.update", (p) => `Deploys the newest code on HQ's branch (${Number(p.count ?? 0)} change${Number(p.count) === 1 ? "" : "s"}, up to ${String(p.sha ?? "").slice(0, 7)}): HQ waits for any agent mid-run, rebuilds and restarts (two or three minutes), and rolls back by itself if it doesn't come back up. Nothing else changes.`);
-    this.describers.set("code.ship", (p) => `Pushes Einstein's commit ${String(p.sha ?? "").slice(0, 7)} to the live branch and redeploys HQ (HQ restarts; two or three minutes). If HQ doesn't come back up, the deploy rolls back by itself and the commit is reverted.${Array.isArray(p.guardrails) && p.guardrails.length ? ` This one changes Einstein's own guardrails (${(p.guardrails as string[]).join(", ")}): read the diff first.` : ""}`);
+    this.describers.set("code.ship", (p) => `Pushes Einstein's commit ${String(p.sha ?? "").slice(0, 7)} to the live branch and redeploys HQ (HQ restarts; two or three minutes). If HQ doesn't come back up, the deploy rolls back by itself and the commit is reverted.${Array.isArray(p.guardrails) && p.guardrails.length ? ` This one changes Einstein's own guardrails (${(p.guardrails as string[]).join(", ")}): read the diff first.` : ""} ${reviewText(this.reviewOf(String(p.sha ?? ""))).split("\n")[0]}`);
   }
   /**
    * Is there code on GitHub HQ isn't running? Then one "Update HQ" card waits under Needs you (and on Telegram), listing
@@ -570,6 +573,9 @@ export class Jarvis {
     // The files of everything it would ship, not only its own: an earlier change underneath goes out with it.
     const rails = files.filter((f) => GUARDRAIL_FILES.test(f));
     if (rails.length) return `it touches guardrails (${rails.join(", ")})`;
+    // A second opinion on record, which ran, read all of it and raised nothing serious; else Phil decides.
+    const held = reviewBlocks(await shipReview(this.store, sha));
+    if (held) return held;
     if (carries.length) return `it sits on ${carries.length} earlier change${carries.length === 1 ? "" : "s"} you haven't shipped (${carries.map((t) => `"${t}"`).join(", ")}), and shipping it ships ${carries.length === 1 ? "that" : "those"} too`;
     const today = new Date().toISOString().slice(0, 10);
     const log = (await this.store.settings.get<string[]>(AUTO_SHIP_LOG_KEY, [])).filter((d) => d.startsWith(today));
@@ -577,6 +583,32 @@ export class Jarvis {
     if (log.length >= cap) return `${cap} changes already auto-shipped today`;
     await this.store.settings.set(AUTO_SHIP_LOG_KEY, [...log, new Date().toISOString()]);
     return undefined;
+  }
+
+  /** Reviews by commit, in memory as well as in the store: the card's "If you approve" line is written without waiting on the store. */
+  private shipReviews = new Map<string, ShipReview>();
+  private noteReview(r: ShipReview): ShipReview { this.shipReviews.set(r.sha, r); return r; }
+  private reviewOf(sha: string): ShipReview | undefined { return sha.length < 7 ? undefined : [...this.shipReviews.values()].find((r) => r.sha.startsWith(sha) || sha.startsWith(r.sha)); }
+  /**
+   * The independent review of one of Einstein's changes (shipreview.ts): one model run as Jarvis, no tools, nothing
+   * of Einstein's conversation, only the diff. Never throws: a reviewer that can't run or answers something
+   * unreadable is a review that didn't run, and the card says so.
+   */
+  async reviewShip(x: { sha: string; title: string; why: string; files: string[]; diff: string; whole: boolean }): Promise<ShipReview> {
+    const at = new Date().toISOString();
+    const not = (note: string): ShipReview => this.noteReview({ sha: x.sha, at, ran: false, whole: x.whole, findings: [], note });
+    const jarvis = getAgent("jarvis");
+    if (!jarvis) return not("no reviewer");
+    try {
+      const r = await within(this.router.run(jarvis, { system: REVIEW_SYSTEM, prompt: reviewPrompt(x), maxTurns: 1 }), Number(process.env.SHIP_REVIEW_TIMEOUT_MS ?? 300_000), () => undefined);
+      if (!r) return not("the reviewer didn't answer in time");
+      if (r.blocked) return not(r.blocked);
+      const parsed = parseReview(r.text);
+      if (!parsed) return not("the reviewer's answer couldn't be read");
+      const review = this.noteReview({ sha: x.sha, at, ran: true, whole: x.whole, findings: parsed.findings, note: parsed.summary });
+      await this.router.log("jarvis", "system", `Independent review of Einstein's "${x.title}" (${x.sha.slice(0, 7)}): ${parsed.findings.length ? `${parsed.findings.length} point(s), ${parsed.findings.filter((f) => f.severity !== "low").length} serious` : "nothing to flag"}`, r.runId, { findings: parsed.findings });
+      return review;
+    } catch (e) { return not((e as Error).message.slice(0, 200)); }
   }
 
   /** Jobs for the workshop that haven't started: held for an update, or queued behind the job in it (deployhold.ts). */

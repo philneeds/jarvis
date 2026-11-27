@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "./store/types.js";
+import { REVIEW_DIFF_MAX, saveShipReview, serious, reviewText, type ShipReview } from "./shipreview.js";
 
 /**
  * Einstein's workshop: a separate copy of HQ's code where he can read, edit and test. Nothing he does there touches the
@@ -268,6 +269,7 @@ export class Workshop {
    * its own files hid an earlier, unapproved change riding along (a guardrail edit under a harmless one). `carries`
    * names those earlier commits, newest first.
    */
+  async fullSha(sha: string): Promise<string> { return this.must(["rev-parse", sha]); }
   async describe(sha: string): Promise<{ title: string; files: string[]; stat: string; carries: string[] }> {
     const title = await this.must(["log", "-1", "--format=%s", sha]);
     const full = await this.must(["rev-parse", sha]);
@@ -290,6 +292,25 @@ export class Workshop {
     const files = (await this.must(["diff", "--name-only", from, sha])).split("\n").filter(Boolean);
     const carries = (await this.must(["log", "--format=%s", `${from}..${sha}`])).split("\n").filter(Boolean).slice(1);
     return { title, files, stat: await this.must(["diff", "--stat", from, sha]), carries };
+  }
+
+  /**
+   * The diff of everything approving this commit would ship (the same span describe() lists), for the independent
+   * review. The lockfile is left out (machine-written, huge); the text is cut at `max` characters and `whole` says so.
+   */
+  async diff(sha: string, max = REVIEW_DIFF_MAX): Promise<{ text: string; whole: boolean }> {
+    const full = await this.must(["rev-parse", sha]);
+    const { branch } = await this.target();
+    await this.git(["fetch", "-q", "origin", branch], this.opts.dir, this.auth());
+    let base = await this.git(["merge-base", full, `origin/${branch}`]);
+    if (base.code !== 0 || !base.out.trim()) {
+      const live = await this.git(["fetch", "-q", this.opts.appDir, "HEAD"]);
+      if (live.code === 0) base = await this.git(["merge-base", full, "FETCH_HEAD"]);
+    }
+    if (base.code !== 0 || !base.out.trim()) throw new Error(`can't find where ${sha.slice(0, 7)} meets ${branch}`);
+    const from = base.out.trim() !== full ? base.out.trim() : `${full}^`;
+    const text = await this.must(["diff", "--no-color", "-U6", from, full, "--", ".", ":(exclude)pnpm-lock.yaml", ":(exclude)*.lock"]);
+    return text.length > max ? { text: text.slice(0, max), whole: false } : { text, whole: true };
   }
 
   /**
@@ -479,10 +500,12 @@ export interface WorkshopToolDeps {
   query?: (sql: string) => Promise<{ rows: Record<string, unknown>[] }>;
   /** The server log, last n lines. */
   logs?: (lines: number) => Promise<string>;
+  /** The independent review of a submitted change (shipreview.ts): a model that didn't write it reads the diff. */
+  review?: (x: { sha: string; title: string; why: string; files: string[]; diff: string; whole: boolean }) => Promise<ShipReview>;
 }
 
 export const WORKSHOP_HINT = (dir: string, branch: string, base: string) => `You are working in your workshop: ${dir}, a copy of HQ's code on branch ${branch}, started fresh from ${base} (the live branch). Your Read, Edit, Write, Glob, Grep and Bash tools work only inside it; .env, keys and the live app are off limits and git push is refused. The layout: packages/core (the brain: agents, charters, scheduler, tools, connectors), apps/server (API, Telegram, scheduler host), apps/hq (the Next.js screens), deploy/ (server scripts), docs/. Tests: packages/core/tests and apps/server/tests (pnpm test in the package, or node --test --import tsx tests/<name>.test.ts for one file). Read before you change; keep changes small and in the codebase's style; add or adjust a test for behaviour you change.
-When the change is ready: call workshop_verify (build, typecheck, tests across packages; fix anything red), then workshop_submit with a title and why. It commits and returns the approval block to put in your reply, word for word, so Phil can ship it from Needs you. HQ then pushes it to the live branch, redeploys, and rolls back by itself if HQ doesn't come back. Never claim a change is live: it is live only after Phil approves and HQ reports the deploy. If a task needs a secret or a setting only Phil can add, say exactly what (name and where) and stop; never guess a key.`;
+When the change is ready: call workshop_verify (build, typecheck, tests across packages; fix anything red), then workshop_submit with a title and why. It commits, has a second model that didn't write the change read the whole diff for safety problems (a stranger's text reaching a send or a request, an action that should wait for Phil running on its own, a secret leaking, data lost), and returns the approval block to put in your reply, word for word, so Phil can ship it from Needs you. The reviewer's verdict is on the card and HQ keeps its own copy. If it raises a point that is real, fix it and submit again; passing tests are not an answer to it. HQ then pushes it to the live branch, redeploys, and rolls back by itself if HQ doesn't come back. Never claim a change is live: it is live only after Phil approves and HQ reports the deploy. If a task needs a secret or a setting only Phil can add, say exactly what (name and where) and stop; never guess a key.`;
 
 /** Files that define what Einstein may do; a change to any of them is flagged on the ship card. */
 export const GUARDRAIL_FILES = /^(packages\/core\/src\/workshop\.ts|packages\/core\/src\/router\/|packages\/core\/src\/jarvis\/(prompts|orchestrator|rules|overlap)\.ts|packages\/core\/src\/(config|watchers)\.ts|packages\/core\/src\/usage\/|packages\/core\/src\/trading\/|packages\/core\/src\/connectors\/|packages\/core\/src\/registry\/charters\.ts|packages\/core\/src\/store\/|deploy\/|apps\/server\/src\/(auth|index|app|telegram)\.ts|\.github\/|package\.json$|pnpm-lock\.yaml$|[^/]+\/package\.json$|[^/]+\/[^/]+\/package\.json$)/;
@@ -522,10 +545,22 @@ export function workshopTools(w: Workshop, deps: WorkshopToolDeps = {}): ToolDef
           const d = await w.describe(sha);
           // A change to the guardrails themselves is still Phil's call, but it must be impossible to miss on the card.
           const rails = d.files.filter((f) => GUARDRAIL_FILES.test(f));
+          // A second model reads the whole diff before the card exists. HQ keeps the verdict against the commit;
+          // a review that can't run is said on the card and holds the change back from shipping on its own.
+          const full = await w.fullSha(sha);
+          let review: ShipReview = { sha: full, at: new Date().toISOString(), ran: false, whole: true, findings: [], note: "no reviewer is set up" };
+          if (deps.review) {
+            try { const df = await w.diff(sha); review = { ...(await deps.review({ sha: full, title, why, files: d.files, diff: df.text, whole: df.whole })), sha: full }; }
+            catch (e) { review = { ...review, note: (e as Error).message.slice(0, 200) }; }
+          }
+          await saveShipReview(ctx.store, review).catch(() => undefined);
+          const concerns = serious(review).length;
+          const flags = [rails.length ? "touches guardrails" : "", concerns ? `review raised ${concerns} concern${concerns === 1 ? "" : "s"}` : !review.ran ? "not reviewed" : ""].filter(Boolean);
           const riders = d.carries.length ? `ALSO SHIPS ${d.carries.length} earlier change${d.carries.length === 1 ? "" : "s"} from the workshop that ${d.carries.length === 1 ? "isn't" : "aren't"} live yet: ${d.carries.map((t) => `"${t}"`).join(", ")}. Approving this card ships ${d.carries.length === 1 ? "it" : "them"} too; the files below cover all of it.\n\n` : "";
-          const body = `${riders}${rails.length ? `GUARDRAILS TOUCHED: ${rails.join(", ")}. This change edits the code that limits what Einstein can do (the workshop guard, the deploy script, approvals or safety rules). Read the diff before approving.\n\n` : ""}${why.trim()}\n\nFiles: ${d.files.join(", ")}\n${d.stat}\n\nChecks: all green (build, typecheck, tests).`;
-          const block = { kind: "config", title: `${rails.length ? "Ship (touches guardrails)" : "Ship"}: ${title}`, body, payload: { action: "code.ship", sha, title, files: d.files, guardrails: rails, carries: d.carries }, context: `Einstein changed ${d.files.length} file${d.files.length === 1 ? "" : "s"} in the workshop on branch ${w.current?.branch ?? "einstein"}; every check passed. Approving pushes commit ${sha.slice(0, 7)} to the live branch and redeploys HQ (two or three minutes, HQ restarts); if HQ doesn't come back it rolls back on its own.` };
-          return `Committed ${sha.slice(0, 7)}. Put this in your reply, exactly:\n\n\`\`\`approval\n${JSON.stringify(block)}\n\`\`\``;
+          const body = `${riders}${rails.length ? `GUARDRAILS TOUCHED: ${rails.join(", ")}. This change edits the code that limits what Einstein can do (the workshop guard, the deploy script, approvals or safety rules). Read the diff before approving.\n\n` : ""}${why.trim()}\n\n${reviewText(review)}\n\nFiles: ${d.files.join(", ")}\n${d.stat}\n\nChecks: all green (build, typecheck, tests).`;
+          const block = { kind: "config", title: `${flags.length ? `Ship (${flags.join("; ")})` : "Ship"}: ${title}`, body, payload: { action: "code.ship", sha, title, files: d.files, guardrails: rails, carries: d.carries }, context: `Einstein changed ${d.files.length} file${d.files.length === 1 ? "" : "s"} in the workshop on branch ${w.current?.branch ?? "einstein"}; every check passed. Approving pushes commit ${sha.slice(0, 7)} to the live branch and redeploys HQ (two or three minutes, HQ restarts); if HQ doesn't come back it rolls back on its own.` };
+          const told = review.findings.length ? `\n\nThe independent reviewer read your diff and raised the points below. For each: if it is real, fix it in the workshop and call workshop_submit again (the new commit is reviewed afresh and replaces this card); if it is not, say why in your reply to Phil in one line. Don't argue with it on the card.\n${review.findings.map((f) => `- ${f.severity.toUpperCase()}${f.file ? ` · ${f.file}` : ""}: ${f.what}`).join("\n")}` : "";
+          return `Committed ${sha.slice(0, 7)}. Put this in your reply, exactly:\n\n\`\`\`approval\n${JSON.stringify(block)}\n\`\`\`${told}`;
         } catch (e) { return `Submit failed: ${(e as Error).message}`; }
       },
     }),
