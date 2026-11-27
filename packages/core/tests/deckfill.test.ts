@@ -277,6 +277,9 @@ test("the words a deck needs from the numbers: the period in full, when it was p
   assert.equal(f("Demo rate {{trend.demo}} this period. {{Change.demo}} {{prior.demo|0}}.", 78), "Demo rate fell this period. Down from 78%.");
   assert.equal(f("Demo rate {{trend.demo}}; {{change.demo}} {{prior.demo|0}}", 60), "Demo rate rose; up from 60%");
   assert.equal(f("{{trend.demo}} / {{change.demo}}", 67), "held / level with");
+  // Phil, Nov 27: slide 13's "per extra demo" is gross sold ÷ demos sat. No demos: no figure, never a divide by zero.
+  assert.equal(f("+{{per_demo}} per extra demo ({{gross}} ÷ {{demos}}); was {{prior.per_demo}}", 50), "+$7,463 per extra demo ($500,000 ÷ 67); was $10,000");
+  assert.doesNotMatch(f("{{prior.per_demo}}", 0), /NaN|Infinity/);
 });
 
 test("a template marked with codes isn't nagged about its plain text: a target and a rule's number are meant to stay", async () => {
