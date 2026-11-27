@@ -2,14 +2,15 @@ import type { Approval } from "../events.js";
 import { PERSONAL_CALENDARS } from "../connectors/google.js";
 import { BATCH_ACTION, batchSteps } from "./batch.js";
 
-/** Actions that reach another person. */
-const OUTBOUND_ACTIONS = new Set(["gmail.send", "x.post", "x.reply", "x.dm", "ghl.message"]);
+/** Actions that reach another person (an unsubscribe is a request to the sender, in Phil's name). */
+const OUTBOUND_ACTIONS = new Set(["gmail.send", "x.post", "x.reply", "x.dm", "ghl.message", "gmail.unsubscribe"]);
 
 /**
- * Actions that move money, trade, change a strategy, ship code or update HQ: no rule ever approves them on Phil's
- * behalf, whatever "kind" the agent wrote on the card (the agent chooses the kind; the action is what runs).
+ * Actions that move money, trade, change a strategy, ship code, update HQ or unsubscribe Phil from a sender (one way;
+ * Phil, Nov 27 2026: never without his OK): no rule ever approves them on Phil's behalf, whatever "kind" the agent
+ * wrote on the card (the agent chooses the kind; the action is what runs).
  */
-const NEVER_AUTO = /^(trade\.|strategy\.|robinhood\.|hyperliquid\.|kalshi\.|payment\.|invoice\.|transfer\.|wallet\.|order\.|eagleview\.order$|lp\.|github\.access$|code\.ship$|hq\.update$)/;
+const NEVER_AUTO = /^(trade\.|strategy\.|robinhood\.|hyperliquid\.|kalshi\.|payment\.|invoice\.|transfer\.|wallet\.|order\.|eagleview\.order$|lp\.|github\.access$|code\.ship$|hq\.update$|gmail\.unsubscribe$)/;
 export function alwaysWaits(a: Pick<Approval, "kind" | "payload">): boolean {
   const action = (a.payload as { action?: unknown } | undefined)?.action;
   if (a.kind === "money" || a.kind === "strategy") return true;

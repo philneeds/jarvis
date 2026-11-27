@@ -10,14 +10,14 @@ const KIND: Record<string, string> = { send: "var(--red)", post: "var(--sky, #5C
 
 /** The approve button says what it does. */
 const ACTION_LABEL: Record<string, string> = {
-  "gmail.send": "Send email", "gmail.archive": "Archive", "gmail.label": "Add label", "gmail.trash": "Move to trash",
+  "gmail.send": "Send email", "gmail.archive": "Archive", "gmail.label": "Add label", "gmail.trash": "Move to trash", "gmail.unsubscribe": "Unsubscribe",
   "calendar.create": "Add to calendar", "calendar.update": "Change event", "calendar.delete": "Remove event",
   "x.post": "Post to X", "x.reply": "Post reply", "x.dm": "Send DM", "ghl.message": "Send via GoHighLevel", "ghl.contact.create": "Create contact", "ghl.note": "Add note", "ghl.deal.create": "Create deal", "ghl.deal.move": "Move deal", "robinhood.call": "Run on Robinhood", "eagleview.order": "Order EagleView report",
   "trade.execute": "Place trade", "trade.close": "Close position", "strategy.enable": "Enable strategy", "memory.replace": "Apply",
 };
 /** Which payload fields are worth a line at the top, in order. */
 const HEADLINE: Record<string, string[]> = {
-  "gmail.send": ["to", "account", "subject"], "gmail.archive": ["account", "query", "max"], "gmail.label": ["account", "label", "query"], "gmail.trash": ["account", "query", "max"],
+  "gmail.send": ["to", "account", "subject"], "gmail.archive": ["account", "query", "max"], "gmail.label": ["account", "label", "query"], "gmail.trash": ["account", "query", "max"], "gmail.unsubscribe": ["account"],
   "calendar.create": ["start", "end", "account"], "calendar.update": ["start", "end", "account"], "calendar.delete": ["title", "account"],
   "x.post": ["account"], "x.reply": ["account", "replyTo"], "x.dm": ["account", "to"], "ghl.message": ["to", "type", "subject"], "ghl.contact.create": ["name", "phone", "email", "source"], "ghl.note": ["to"], "ghl.deal.create": ["name", "stage", "value"], "ghl.deal.move": ["name", "stage", "status"], "robinhood.call": ["tool"], "eagleview.order": ["address", "product", "delivery", "estimate"],
   "trade.execute": ["symbol", "side", "sizeUsd", "strategy"], "trade.close": ["positionId", "pnlUsd"], "strategy.enable": ["name", "backtestReturn", "winRate", "maxDrawdown", "paperDays"],

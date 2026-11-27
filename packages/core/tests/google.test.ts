@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { GoogleConnector, memoryStore, Jarvis, ModelRouter, mockProvider, rawMail, bodyText } from "../src/index.js";
+import { GoogleConnector, memoryStore, Jarvis, ModelRouter, mockProvider, rawMail, bodyText, parseListUnsubscribe } from "../src/index.js";
 
 function fakeGoogle() {
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -235,3 +235,79 @@ test("all-day events report their real last day", async () => {
   assert.match(await tool.handler({}, { store, agentId: "monica" }), /all day 2026-09-23 through 2026-11-04/);
 });
 function jarvisTools(g: GoogleConnector) { return g.tools(); }
+
+test("List-Unsubscribe headers: one-click needs the Post header, mailto is an address, anything else is a page or nothing", () => {
+  const oneClick = parseListUnsubscribe("<https://store.com/unsub?x=1>, <mailto:unsub@store.com>", "List-Unsubscribe=One-Click");
+  assert.deepEqual(oneClick, { oneClick: "https://store.com/unsub?x=1", mailto: { to: "unsub@store.com", subject: undefined }, way: "one-click" });
+  const page = parseListUnsubscribe("<https://only.com/manage>");
+  assert.deepEqual(page, { link: "https://only.com/manage", way: "link" });
+  const mail = parseListUnsubscribe("<mailto:leave@site.com?subject=unsubscribe%20me>");
+  assert.deepEqual(mail, { mailto: { to: "leave@site.com", subject: "unsubscribe me" }, way: "mailto" });
+  // Plain http and junk are dropped: the header comes from a stranger.
+  assert.deepEqual(parseListUnsubscribe("<http://x.com/u>, <javascript:alert(1)>", "List-Unsubscribe=One-Click"), { way: undefined });
+  assert.deepEqual(parseListUnsubscribe(undefined), {});
+});
+
+test("unsubscribe sweep: gmail_senders says how each sender unsubscribes; gmail.unsubscribe always waits, then does one-click and mailto, and hands Phil the page-only links", async () => {
+  const store = memoryStore(); await store.init();
+  const { f, calls } = fakeGoogle();
+  const headers = (from: string, unsub: string, post?: string) => ({ id: "x", labelIds: ["UNREAD"], payload: { headers: [{ name: "From", value: `Shop <${from}>` }, { name: "Subject", value: "Deals" }, { name: "List-Unsubscribe", value: unsub }, ...(post ? [{ name: "List-Unsubscribe-Post", value: post }] : [])] } });
+  const sweep = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url);
+    const json = (o: unknown) => new Response(JSON.stringify(o), { headers: { "content-type": "application/json" } });
+    if (u.includes("/messages?q=") && u.includes("category%3Apromotions")) return json({ messages: [{ id: "u1" }, { id: "u1" }, { id: "u2" }, { id: "u3" }] });
+    if (u.includes("/messages?q=from%3Adeals%40store.com")) return json({ messages: [{ id: "u1" }] });
+    if (u.includes("/messages?q=from%3Anews%40site.com")) return json({ messages: [{ id: "u2" }] });
+    if (u.includes("/messages?q=from%3Apage%40only.com")) return json({ messages: [{ id: "u3" }] });
+    if (u.includes("/messages?q=from%3Anobody%40gone.com")) return json({});
+    if (u.includes("/messages/u1?")) return json(headers("deals@store.com", "<https://store.com/unsub?x=1>, <mailto:unsub@store.com>", "List-Unsubscribe=One-Click"));
+    if (u.includes("/messages/u2?")) return json(headers("news@site.com", "<mailto:leave@site.com?subject=unsubscribe>"));
+    if (u.includes("/messages/u3?")) return json(headers("page@only.com", "<https://only.com/manage>"));
+    if (u.startsWith("https://store.com/unsub")) { calls.push({ url: u, init }); return new Response("ok", { status: 200 }); }
+    return f(url, init);
+  }) as typeof fetch;
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: sweep });
+  await g.exchangeCode("c1");
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("m")], grok: [mockProvider("g")] } }) });
+  jarvis.addConnector(g, GoogleConnector.promptHint());
+  const senders = jarvis.allTools().find((t) => t.name === "gmail_senders")!;
+  const overview = await senders.handler({ query: "category:promotions newer_than:30d" }, { store, agentId: "oscar" });
+  assert.match(overview, /2× \(2 unread\) deals@store.com .* unsubscribe: one-click/);
+  assert.match(overview, /news@site.com .* unsubscribe: mailto/);
+  assert.match(overview, /page@only.com .* unsubscribe: link/);
+  assert.ok(!calls.some((c) => c.url.startsWith("https://store.com/")), "reading never unsubscribes");
+  // Even an agent Phil lets act alone waits here: unsubscribing is one way and reaches the sender.
+  const { setAgentConfig } = await import("../src/index.js");
+  await setAgentConfig(store, "monica", { rules: { autoApprove: ["record", "send", "other"], maxAutoDollars: 0 } });
+  const card = await jarvis.requestApproval({ agentId: "monica", kind: "other", title: "Unsubscribe from 4 promo senders", body: "…", payload: { action: "gmail.unsubscribe", senders: ["deals@store.com", "Site News <news@site.com>", "page@only.com", "nobody@gone.com"] } });
+  assert.equal(card.status, "pending");
+  assert.match(card.effect ?? "", /Unsubscribes phil@example.com from 4 sender\(s\).*can't be undone/);
+  const batch = await jarvis.requestApproval({ agentId: "monica", kind: "other", title: "Sweep", body: "…", payload: { action: "batch", steps: [{ action: "gmail.unsubscribe", senders: ["deals@store.com"] }, { action: "gmail.label", query: "from:deals@store.com", label: "Unsubscribe candidates" }] } });
+  assert.equal(batch.status, "pending", "a batch with an unsubscribe step waits too");
+  const blank = await jarvis.requestApproval({ agentId: "oscar", kind: "other", title: "Unsubscribe", body: "", payload: { action: "gmail.unsubscribe", senders: [] } });
+  assert.match(blank.note ?? "", /^refused: gmail\.unsubscribe needs senders in the payload/);
+  assert.ok(!calls.some((c) => c.url.startsWith("https://store.com/") || c.url.endsWith("/messages/send")), "nothing happened before Phil's OK");
+  await jarvis.decide(card.id, "approved");
+  const post = calls.find((c) => c.url === "https://store.com/unsub?x=1");
+  assert.ok(post && post.init?.method === "POST" && String(post.init.body) === "List-Unsubscribe=One-Click", "RFC 8058 one-click POST");
+  const sent = calls.find((c) => c.url.endsWith("/messages/send"));
+  assert.ok(sent, "the mailto sender got an unsubscribe email");
+  assert.match(Buffer.from(JSON.parse(String(sent!.init?.body)).raw, "base64url").toString(), /To: leave@site.com\r\nSubject: unsubscribe/);
+  assert.ok(!calls.some((c) => c.url.startsWith("https://only.com/")), "a page-only link is never opened by HQ");
+  assert.ok(!calls.some((c) => c.url.endsWith("/messages/batchModify")), "nothing archived or labelled by this card");
+  const log = await store.activity.list({ agentId: "monica" });
+  const done = log.find((e) => /Unsubscribed from 2 of 4 sender\(s\) in phil@example.com: deals@store.com \(one-click\), news@site.com \(mailto\)/.test(e.summary));
+  assert.ok(done, `report line missing: ${log.map((e) => e.summary).join(" | ")}`);
+  assert.match(done!.summary, /Need a click from Phil.*page@only.com → https:\/\/only.com\/manage/);
+  assert.match(done!.summary, /Not done: nobody@gone.com \(no mail from this address\)/);
+});
+
+test("Oscar's Sunday 4:00 routine carries Phil's unsubscribe sweep", async () => {
+  const { SCHEDULES } = await import("../src/index.js");
+  const s = SCHEDULES.find((x) => x.id === "oscar-inbox")!;
+  assert.equal(s.when, "weekly:sun@04:00");
+  assert.match(s.task, /unsubscribe_sweep_standing_rule/);
+  assert.match(s.task, /ONE approval card for the whole sweep.*gmail\.unsubscribe.*gmail\.label 'Unsubscribe candidates'/);
+  assert.match(s.task, /philneedsofficial@gmail.com, pmarino9081@gmail.com and info@jdpmrenovations.com/);
+  assert.match(GoogleConnector.promptHint(), /"action":"gmail\.unsubscribe","senders"/);
+});

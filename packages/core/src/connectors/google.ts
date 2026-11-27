@@ -366,18 +366,60 @@ export class GoogleConnector {
     return ids.slice(0, max);
   }
 
-  /** Who sends the most mail matching a query: for a cleanup plan. */
+  /**
+   * Who sends the most mail matching a query: for a cleanup plan. Each sender also says how it can be unsubscribed
+   * from, read off its newest message's List-Unsubscribe headers: "one-click" (RFC 8058, HQ can do it on approval),
+   * "mailto" (HQ sends the unsubscribe email on approval), "link" (a page Phil opens himself) or nothing.
+   */
   async senders(query: string, sample = 100, account?: string) {
     const ids = await this.listMessageIds(query, sample, account);
-    const counts = new Map<string, { n: number; unread: number; subject: string }>();
+    const counts = new Map<string, { n: number; unread: number; subject: string; unsub?: UnsubscribeWay; messageId: string }>();
     for (const id of ids) {
-      const j = await this.api<{ labelIds?: string[]; payload?: GmailPart }>(account, `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`);
-      const from = (j.payload?.headers?.find((h) => h.name.toLowerCase() === "from")?.value ?? "?").replace(/^.*<([^>]+)>.*$/, "$1").toLowerCase();
-      const c = counts.get(from) ?? { n: 0, unread: 0, subject: j.payload?.headers?.find((h) => h.name.toLowerCase() === "subject")?.value ?? "" };
+      const j = await this.api<{ labelIds?: string[]; payload?: GmailPart }>(account, `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=List-Unsubscribe&metadataHeaders=List-Unsubscribe-Post`);
+      const h = (name: string) => j.payload?.headers?.find((x) => x.name.toLowerCase() === name.toLowerCase())?.value;
+      const from = (h("From") ?? "?").replace(/^.*<([^>]+)>.*$/, "$1").toLowerCase();
+      // Gmail lists newest first, so the first message seen for a sender is its latest: that one's headers stand.
+      const c = counts.get(from) ?? { n: 0, unread: 0, subject: h("Subject") ?? "", unsub: parseListUnsubscribe(h("List-Unsubscribe"), h("List-Unsubscribe-Post")).way, messageId: id };
       c.n++; if (j.labelIds?.includes("UNREAD")) c.unread++;
       counts.set(from, c);
     }
     return [...counts.entries()].map(([from, c]) => ({ from, ...c })).sort((a, b) => b.n - a.n);
+  }
+
+  /**
+   * Unsubscribe Phil from senders, the way their own mail offers (RFC 8058 one-click or a mailto address), once Phil
+   * has approved the card. For each address: its newest message's List-Unsubscribe headers decide. One-click is one
+   * POST to the sender's https link with the body the standard requires; mailto sends the unsubscribe email from the
+   * account the mail arrived in. A sender that only offers a page to open is not touched: Phil gets the link. Never
+   * deletes or archives anything; that's its own card.
+   */
+  async unsubscribe(senders: string[], account?: string): Promise<{ from: string; result: "one-click" | "mailto" | "link" | "none" | "no-mail" | "failed"; detail?: string }[]> {
+    const out: { from: string; result: "one-click" | "mailto" | "link" | "none" | "no-mail" | "failed"; detail?: string }[] = [];
+    const seen = new Set<string>();
+    for (const raw of senders.slice(0, 50)) {
+      const from = String(raw).replace(/^.*<([^>]+)>.*$/, "$1").trim().toLowerCase();
+      if (!from || seen.has(from)) continue;
+      seen.add(from);
+      try {
+        const [id] = await this.listMessageIds(`from:${from}`, 1, account);
+        if (!id) { out.push({ from, result: "no-mail", detail: "no mail from this address" }); continue; }
+        const j = await this.api<{ payload?: GmailPart }>(account, `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=List-Unsubscribe&metadataHeaders=List-Unsubscribe-Post`);
+        const h = (name: string) => j.payload?.headers?.find((x) => x.name.toLowerCase() === name.toLowerCase())?.value;
+        const u = parseListUnsubscribe(h("List-Unsubscribe"), h("List-Unsubscribe-Post"));
+        if (u.oneClick) {
+          const res = await this.f(u.oneClick, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "List-Unsubscribe=One-Click", redirect: "follow", signal: AbortSignal.timeout(15_000) });
+          if (!res.ok) { out.push({ from, result: "failed", detail: `the sender's one-click link answered ${res.status}` }); continue; }
+          out.push({ from, result: "one-click", detail: u.oneClick });
+        } else if (u.mailto) {
+          await this.sendMessage({ to: u.mailto.to, subject: u.mailto.subject ?? "unsubscribe", body: "unsubscribe", account });
+          out.push({ from, result: "mailto", detail: u.mailto.to });
+        } else if (u.link) out.push({ from, result: "link", detail: u.link });
+        else out.push({ from, result: "none", detail: "its mail carries no List-Unsubscribe header" });
+      } catch (e) {
+        out.push({ from, result: "failed", detail: (e as Error).message.slice(0, 200) });
+      }
+    }
+    return out;
   }
 
   /**
@@ -541,9 +583,9 @@ export class GoogleConnector {
       }),
       defineTool({
         name: "gmail_senders",
-        description: "Who sends the most mail matching a Gmail query (e.g. 'category:promotions older_than:30d' or 'in:inbox is:unread'), with counts and unread counts. For planning a cleanup before asking to archive, label or trash.",
+        description: "Who sends the most mail matching a Gmail query (e.g. 'category:promotions older_than:30d' or 'in:inbox is:unread'), with counts, unread counts, and how each sender can be unsubscribed from (one-click or mailto: HQ does it on an approved gmail.unsubscribe card; link: a page Phil opens himself). For planning a cleanup before asking to archive, label, unsubscribe or trash.",
         schema: { query: z.string(), sample: z.number().int().min(10).max(300).optional(), ...acct },
-        handler: async (a, ctx) => { this.allowed = await this.allowedFor(ctx); const rows = await this.senders(a.query, a.sample ?? 100, a.account); return rows.length ? rows.slice(0, 40).map((r) => `${r.n}× (${r.unread} unread) ${r.from} — e.g. "${r.subject.slice(0, 60)}"`).join("\n") : "No matching mail."; },
+        handler: async (a, ctx) => { this.allowed = await this.allowedFor(ctx); const rows = await this.senders(a.query, a.sample ?? 100, a.account); return rows.length ? rows.slice(0, 40).map((r) => `${r.n}× (${r.unread} unread) ${r.from} — e.g. "${r.subject.slice(0, 60)}" · unsubscribe: ${r.unsub ?? "none"}`).join("\n") : "No matching mail."; },
       }),
     ];
   }
@@ -580,6 +622,18 @@ export class GoogleConnector {
         if (!p.ids?.length && !p.query) throw new Error("gmail.trash needs ids or a query");
         const n = await this.modifyMessages("trash", p);
         return `Moved ${n} message(s) to Trash${p.query ? ` matching "${p.query}"` : ""}${p.account ? ` in ${p.account}` : ""} (recoverable for 30 days).`;
+      },
+      "gmail.unsubscribe": async (a) => {
+        const p = a.payload as { senders?: string[]; account?: string };
+        if (!Array.isArray(p.senders) || !p.senders.length) throw new Error("gmail.unsubscribe needs senders: the addresses to unsubscribe from");
+        const rows = await this.unsubscribe(p.senders.map(String), p.account);
+        const done = rows.filter((r) => r.result === "one-click" || r.result === "mailto");
+        const open = rows.filter((r) => r.result === "link");
+        const rest = rows.filter((r) => r.result === "none" || r.result === "no-mail" || r.result === "failed");
+        const parts = [`Unsubscribed from ${done.length} of ${rows.length} sender(s)${p.account ? ` in ${p.account}` : ""}${done.length ? `: ${done.map((r) => `${r.from} (${r.result})`).join(", ")}` : ""}.`];
+        if (open.length) parts.push(`Need a click from Phil (no one-click offered): ${open.map((r) => `${r.from} → ${r.detail}`).join("; ")}.`);
+        if (rest.length) parts.push(`Not done: ${rest.map((r) => `${r.from} (${r.detail})`).join("; ")}.`);
+        return parts.join(" ");
       },
       "calendar.create": async (a) => {
         const p = a.payload as { title?: string; start?: string; end?: string; description?: string; location?: string; attendees?: string[]; recurrence?: string | string[]; timeZone?: string; account?: string };
@@ -626,6 +680,7 @@ export class GoogleConnector {
     "gmail.archive": ["ids|query"],
     "gmail.label": ["ids|query", "label"],
     "gmail.trash": ["ids|query"],
+    "gmail.unsubscribe": ["senders"],
     "calendar.create": ["title", "start", "end"],
     "calendar.update": ["id"],
     "calendar.delete": ["id"],
@@ -697,6 +752,7 @@ export class GoogleConnector {
       "gmail.archive": (p) => `Archives ${scope(p)} in ${acct(p)}: they leave the inbox but stay in All Mail and search. Nothing is deleted.`,
       "gmail.label": (p) => `Adds the label "${String(p.label ?? "")}" to ${scope(p)} in ${acct(p)}. Nothing moves or is deleted.`,
       "gmail.trash": (p) => `Moves ${scope(p)} in ${acct(p)} to Trash. Gmail empties Trash after 30 days; until then you can restore them.`,
+      "gmail.unsubscribe": (p) => { const s = Array.isArray(p.senders) ? p.senders.map(String) : []; return `Unsubscribes ${acct(p)} from ${s.length} sender(s)${s.length ? ` (${s.slice(0, 8).join(", ")}${s.length > 8 ? ", …" : ""})` : ""} the way their own mail offers: a one-click request or an unsubscribe email, nothing a person has to click through. A sender that only offers a web page is left alone and you get its link. No mail is moved or deleted, and this can't be undone from HQ.`; },
       "calendar.create": (p) => `Adds "${String(p.title ?? "")}" to the calendar on ${acct(p)} from ${String(p.start ?? "?")} to ${String(p.end ?? "?")}${p.recurrence ? `, repeating ${String(Array.isArray(p.recurrence) ? p.recurrence.join("; ") : p.recurrence).replace(/^RRULE:/i, "")}` : ""}${Array.isArray(p.attendees) && p.attendees.length ? ` and invites ${p.attendees.join(", ")}` : ""}.`,
       "calendar.update": (p) => `Changes the event "${String(p.title ?? p.id ?? "")}" on ${acct(p)}${p.start ? ` to ${String(p.start)}${p.end ? ` – ${String(p.end)}` : ""}` : ""}.${Array.isArray(p.guests) && p.guests.length ? ` It also changes for ${p.guests.join(", ")}.` : ""}`,
       "calendar.delete": (p) => `Removes the event "${String(p.title ?? p.id ?? "")}" from the calendar on ${acct(p)}.${Array.isArray(p.guests) && p.guests.length ? ` It also disappears for ${p.guests.join(", ")}.` : ""}`,
@@ -705,7 +761,7 @@ export class GoogleConnector {
 
   /** One paragraph for agent prompts on how to write through this connector. */
   static promptHint(): string {
-    return `Google is connected (google_accounts lists which accounts; pass "account" to use one other than the first). Reading: calendar_list_events, gmail_search, gmail_read. Drafting: gmail_create_draft (no approval). Sending mail = an approval block with "kind":"send" and "payload":{"action":"gmail.send","to":"...","subject":"...","body":"...","account":"<email>"}. Calendar changes = an approval block with "kind":"record": create with "payload":{"action":"calendar.create","title":"...","start":"<ISO>","end":"<ISO>"} (a repeating block adds "recurrence":"RRULE:FREQ=WEEKLY;BYDAY=MO,WE" and "timeZone":"America/New_York"); a revised card replaces your older pending card for the same slot on its own, so never ask Phil to reject the old one; move or rename with {"action":"calendar.update","id":"<event id>","start":"<ISO>","end":"<ISO>","title":"..."}; remove with {"action":"calendar.delete","id":"<event id>","title":"..."}. Say in the title what will change. An agent that has calendar_create_event, calendar_update_event and calendar_delete_event (Monica) changes Phil's own events on his personal calendars with those tools straight away, no approval block; they refuse a business calendar and an event with guests, and inviting anyone is always the approval block with "attendees". Mail cleanup = "kind":"record" for archive or label ({"action":"gmail.archive","query":"category:promotions older_than:30d","max":500,"account":"<email>"} / {"action":"gmail.label","query":"...","label":"Receipts"}), and "kind":"other" for trash ({"action":"gmail.trash","query":"...","max":200}), which always waits for Phil. Plan with gmail_senders first and say how many messages the query matches.`;
+    return `Google is connected (google_accounts lists which accounts; pass "account" to use one other than the first). Reading: calendar_list_events, gmail_search, gmail_read. Drafting: gmail_create_draft (no approval). Sending mail = an approval block with "kind":"send" and "payload":{"action":"gmail.send","to":"...","subject":"...","body":"...","account":"<email>"}. Calendar changes = an approval block with "kind":"record": create with "payload":{"action":"calendar.create","title":"...","start":"<ISO>","end":"<ISO>"} (a repeating block adds "recurrence":"RRULE:FREQ=WEEKLY;BYDAY=MO,WE" and "timeZone":"America/New_York"); a revised card replaces your older pending card for the same slot on its own, so never ask Phil to reject the old one; move or rename with {"action":"calendar.update","id":"<event id>","start":"<ISO>","end":"<ISO>","title":"..."}; remove with {"action":"calendar.delete","id":"<event id>","title":"..."}. Say in the title what will change. An agent that has calendar_create_event, calendar_update_event and calendar_delete_event (Monica) changes Phil's own events on his personal calendars with those tools straight away, no approval block; they refuse a business calendar and an event with guests, and inviting anyone is always the approval block with "attendees". Mail cleanup = "kind":"record" for archive or label ({"action":"gmail.archive","query":"category:promotions older_than:30d","max":500,"account":"<email>"} / {"action":"gmail.label","query":"...","label":"Receipts"}), and "kind":"other" for trash ({"action":"gmail.trash","query":"...","max":200}), which always waits for Phil. Unsubscribing = "kind":"other" with {"action":"gmail.unsubscribe","senders":["deals@store.com","news@site.com"],"account":"<email>"}: HQ uses each sender's own one-click link or unsubscribe address (gmail_senders shows which senders offer one), always waits for Phil, and reports any sender that only offers a page for him to open; put the senders' names, volume and % unread in the body. Plan with gmail_senders first and say how many messages the query matches.`;
   }
 }
 
@@ -733,6 +789,36 @@ export function bodyText(p?: GmailPart): string {
   const plain = find(p, "text/plain");
   if (plain) return plain;
   return find(p, "text/html").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** How a sender's mail says it can be unsubscribed from. */
+export type UnsubscribeWay = "one-click" | "mailto" | "link";
+export interface ListUnsubscribe { oneClick?: string; mailto?: { to: string; subject?: string }; link?: string; way?: UnsubscribeWay }
+
+/**
+ * Read a message's List-Unsubscribe (RFC 2369) and List-Unsubscribe-Post (RFC 8058) headers. One-click means an
+ * https link plus the Post header saying "List-Unsubscribe=One-Click": a single POST unsubscribes, no page to click
+ * through. Without the Post header an https link is just a page for Phil to open, and a mailto: entry is an address
+ * to email. The header is data from a stranger: only https and mailto are kept, anything else is dropped.
+ */
+export function parseListUnsubscribe(header?: string, post?: string): ListUnsubscribe {
+  const out: ListUnsubscribe = {};
+  if (!header) return out;
+  const entries = [...header.matchAll(/<([^<>]+)>/g)].map((m) => m[1]!.trim());
+  const https = entries.find((e) => /^https:\/\/\S+$/i.test(e));
+  const mail = entries.find((e) => /^mailto:/i.test(e));
+  if (https && /List-Unsubscribe=One-Click/i.test(post ?? "")) out.oneClick = https;
+  else if (https) out.link = https;
+  if (mail) {
+    const m = /^mailto:([^?\s]+)(?:\?(.*))?$/i.exec(mail);
+    const to = m?.[1] ? decodeURIComponent(m[1]) : "";
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      const subject = m?.[2] ? new URLSearchParams(m[2]).get("subject") ?? undefined : undefined;
+      out.mailto = { to, subject: subject || undefined };
+    }
+  }
+  out.way = out.oneClick ? "one-click" : out.mailto ? "mailto" : out.link ? "link" : undefined;
+  return out;
 }
 
 export function rawMail(m: { to: string; subject: string; body: string }): string {

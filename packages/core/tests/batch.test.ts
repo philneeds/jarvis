@@ -91,5 +91,8 @@ test("a batch card is checked step by step when it's filed, and waits if any ste
   assert.equal(isOutbound({ kind: "other", payload: { action: "batch", steps: [{ action: "ghl.note" }, { action: "ghl.message" }] } }), true);
   assert.equal(alwaysWaits(internal), false);
   assert.equal(alwaysWaits({ kind: "other", payload: { action: "batch", steps: [{ action: "ghl.note" }, { action: "eagleview.order" }] } }), true);
+  // Oscar's sweep: labelling is internal, but one unsubscribe step makes the whole card wait for Phil (Nov 27 2026).
+  assert.equal(alwaysWaits({ kind: "other", payload: { action: "batch", steps: [{ action: "gmail.label", label: "Unsubscribe candidates" }, { action: "gmail.unsubscribe", senders: ["a@b.co"] }] } }), true);
+  assert.equal(isOutbound({ kind: "other", payload: { action: "gmail.unsubscribe", senders: ["a@b.co"] } }), true);
   assert.equal(isOutbound({ kind: "other", payload: { action: "batch" } }), true);
 });

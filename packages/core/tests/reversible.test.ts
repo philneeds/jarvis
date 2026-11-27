@@ -11,7 +11,7 @@ const card = (action: string, extra: Record<string, unknown> = {}, kind: Approva
 
 test("which work counts as reversible", () => {
   for (const a of ["memory.replace", "goals.update", "goals.benchmarks", "today.set", "gmail.archive", "gmail.label"]) assert.equal(isReversible(card(a)), true, a);
-  for (const a of ["watchlist.add", "gmail.send", "gmail.trash", "calendar.create", "calendar.delete", "ghl.note", "ghl.deal.move", "goals.set", "trade.execute", "code.ship", "hq.update", "x.post"]) assert.equal(isReversible(card(a)), false, a);
+  for (const a of ["watchlist.add", "gmail.send", "gmail.trash", "gmail.unsubscribe", "calendar.create", "calendar.delete", "ghl.note", "ghl.deal.move", "goals.set", "trade.execute", "code.ship", "hq.update", "x.post"]) assert.equal(isReversible(card(a)), false, a);
   assert.equal(isReversible(card("memory.replace", {}, "money")), false, "a money card never runs alone, whatever its action");
   assert.equal(isReversible(card("gmail.label", { public: true })), false);
   assert.equal(isReversible({ kind: "record", payload: {} }), false, "no action, nothing to run");
