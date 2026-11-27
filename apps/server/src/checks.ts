@@ -32,7 +32,7 @@ export function connectionProbes(jarvis: Jarvis, c: Connectors, env: NodeJS.Proc
     },
     {
       id: "robinhood", name: "Robinhood", what: "Buffett and Munger read your holdings; orders wait for you",
-      off: async () => (!c.robinhood ? "The Robinhood connector isn't loaded on this server." : (await c.robinhood.status()).connected ? undefined : "Not connected. Press Connect under Robinhood below, approve at Robinhood, then paste the address it ends on."),
+      off: async () => (!c.robinhood ? "The Robinhood connector isn't loaded on this server." : (await c.robinhood.status()).connected || (await c.robinhood.status()).problem ? undefined : "Not connected. Press Connect under Robinhood below, approve at Robinhood, then paste the address it ends on."),
       run: () => c.robinhood!.check(),
     },
     wallets("hyperliquid", "Hyperliquid (reading)", "Pentoshi reads the account by its public address", () => hlAccounts(store, env), (a) => accountText(a, f)),

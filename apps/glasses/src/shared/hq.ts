@@ -23,13 +23,23 @@ export function hqUrl(typed: string): string {
   return `${m[1]!.toLowerCase()}://${m[2]!}`;
 }
 
+/** How long a call to HQ may take: HQ holds a "replies" call up to 25 seconds on purpose; the rest answer at once. */
+export const CALL_MS = 20_000, REPLIES_MS = 40_000;
+/** The promise, or a failure once the time is up: a request that never comes back must not hold anything forever. */
+function within<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((yes, no) => {
+    const t = setTimeout(() => no(new Error("timed out")), ms);
+    p.then((v) => { clearTimeout(t); yes(v); }, (e) => { clearTimeout(t); no(e); });
+  });
+}
+
 export class Hq {
   constructor(private cfg: HqConfig, private f: Fetch) {}
 
   private async call<T>(path: string, body?: unknown): Promise<T> {
     let res: Awaited<ReturnType<Fetch>>;
     try {
-      res = await this.f(`${this.cfg.url}/api/glasses/device/${path}`, { method: body ? "POST" : "GET", headers: { authorization: `Bearer ${this.cfg.key}`, ...(body ? { "content-type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      res = await within(this.f(`${this.cfg.url}/api/glasses/device/${path}`, { method: body ? "POST" : "GET", headers: { authorization: `Bearer ${this.cfg.key}`, ...(body ? { "content-type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }), path.startsWith("replies") ? REPLIES_MS : CALL_MS);
     } catch { throw new Error("can't reach HQ (no connection, or the address is wrong)"); }
     if (res.status === 401) throw new Error("HQ didn't accept the pairing key; pair again in HQ › Settings › Glasses");
     const j = (await res.json().catch(() => ({}))) as T & { error?: string };

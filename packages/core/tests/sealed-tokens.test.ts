@@ -78,3 +78,45 @@ test("an open dev HQ with no server secret keeps working: nothing to seal with, 
   assert.deepEqual(await store.settings.get("spotify.tokens", null), { access_token: "a" });
   assert.deepEqual(await readSealedSetting(store, "spotify.tokens"), { value: { access_token: "a" }, present: true, locked: false });
 }));
+
+test("review, Nov 27: X renews an account once however many ask at once, and never writes back another account's spent token", () => withSecret("pw-1", async () => {
+  const store = memoryStore(); await store.init();
+  const acct = (handle: string, userId: string) => ({ handle, userId, access_token: `old-${handle}`, refresh_token: `r-${handle}`, expires_at: T0 - 1, connectedAt: "2026-11-01T00:00:00Z" });
+  await store.settings.set("x.accounts", [acct("a", "1"), acct("b", "2")]);
+  const spent: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const xf = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const token = new URLSearchParams(String(init?.body)).get("refresh_token")!;
+    // X's refresh tokens work once.
+    if (spent.includes(token)) return new Response("{}", { status: 400 });
+    spent.push(token);
+    if (token === "r-a") await gate; // @a's renewal is still at X while @b's finishes
+    return Response.json({ access_token: `new-${token}`, refresh_token: `${token}-2`, expires_in: 7200 });
+  }) as typeof fetch;
+  const x = new XConnector(store, { clientId: "cid", redirectUri: "http://hq/x", fetch: xf, now: () => T0 });
+  const priv = x as unknown as { account(h?: string): Promise<{ access_token: string }> };
+  // Two callers for @a at once (an agent and the watch), and one for @b.
+  const a1 = priv.account("a"), a2 = priv.account("a"), b = priv.account("b");
+  assert.equal((await b).access_token, "new-r-b");
+  release();
+  assert.deepEqual([(await a1).access_token, (await a2).access_token], ["new-r-a", "new-r-a"], "one renewal, shared");
+  assert.deepEqual(spent.sort(), ["r-a", "r-b"]);
+  const saved = await x.accounts();
+  assert.deepEqual(saved.map((s) => `${s.handle}:${s.refresh_token}`), ["a:r-a-2", "b:r-b-2"], "@b's new token survived @a's later write");
+}));
+
+test("review, Nov 27: a Robinhood sign-in that can't be opened is a problem to tell Phil about, not \"never connected\"", () => withSecret("pw-1", async () => {
+  const { RobinhoodConnector } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const rh = new RobinhoodConnector(store, { redirectUri: "http://x/cb", fetch: (async () => { throw new Error("no network"); }) as typeof fetch });
+  assert.deepEqual([(await rh.status()).connected, (await rh.status()).problem], [false, undefined]);
+  await writeSealedSetting(store, "robinhood.tokens", { access_token: "a", refresh_token: "r", expires_at: Date.now() + 3_600_000, connectedAt: "2026-11-20T00:00:00Z" });
+  assert.equal((await rh.status()).connected, true);
+  await withSecret("pw-CHANGED", async () => {
+    const s = await rh.status();
+    assert.equal(s.connected, false);
+    assert.match(s.problem!, /can't be opened/);
+    await assert.rejects(rh.check(), /Robinhood: the saved sign-in can't be opened/);
+  });
+}));

@@ -7,6 +7,7 @@ import { listDecks } from "./decks.js";
 import { listDataFiles } from "./salesdata.js";
 import { deployPending } from "./deployhold.js";
 import { isUsageLimit } from "./router/claude.js";
+import { pruneHeard } from "./glasses.js";
 
 export interface Schedule {
   id: string;
@@ -256,9 +257,13 @@ export async function deliverReports(jarvis: Jarvis, toId: string, reports: Rout
     const body = reports.map((r) => (r.copyOf ? `${r.agent.name}'s report to ${leadName(r.copyOf)} (${r.scheduleId}), a copy for you:\n\n${r.text}` : `${r.agent.name} reports to you (${r.scheduleId}):\n\n${r.text}`)).join("\n\n---\n\n");
     // A copy is for the reader's own view: the lead it went to handles what's actionable, so nothing is done twice.
     const copies = reports.every((r) => r.copyOf);
+    // Reports for the reader and copies in one hand-over (Ansem's scan and a copy of Pentoshi's land on Mantis in the
+    // same tick): the copies stay copies, or the same trade is handed off twice, once by each lead.
+    const copied = reports.filter((r) => r.copyOf);
+    const mixed = copied.length && !copies ? ` The ${copied.length > 1 ? "ones" : "one"} marked "a copy for you" (${copied.map((r) => `${r.agent.name}'s, already with ${leadName(r.copyOf!)}`).join("; ")}) ${copied.length > 1 ? "are" : "is"} for your own read only: hand nothing off from ${copied.length > 1 ? "them" : "it"}, since that lead handles what's to be done.` : "";
     const instruction = copies
       ? `This is a copy for your own view, not Phil's, and ${reports.length > 1 ? "they were" : "it was"} already handed to ${[...new Set(reports.map((r) => leadName(r.copyOf!)))].join(" and ")}, who ${reports.length > 1 || new Set(reports.map((r) => r.copyOf)).size > 1 ? "handle" : "handles"} anything to be done about it: keep what matters for your own read in memory (scope venture:${to.venture}) and on the board, hand nothing off from it, and raise something for Phil only if he must act and the lead wouldn't know. Reply in one or two lines on what you kept.`
-      : `This is for you, not Phil: keep what matters in memory (scope venture:${to.venture}) and on the board, hand anything actionable to whoever owns it, and raise an attention or approval block only if Phil himself must act. Reply in one or two lines on what you did with ${reports.length > 1 ? "these" : "it"}.`;
+      : `This is for you, not Phil: keep what matters in memory (scope venture:${to.venture}) and on the board, hand anything actionable to whoever owns it, and raise an attention or approval block only if Phil himself must act.${mixed} Reply in one or two lines on what you did with ${reports.length > 1 ? "these" : "it"}.`;
     const rr = await jarvis.runAgent(to, `${body}\n\n${instruction}`, { direct: false, from: reports.length > 1 ? "The team" : reports[0]!.agent.name, parentRunId: reports[0]!.runId });
     if (!rr.blocked) await jarvis.router.log(to.id, "run", `${to.name} took ${reports.length > 1 ? `${reports.length} reports (${reports.map((r) => r.agent.name).join(", ")})` : `${copies ? "a copy of " : ""}${reports[0]!.agent.name}'s report`}: ${rr.text.slice(0, 200)}`, rr.runId);
     return;
@@ -419,6 +424,8 @@ export class Scheduler {
         } else if (s.task === "setup-check") {
           await done(await this.jarvis.syncSetupGoal());
         } else if (s.task === "connections-watch") {
+          // What the glasses heard is kept two weeks, whether or not the memory is still switched on.
+          await pruneHeard(this.jarvis.store).catch(() => undefined);
           const r = await this.jarvis.watchConnections();
           if (r) await done(r);
         } else if (s.task === "goal-check") {

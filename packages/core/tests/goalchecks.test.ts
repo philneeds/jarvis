@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Jarvis, ModelRouter, memoryStore, mockProvider, parseCheck, describeCheck, evaluateCheck, TOOLS, SCHEDULES, type BenchmarkCheck, type KuberaDay } from "../src/index.js";
+import { Jarvis, ModelRouter, memoryStore, mockProvider, parseCheck, describeCheck, evaluateCheck, tickFor, TOOLS, SCHEDULES, type BenchmarkCheck, type KuberaDay } from "../src/index.js";
 import { HOUSEKEEPING } from "../src/scheduler.js";
 
 const day = (d: string, nw: number, items: Record<string, number> = {}): KuberaDay => ({ day: d, netWorth: nw, assets: nw + 50_000, debts: 50_000, items });
@@ -44,8 +44,24 @@ test("Kubera net worth: the latest reading decides, a stale or failed read prove
   r = await evaluateCheck({ ...nw, value: 45_000, days: 3 }, { now, kubera: { status: fresh, history } });
   assert.equal(r.met, false, "Nov 21 was under the line");
   r = await evaluateCheck({ ...nw, value: 40_000, days: 30 }, { now, kubera: { status: fresh, history } });
-  assert.equal(r.met, false, "only 3 of 30 days on record: not proven yet");
-  assert.match(r.figure!, /3 of 30 days on record/);
+  assert.equal(r.met, undefined, "only 3 of 30 days on record: not proven, and not disproven either");
+  assert.equal(tickFor(false, r), false, "an unticked benchmark stays unticked until every day is in");
+  assert.match(r.figure!, /3 of 30 days on record .*; not judged until every day is on record/);
+  // The night before today's figure exists (review, Nov 27): two good days of three is not "broken"; a met tick stays.
+  const midnight = new Date("2026-11-24T05:30:00Z"); // 12:30 am Eastern, Nov 24: nothing recorded for the 24th yet
+  r = await evaluateCheck({ ...nw, value: 40_000, days: 3 }, { now: midnight, kubera: { status: { ok: true, at: "2026-11-24T05:10:00Z" }, history } });
+  assert.equal(r.met, undefined);
+  assert.equal(tickFor(true, r), true, "it doesn't untick itself every night");
+  // A day in the window that really was under the line still unticks it, however many days are missing.
+  r = await evaluateCheck({ ...nw, value: 45_000, days: 30 }, { now, kubera: { status: fresh, history } });
+  assert.equal(r.met, false);
+  // "Chase" with a checking account and a card on record is not guessed at.
+  const two = [day("2026-11-23", 1, { "Chase Sapphire": -5_000, "Chase Checking": 12_000 })];
+  r = await evaluateCheck({ kind: "kubera_item", name: "Chase", op: ">=", value: 10_000 }, { now, kubera: { status: fresh, history: two } });
+  assert.equal(r.met, undefined);
+  assert.match(r.error!, /"Chase" matches 2 accounts in Kubera \(Chase Sapphire, Chase Checking\); the check needs the exact name/);
+  r = await evaluateCheck({ kind: "kubera_item", name: "chase checking", op: ">=", value: 10_000 }, { now, kubera: { status: fresh, history: two } });
+  assert.equal(r.met, true);
   // One account, by name: Robinhood's figure in Kubera is gross of the margin loan, which is its own (negative) line.
   r = await evaluateCheck({ kind: "kubera_item", name: "robinhood 1888", op: ">=", value: 90_000 }, { now, kubera: { status: fresh, history } });
   assert.equal(r.met, true);
@@ -134,6 +150,11 @@ test("HQ ticks a checked benchmark from Kubera, unticks it when the figure drops
   assert.equal(b.paused, true);
   assert.equal((await jarvis.syncGoalChecks()).summary, "no checked benchmarks");
   assert.equal((await auto()).done, true, "left alone while paused");
+  // An agent's card that resends the list with the same rule (a fresh copy of it) doesn't lift Phil's pause (review, Nov 27).
+  await jarvis.updateGoal(g.id, { benchmarks: (await goal()).benchmarks!.map((x) => ({ text: x.text, weight: x.weight, ...(x.check ? { check: JSON.parse(JSON.stringify(x.check)) } : {}) })) });
+  assert.equal((await auto()).paused, true, "his hand tick stands");
+  await jarvis.syncGoalChecks();
+  assert.equal((await auto()).done, true);
   // Resuming (saving the check again) reads it straight away and the data wins again.
   await jarvis.updateGoal(g.id, { benchmarkChecks: { [b.id]: b.check! } });
   assert.equal((await auto()).paused, undefined);

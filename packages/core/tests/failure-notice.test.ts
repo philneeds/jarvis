@@ -61,3 +61,26 @@ test("clearing a setting removes it, so it reads back as the caller's fallback (
   await store.settings.set("x", undefined);
   assert.equal(await store.settings.get<null | number>("x", null), null);
 });
+
+test("a hand-over that mixes a report for the lead with a copy of another lead's: the copy stays a copy (nothing handed off from it)", async () => {
+  const { deliverReports, getAgent } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  await store.settings.set("phase", 3);
+  const base = mockProvider("mock-claude");
+  const seen: string[] = [];
+  const provider = { ...base, async run(req: Parameters<typeof base.run>[0]) { seen.push(req.prompt); return base.run(req); } };
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [provider], grok: [provider] } }) });
+  const ansem = getAgent("ansem")!, pentoshi = getAgent("pentoshi")!;
+  await deliverReports(jarvis, "mantis", [
+    { agent: ansem, scheduleId: "ansem-scan", text: "SOL memes quiet.", runId: "r1" },
+    { agent: pentoshi, scheduleId: "pentoshi-scan", text: "ETH funding negative; long setup.", runId: "r2", copyOf: "mayne" },
+  ]);
+  const prompt = seen.find((p) => /SOL memes quiet/.test(p))!;
+  assert.match(prompt, /Ansem reports to you \(ansem-scan\)/);
+  assert.match(prompt, /Pentoshi's report to Mayne \(pentoshi-scan\), a copy for you/);
+  assert.match(prompt, /The one marked "a copy for you" \(Pentoshi's, already with Mayne\) is for your own read only: hand nothing off from it/);
+  // All for the lead: no such line.
+  seen.length = 0;
+  await deliverReports(jarvis, "mantis", [{ agent: ansem, scheduleId: "ansem-scan", text: "Only Ansem.", runId: "r3" }]);
+  assert.doesNotMatch(seen.find((p) => /Only Ansem/.test(p))!, /a copy for you/);
+});

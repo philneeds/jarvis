@@ -81,7 +81,12 @@ export async function evaluateCheck(c: BenchmarkCheck, data: CheckData): Promise
     const read = `read ${fmtAt(readAt)}`;
     if (c.kind === "kubera_item") {
       const q = c.name.toLowerCase();
-      const hit = Object.entries(last.items).find(([n]) => n.toLowerCase() === q) ?? Object.entries(last.items).find(([n]) => n.toLowerCase().includes(q));
+      // The exact name, else the one account that contains it; "Chase" with both a checking and a card on record is
+      // not guessed at (the first match was once the card, a debt, judged as the balance).
+      const all = Object.entries(last.items);
+      const close = all.filter(([n]) => n.toLowerCase().includes(q));
+      const hit = all.find(([n]) => n.toLowerCase() === q) ?? (close.length === 1 ? close[0] : undefined);
+      if (!hit && close.length > 1) return { at, source, error: `"${c.name}" matches ${close.length} accounts in Kubera (${close.slice(0, 4).map(([n]) => n).join(", ")}); the check needs the exact name` };
       if (!hit) return { at, source, error: `no account called "${c.name}" in Kubera` };
       return { at, source: `Kubera · ${hit[0]}`, figure: `${money(hit[1])}, ${read}`, met: holds(c.op, hit[1], c.value) };
     }
@@ -89,10 +94,9 @@ export async function evaluateCheck(c: BenchmarkCheck, data: CheckData): Promise
     if (!c.days) return { at, source: "Kubera net worth", figure: `${money(nw)}, ${read}`, met: holds(c.op, nw, c.value) };
     const since = dayBefore(easternDay(now.getTime()), c.days - 1);
     const window = k.history.filter((h) => h.day >= since);
-    const covered = window.length >= c.days;
-    const met = covered && window.every((h) => holds(c.op, h.netWorth, c.value));
+    const met = heldFor(c.days, window.map((h) => holds(c.op, h.netWorth, c.value)));
     const low = Math.min(...window.map((h) => h.netWorth)), high = Math.max(...window.map((h) => h.netWorth));
-    return { at, source: "Kubera net worth", figure: `${money(nw)} today; ${window.length} of ${c.days} days on record${window.length > 1 ? ` (${money(low)} to ${money(high)})` : ""}, ${read}`, met };
+    return { at, source: "Kubera net worth", figure: `${money(nw)} today; ${window.length} of ${c.days} days on record${window.length > 1 ? ` (${money(low)} to ${money(high)})` : ""}${met === undefined ? "; not judged until every day is on record" : ""}, ${read}`, ...(met === undefined ? {} : { met }) };
   }
   const source = `${VENTURES[c.venture as VentureId]?.short ?? c.venture} board · ${c.key}`;
   if (!data.metrics) return { at, source, error: "the board can't be read here" };
@@ -109,8 +113,19 @@ export async function evaluateCheck(c: BenchmarkCheck, data: CheckData): Promise
   const byDay = new Map<string, MetricPoint>();
   for (const p of points) { const d = easternDay(Date.parse(p.at)); if (d >= since) byDay.set(d, p); }
   const days = [...byDay.values()];
-  const met = days.length >= c.days && days.every((p) => holds(c.op, p.value, c.value));
-  return { at, source, figure: `${last.value.toLocaleString("en-US")} latest; ${days.length} of ${c.days} days on record, ${read}`, met };
+  const met = heldFor(c.days, days.map((p) => holds(c.op, p.value, c.value)));
+  return { at, source, figure: `${last.value.toLocaleString("en-US")} latest; ${days.length} of ${c.days} days on record${met === undefined ? "; not judged until every day is on record" : ""}, ${read}`, ...(met === undefined ? {} : { met }) };
+}
+
+/**
+ * A "held for N days" verdict. A day that breaks the rule: not met. Every one of the N days on record and holding:
+ * met. Days missing and none broken: not judged, so the tick stays as it was. (A missing day used to read as "not
+ * met": the window includes today, so every night before the day's figure came in, a met benchmark unticked itself
+ * and ticked back in the morning; one day of HQ being down did the same.)
+ */
+export function heldFor(days: number, held: boolean[]): boolean | undefined {
+  if (held.some((h) => !h)) return false;
+  return held.length >= days ? true : undefined;
 }
 
 /** The same check, judged: did anything about the tick change? */

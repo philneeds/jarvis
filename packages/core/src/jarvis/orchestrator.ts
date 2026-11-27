@@ -331,7 +331,7 @@ export class Jarvis {
       const p = (a.payload ?? {}) as { id?: unknown; benchmarks?: unknown };
       if (typeof p.id !== "string" || !Array.isArray(p.benchmarks)) throw new Error("goals.benchmarks needs the goal id and a list of benchmarks");
       // A benchmark may carry a check (Kubera net worth, a Kubera account, a board figure): HQ then ticks it itself.
-      const list = (p.benchmarks as { text?: unknown; weight?: unknown; done?: unknown; check?: unknown }[]).filter((b) => b && typeof b.text === "string" && b.text.trim()).map((b) => ({ text: String(b.text), weight: Number(b.weight), ...(typeof b.done === "boolean" ? { done: b.done } : {}), ...(b.check ? { check: parseCheck(b.check) ?? null } : {}) }));
+      const list = (p.benchmarks as { text?: unknown; weight?: unknown; done?: unknown; check?: unknown }[]).filter((b) => b && typeof b.text === "string" && b.text.trim()).map((b) => ({ text: String(b.text), weight: Number(b.weight), ...(typeof b.done === "boolean" ? { done: b.done } : {}), ...(b.check === null ? { check: null } : parseCheck(b.check) ? { check: parseCheck(b.check) } : {}) }));
       if (!list.length) throw new Error("no benchmarks in the proposal");
       const g = await this.updateGoal(p.id, { benchmarks: list }, a.agentId);
       if (!g) throw new Error("no goal with that id; check goals_list");
@@ -1317,7 +1317,9 @@ export class Jarvis {
         const done = b.done ?? old?.done ?? false;
         // A check named here replaces the old one (null clears it); left out, the old check and its last reading stay.
         const check = b.check === undefined ? old?.check : b.check ?? undefined;
-        const keep = check && check === old?.check ? { auto: old?.auto, paused: old?.paused } : {};
+        // The same rule sent again (a card that resends every benchmark with its check) is the same check: its last
+        // reading stays, and so does Phil's pause (he unticked it by hand; HQ must not tick it back over him).
+        const keep = check && old?.check && JSON.stringify(check) === JSON.stringify(old.check) ? { auto: old?.auto, paused: old?.paused } : {};
         return { id: old?.id ?? randomUUID().slice(0, 8), text, weight: Math.max(1, Math.min(100, Math.round(Number.isFinite(b.weight) ? b.weight! : 1))), done, doneAt: done ? old?.doneAt ?? now : undefined, ...(check ? { check } : {}), ...(keep.auto ? { auto: keep.auto } : {}), ...(keep.paused ? { paused: true } : {}) };
       });
     }
@@ -1600,9 +1602,9 @@ export class Jarvis {
     const r = await watchConnections({
       probes, store: this.store,
       raise: async (title, why) => (await this.raiseAttention({ title, why, agentId: "einstein", venture: "command" })).id,
-      resolve: async (id, name, summary) => {
+      resolve: async (id, name, summary, back) => {
         await this.attentionUpdate(id, "done");
-        await this.notify?.(`${name} is working again`, summary.split("\n")[0]!.slice(0, 200)).catch(() => undefined);
+        if (back) await this.notify?.(`${name} is working again`, summary.split("\n")[0]!.slice(0, 200)).catch(() => undefined);
       },
     });
     // The log gets a line only when something changed: a "still fine" every three hours would bury it.

@@ -56,7 +56,15 @@ export async function runChecks(probes: Probe[], opts: { only?: string[]; timeou
 }
 
 /** Keep what was last seen for each connection, so Settings shows it without checking again. */
-export async function saveChecks(store: Pick<Store, "settings">, results: CheckResult[], known?: string[]): Promise<CheckResult[]> {
+export function saveChecks(store: Pick<Store, "settings">, results: CheckResult[], known?: string[]): Promise<CheckResult[]> {
+  // One save at a time per store: Settings asks for each connection on its own, side by side, while the watch and
+  // an agent's connections_check may be saving too, and a read-then-write would drop the others' results.
+  const run = (saving.get(store) ?? Promise.resolve()).catch(() => undefined).then(() => saveChecksNow(store, results, known));
+  saving.set(store, run);
+  return run;
+}
+const saving = new WeakMap<object, Promise<unknown>>();
+async function saveChecksNow(store: Pick<Store, "settings">, results: CheckResult[], known?: string[]): Promise<CheckResult[]> {
   const was = await store.settings.get<CheckResult[]>(CONNECTIONS_KEY, []);
   const fresh = new Map(results.map((r) => [r.id, r]));
   // Order: the order the probes come in when known; a connection that no longer exists is dropped.
@@ -143,8 +151,8 @@ export interface WatchDeps {
   store: Pick<Store, "settings">;
   /** Raise a Needs-you item (it reaches his phone); returns its id. */
   raise(title: string, why: string): Promise<string>;
-  /** Close the item and say it's back. */
-  resolve(itemId: string, title: string, summary: string): Promise<void>;
+  /** Close the item. `back` is true only when the connection works again (then Phil is told); false when it simply isn't set up any more. */
+  resolve(itemId: string, title: string, summary: string, back: boolean): Promise<void>;
   now?: () => number;
 }
 
@@ -162,7 +170,7 @@ export async function watchConnections(d: WatchDeps): Promise<{ checked: number;
   for (const r of results) {
     const w: Watch = { ...(was[r.id] ?? { fails: 0, seenOk: false }) };
     if (r.state === "ok") {
-      if (w.itemId) { await d.resolve(w.itemId, r.name, r.summary).catch(() => undefined); back.push(r.name); }
+      if (w.itemId) { await d.resolve(w.itemId, r.name, r.summary, true).catch(() => undefined); back.push(r.name); }
       next[r.id] = { fails: 0, seenOk: true };
     } else if (r.state === "failed") {
       w.fails++;
@@ -173,8 +181,9 @@ export async function watchConnections(d: WatchDeps): Promise<{ checked: number;
       }
       next[r.id] = w;
     } else {
-      // Not set up any more, or not checkable: no alarm, and an open item about it is closed.
-      if (w.itemId) await d.resolve(w.itemId, r.name, r.summary).catch(() => undefined);
+      // Not set up any more (Phil disconnected it), or not checkable: no alarm, and an open item about it is closed
+      // quietly. It is not "working again", and he isn't told it is.
+      if (w.itemId) await d.resolve(w.itemId, r.name, r.summary, false).catch(() => undefined);
       next[r.id] = { fails: 0, seenOk: w.seenOk };
     }
   }

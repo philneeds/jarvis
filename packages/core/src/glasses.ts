@@ -116,7 +116,18 @@ const dayOf = (at: number, tz = process.env.PHIL_TZ || "America/New_York") => ne
  * Keep what the glasses heard, sealed at rest (it is other people's words as much as Phil's). Grouped by day; a day
  * holds up to about 400 KB of text (some twelve hours of steady talk), and days older than two weeks are dropped.
  */
-export async function saveHeard(store: Pick<Store, "settings">, segments: Heard[], now = Date.now()): Promise<{ kept: number }> {
+export function saveHeard(store: Pick<Store, "settings">, segments: Heard[], now = Date.now()): Promise<{ kept: number }> { return inTurn(store, () => saveHeardNow(store, segments, now)); }
+/**
+ * One change to the heard lines at a time per store: a batch that read a day's lines just before "Erase all" must
+ * not write them back after it.
+ */
+const turns = new WeakMap<object, Promise<unknown>>();
+function inTurn<T>(store: object, fn: () => Promise<T>): Promise<T> {
+  const run = (turns.get(store) ?? Promise.resolve()).catch(() => undefined).then(fn);
+  turns.set(store, run);
+  return run;
+}
+async function saveHeardNow(store: Pick<Store, "settings">, segments: Heard[], now: number): Promise<{ kept: number }> {
   const clean = segments
     .map((s) => ({ at: Number.isFinite(Date.parse(s.at)) ? new Date(Math.min(Date.parse(s.at), now)).toISOString() : new Date(now).toISOString(), text: String(s.text ?? "").replace(/\s+/g, " ").trim().slice(0, 2000) }))
     .filter((s) => s.text.length > 1 && now - Date.parse(s.at) < KEEP_DAYS * 86_400_000);
@@ -132,26 +143,39 @@ export async function saveHeard(store: Pick<Store, "settings">, segments: Heard[
     await writeSealedSetting(store, HEARD_PREFIX + day, [...was, ...room].sort((a, b) => a.at.localeCompare(b.at)));
     kept += room.length;
   }
-  // Two weeks and no more.
-  const index = await store.settings.get<string[]>(HEARD_PREFIX + "days", []);
-  const days = [...new Set([...index, ...byDay.keys()])].sort();
-  const cutoff = dayOf(now - KEEP_DAYS * 86_400_000);
-  for (const d of days.filter((d) => d < cutoff)) await store.settings.set(HEARD_PREFIX + d, null);
-  await store.settings.set(HEARD_PREFIX + "days", days.filter((d) => d >= cutoff));
+  await pruneNow(store, now, [...byDay.keys()]);
   return { kept };
 }
+/** Two weeks and no more: days older than that are dropped. `add` are days just written, to put on the list. */
+async function pruneNow(store: Pick<Store, "settings">, now: number, add: string[] = []): Promise<number> {
+  const index = await store.settings.get<string[]>(HEARD_PREFIX + "days", []);
+  const days = [...new Set([...index, ...add])].sort();
+  const cutoff = dayOf(now - KEEP_DAYS * 86_400_000);
+  const old = days.filter((d) => d < cutoff);
+  for (const d of old) await store.settings.set(HEARD_PREFIX + d, null);
+  if (old.length || add.some((d) => !index.includes(d))) await store.settings.set(HEARD_PREFIX + "days", days.filter((d) => d >= cutoff));
+  return old.length;
+}
+/**
+ * Drop heard days past the two weeks. Run on a timer by HQ as well as on every save: with the memory switched off
+ * (or the glasses unpaired) nothing is saved any more, and the last two weeks would otherwise sit there for good.
+ */
+export function pruneHeard(store: Pick<Store, "settings">, now = Date.now()): Promise<number> { return inTurn(store, () => pruneNow(store, now)); }
 /** Forget everything the glasses heard (Settings, when Phil turns the memory off and asks). */
-export async function forgetHeard(store: Pick<Store, "settings">): Promise<number> {
-  const days = await store.settings.get<string[]>(HEARD_PREFIX + "days", []);
-  for (const d of days) await store.settings.set(HEARD_PREFIX + d, null);
-  await store.settings.set(HEARD_PREFIX + "days", []);
-  return days.length;
+export function forgetHeard(store: Pick<Store, "settings">): Promise<number> {
+  return inTurn(store, async () => {
+    const days = await store.settings.get<string[]>(HEARD_PREFIX + "days", []);
+    for (const d of days) await store.settings.set(HEARD_PREFIX + d, null);
+    await store.settings.set(HEARD_PREFIX + "days", []);
+    return days.length;
+  });
 }
 export async function heardDays(store: Pick<Store, "settings">): Promise<string[]> { return store.settings.get<string[]>(HEARD_PREFIX + "days", []); }
 
 /** What was heard, for an agent: one day (default today), or every kept day when searching; newest last; a time on each line. */
 export async function heardText(store: Pick<Store, "settings">, opts: { day?: string; query?: string; max?: number; now?: number } = {}): Promise<string> {
   const now = opts.now ?? Date.now();
+  await pruneHeard(store, now);
   const days = await heardDays(store);
   if (!days.length) return (await glassesOptions(store)).listen ? "Nothing heard yet: the glasses' all-day memory is on, but they haven't sent anything." : "The glasses' all-day memory is off (Phil turns it on in HQ › Settings › Glasses). Nothing is kept.";
   const q = opts.query?.trim().toLowerCase();

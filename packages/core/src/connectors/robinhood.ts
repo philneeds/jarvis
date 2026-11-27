@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Store } from "../store/types.js";
 import { defineTool, type ToolDef } from "../tools/index.js";
 import type { Describer, Executor } from "../jarvis/orchestrator.js";
-import { sealJson, openJson, isSealedValue } from "../secrets.js";
+import { sealJson, openJson, isSealedValue, SIGN_IN_LOCKED } from "../secrets.js";
 
 /**
  * Robinhood's official agent access (the Trading MCP server, public beta since May 2026) for Buffett and Munger.
@@ -157,7 +157,7 @@ export class RobinhoodConnector {
 
   private async accessToken(force = false): Promise<string> {
     const t = await this.tokens();
-    if (!t) throw new Error("Robinhood isn't connected. Phil connects it in Settings.");
+    if (!t) throw new Error((await this.store.settings.get<unknown>(TOKENS_KEY, null)) != null ? `Robinhood: ${SIGN_IN_LOCKED}.` : "Robinhood isn't connected. Phil connects it in Settings.");
     if (force || (t.expires_at && this.now() > t.expires_at - 60_000)) {
       if (!t.refresh_token) throw new Error("Robinhood's sign-in expired; reconnect it in Settings.");
       const c = await this.client();
@@ -169,7 +169,10 @@ export class RobinhoodConnector {
   async disconnect() { await this.store.settings.set(TOKENS_KEY, null); this.session = undefined; this.toolsCache = undefined; }
   async status() {
     const t = await this.tokens();
-    return { configured: true, connected: !!t, connectedAt: t?.connectedAt, lastFetch: await this.store.settings.get<{ ok: boolean; at: string; error?: string } | null>(STATUS_KEY, null) };
+    // Saved but sealed under a server secret HQ no longer has: said as a problem, so the connections watch tells
+    // Phil rather than reading it as "never connected".
+    const locked = !t && (await this.store.settings.get<unknown>(TOKENS_KEY, null)) != null;
+    return { configured: true, connected: !!t, connectedAt: t?.connectedAt, ...(locked ? { problem: SIGN_IN_LOCKED } : {}), lastFetch: await this.store.settings.get<{ ok: boolean; at: string; error?: string } | null>(STATUS_KEY, null) };
   }
 
   // ---- MCP over HTTP ------------------------------------------------------------------------------

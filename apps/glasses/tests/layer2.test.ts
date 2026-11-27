@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Controller, CARD_MS, FLUSH_MS, type Glass } from "../src/background/controller";
+import { Controller, CARD_MS, FLUSH_MS, SILENCE_MS, QUIET_MS, type Glass } from "../src/background/controller";
 import type { Card, Fetch } from "../src/shared/hq";
 import { G2 } from "../src/shared/pages";
 import type { AppState } from "../src/shared/channels";
@@ -21,6 +21,7 @@ function rig(o: { approvals?: boolean; listen?: boolean; cards?: Card[]; decide?
   let hear: ((h: { text: string; isFinal: boolean }) => void) | undefined;
   let all: ((h: { text: string; isFinal: boolean }) => void) | undefined;
   let hushed = 0;
+  const clock = { t: Date.parse("2026-11-25T15:00:00Z") };
   const opts = { approvals: o.approvals ?? true, listen: o.listen ?? false };
   const queue = [...(o.replies ?? [])];
   const ok = (j: unknown, status = 200) => ({ ok: status < 300, status, json: async () => j });
@@ -46,14 +47,14 @@ function rig(o: { approvals?: boolean; listen?: boolean; cards?: Card[]; decide?
     notify: (s) => states.push(s),
     fetch,
     timers: { set: (fn, ms) => { const t = { fn, ms, live: true }; timers.push(t); return t; }, clear: (h) => { (h as { live: boolean }).live = false; } },
-    now: () => Date.parse("2026-11-25T15:00:00Z"),
+    now: () => clock.t,
   };
   const c = new Controller(glass);
   const elapse = (ms: number) => { const t = timers.find((x) => x.live && x.ms === ms); assert.ok(t, `no live ${ms} ms timer`); t.live = false; t.fn(); };
   const settle = () => new Promise((r) => setTimeout(r, 10));
   /** Hold to talk and say it. */
   const speak = async (text: string) => { c.talk(); hear?.({ text, isFinal: true }); await settle(); };
-  return { c, shown, states, said, store, calls, opts, elapse, settle, speak, overhear: (text: string, isFinal = true) => all?.({ text, isFinal }), allOn: () => !!all, hushed: () => hushed, last: () => shown[shown.length - 1]!, paths: () => calls.map((x) => x.path) };
+  return { c, shown, states, said, store, calls, opts, elapse, settle, speak, overhear: (text: string, isFinal = true) => all?.({ text, isFinal }), hearQ: (text: string, isFinal = false) => hear?.({ text, isFinal }), live: (ms: number) => timers.filter((x) => x.live && x.ms === ms).length, advance: (ms: number) => { clock.t += ms; }, allOn: () => !!all, hushed: () => hushed, last: () => shown[shown.length - 1]!, paths: () => calls.map((x) => x.path) };
 }
 
 test("a spoken question's answer is said aloud (the answer, not \"on it\"); a typed one isn't; the phone switch turns it off", async () => {
@@ -116,7 +117,7 @@ test("cards: next and a tap move on, stop clears, anything else is a question ag
   await r.speak("show me my approvals");
   assert.match(r.last().body, /^1\/2 Stella/);
   r.elapse(CARD_MS);
-  assert.equal(r.c.state().phase, "idle", "a card left alone leaves the view after two minutes");
+  assert.equal(r.c.state().phase, "idle", "a card left alone leaves the view after a minute and a half");
   await r.speak("any cards");
   await r.speak("what time is it");
   assert.ok(r.paths().includes("ask"), "not a command: it goes to Jarvis, and the cards are put away");
@@ -166,7 +167,7 @@ test("all-day memory: off unless HQ says on; finished lines between questions go
   await r.settle();
   const sent = r.calls.filter((x) => x.path === "heard");
   assert.equal(sent.length, 1);
-  assert.deepEqual((sent[0]!.body!.segments as { text: string }[]).map((s) => s.text)[0], "Mike said the roof is done Friday");
+  assert.deepEqual((sent[0]!.body!.segments as { text: string }[]).map((s) => s.text), ["Mike said the roof is done Friday"], "the question itself isn't in the memory");
   assert.equal(r.c.state().unsent, 0);
 
   // Turned off in HQ: the next send is refused, the mic is let go, and nothing is kept on the phone.
@@ -199,4 +200,50 @@ test("all-day memory: kept on the phone while HQ can't be reached, and HQ's swit
   // Four more two-minute sends, then the fifth looks at HQ's switches again.
   for (let i = 0; i < 4; i++) { down.elapse(FLUSH_MS); await down.settle(); }
   assert.equal(down.calls.filter((x) => x.path === "ping").length, 2);
+});
+
+test("review, Nov 27: memory turned on in HQ starts by itself; a question ended by a pause and Jarvis's voice stay out of it", async () => {
+  // Off at pairing. Phil turns it on in Settings: within ten minutes the glasses notice, with no restart and no Test press.
+  const r = rig({ listen: false, replies: [{ replies: [{ id: "x", who: "Jarvis", kind: "final", text: "The roof is done Friday." }], done: true }] });
+  await r.c.init();
+  assert.equal(r.allOn(), false);
+  r.opts.listen = true;
+  for (let i = 0; i < 5; i++) { r.elapse(FLUSH_MS); await r.settle(); }
+  assert.equal(r.allOn(), true);
+  assert.equal(r.c.state().listen, true);
+  // A question that ends on a pause: by the time its final words reach the memory's listener, the asking has begun.
+  r.c.talk();
+  r.hearQ("what did Mike say about the roof");
+  r.elapse(SILENCE_MS);
+  await r.settle();
+  r.overhear("What did Mike say about the roof?");
+  // The tail of Jarvis's spoken answer, heard back a moment after it stopped.
+  r.overhear("The roof is done Friday.");
+  assert.equal(r.c.state().unsent, 0);
+  // A few seconds on, the room is the room again.
+  r.advance(QUIET_MS + 1);
+  r.overhear("Dana wants the invoice by Monday");
+  assert.equal(r.c.state().unsent, 1);
+  // Turned off again in HQ: the refusal lets the mic go, and the clock keeps looking so it can come back on.
+  const off = rig({ listen: true, heard: 403 });
+  await off.c.init();
+  off.overhear("x y z");
+  off.elapse(FLUSH_MS);
+  await off.settle();
+  assert.equal(off.allOn(), false);
+  assert.equal(off.live(FLUSH_MS), 1, "still looking at HQ's switch");
+});
+
+test("review, Nov 27: \"approve\" heard in two parts is sent once, and the card isn't called unrun", async () => {
+  const r = rig();
+  await r.c.init();
+  await r.speak("what needs me");
+  r.c.talk();
+  r.hearQ("approve");        // the words so far: a pause timer starts
+  r.hearQ("approve", true);  // then the finished line
+  await r.settle();
+  assert.equal(r.live(SILENCE_MS), 0, "the pause timer doesn't outlive the command");
+  assert.equal(r.calls.filter((x) => x.path === "decide").length, 1);
+  assert.ok(!r.said.includes("Nothing ran. It's on the glasses."));
+  assert.match(r.last().body, /^1\/1 Pentoshi/);
 });

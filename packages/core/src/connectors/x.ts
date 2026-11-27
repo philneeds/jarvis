@@ -123,12 +123,24 @@ export class XConnector {
     const a = h ? all.find((x) => x.handle.toLowerCase() === h) : all[0];
     if (!a) throw new Error(`@${handle} isn't connected. Connected: ${all.map((x) => "@" + x.handle).join(", ")}.`);
     if (a.expires_at > this.now()) return a;
+    // X's refresh tokens work once. Two renewals of one account side by side (an agent and the connections watch)
+    // would spend the same token twice and kill the session, so the second waits for the first and reads its result.
+    const going = this.renewing.get(a.userId);
+    if (going) return going;
+    const work = this.renew(a).finally(() => this.renewing.delete(a.userId));
+    this.renewing.set(a.userId, work);
+    return work;
+  }
+  private renewing = new Map<string, Promise<XAccount>>();
+  private async renew(a: XAccount): Promise<XAccount> {
     if (!a.refresh_token) throw new Error(`@${a.handle}'s X session expired; reconnect under Settings.`);
     const res = await this.f(`${API}/oauth2/token`, { method: "POST", headers: this.tokenHeaders(), body: new URLSearchParams({ refresh_token: a.refresh_token, grant_type: "refresh_token", client_id: this.opts.clientId }) });
     if (!res.ok) throw new Error(`X token refresh failed for @${a.handle}: ${res.status}`);
     const j = (await res.json()) as { access_token: string; refresh_token?: string; expires_in: number };
     const next: XAccount = { ...a, access_token: j.access_token, refresh_token: j.refresh_token ?? a.refresh_token, expires_at: this.now() + (j.expires_in - 60) * 1000 };
-    await writeSealedSetting(this.store, ACCOUNTS_KEY, all.map((x) => (x.userId === a.userId ? next : x)));
+    // Written over a fresh read: another account may have renewed while this one was asking X, and writing the
+    // list as it was read before would put that account's spent token back.
+    await writeSealedSetting(this.store, ACCOUNTS_KEY, (await this.accounts()).map((x) => (x.userId === a.userId ? next : x)));
     return next;
   }
 

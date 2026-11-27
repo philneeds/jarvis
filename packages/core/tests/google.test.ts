@@ -266,7 +266,7 @@ test("unsubscribe sweep: gmail_senders says how each sender unsubscribes; gmail.
     if (u.startsWith("https://store.com/unsub")) { calls.push({ url: u, init }); return new Response("ok", { status: 200 }); }
     return f(url, init);
   }) as typeof fetch;
-  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: sweep });
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: sweep, resolveHost: async () => ["93.184.216.34"] });
   await g.exchangeCode("c1");
   const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("m")], grok: [mockProvider("g")] } }) });
   jarvis.addConnector(g, GoogleConnector.promptHint());
@@ -300,6 +300,55 @@ test("unsubscribe sweep: gmail_senders says how each sender unsubscribes; gmail.
   assert.ok(done, `report line missing: ${log.map((e) => e.summary).join(" | ")}`);
   assert.match(done!.summary, /Need a click from Phil.*page@only.com → https:\/\/only.com\/manage/);
   assert.match(done!.summary, /Not done: nobody@gone.com \(no mail from this address\)/);
+});
+
+test("an unsubscribe header is a stranger's: it can't write mail in Phil's name, add recipients, or point HQ at an inside address", async () => {
+  const { rawMail, notPublic, isPrivateAddress, unsubscribeSubject } = await import("../src/index.js");
+  // A subject that smuggles a Bcc and a body (review, Nov 27 2026): dropped for the plain word, and no header can hold a line break anyway.
+  const evil = parseListUnsubscribe("<mailto:x@evil.example?subject=hi%0D%0ABcc:%20boss@corp.example%0D%0A%0D%0AWire%20the%20money>");
+  assert.deepEqual(evil.mailto, { to: "x@evil.example", subject: undefined });
+  assert.equal(unsubscribeSubject("Please wire the money to this account today"), undefined, "a sentence is a message, not an unsubscribe token");
+  assert.equal(unsubscribeSubject("unsubscribe:9f3a-77c1"), "unsubscribe:9f3a-77c1");
+  const raw = Buffer.from(rawMail({ to: "a@b.example\r\nBcc: c@d.example", subject: "hi\r\nBcc: boss@corp.example\r\n\r\nbody", body: "unsubscribe" }), "base64url").toString();
+  assert.equal(raw.split("\r\n\r\n")[0]!.split("\r\n").filter((l) => /^bcc:/i.test(l)).length, 0, "no smuggled header");
+  assert.equal(raw.split("\r\n\r\n").length, 2, "one header block, one body");
+  assert.equal(parseListUnsubscribe("<mailto:a@b.example,c@d.example>").mailto, undefined, "one address only");
+  // One-click links: public https only.
+  const pub = async () => ["93.184.216.34"], inside = async () => ["10.0.0.5"];
+  assert.equal(await notPublic("https://store.example/unsub?x=1", pub), undefined);
+  assert.equal(await notPublic("https://127.0.0.1/admin", pub), "a private address");
+  assert.equal(await notPublic("https://[::1]/x", pub), "a private address");
+  assert.equal(await notPublic("https://169.254.169.254/latest/meta-data", pub), "a private address");
+  assert.equal(await notPublic("https://localhost/x", pub), "an internal name");
+  assert.equal(await notPublic("https://db.internal/x", pub), "an internal name");
+  assert.equal(await notPublic("https://rebind.evil.example/x", inside), "it points at a private address");
+  assert.equal(await notPublic("https://store.example:8443/x", pub), "an unusual port");
+  assert.equal(await notPublic("https://user:pw@store.example/x", pub), "it carries a sign-in");
+  assert.equal(await notPublic("http://store.example/x", pub), "not https");
+  for (const ip of ["10.1.2.3", "172.16.0.1", "192.168.1.1", "127.0.0.1", "100.64.0.1", "0.0.0.0", "::ffff:10.0.0.1", "fd00::1", "fe80::1"]) assert.equal(isPrivateAddress(ip), true, ip);
+  for (const ip of ["93.184.216.34", "8.8.8.8", "2606:4700::1111"]) assert.equal(isPrivateAddress(ip), false, ip);
+
+  // End to end: an approved card for a sender whose link points inside sends nothing, and a redirect is not followed.
+  const store = memoryStore(); await store.init();
+  const { f } = fakeGoogle();
+  const asked: string[] = [];
+  const hdr = (unsub: string) => ({ id: "x", payload: { headers: [{ name: "List-Unsubscribe", value: unsub }, { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" }] } });
+  const net = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url);
+    const json = (o: unknown) => new Response(JSON.stringify(o), { headers: { "content-type": "application/json" } });
+    if (u.includes("/messages?q=from%3Ain%40side.example")) return json({ messages: [{ id: "i1" }] });
+    if (u.includes("/messages?q=from%3Ahop%40redir.example")) return json({ messages: [{ id: "r1" }] });
+    if (u.includes("/messages/i1?")) return json(hdr("<https://inside.example/unsub>"));
+    if (u.includes("/messages/r1?")) return json(hdr("<https://redir.example/unsub>"));
+    if (u.startsWith("https://inside.example") || u.startsWith("https://redir.example")) { asked.push(`${u} ${init?.redirect}`); return new Response(null, { status: 302, headers: { location: "http://169.254.169.254/" } }); }
+    return f(url, init);
+  }) as typeof fetch;
+  const g = new GoogleConnector(store, { clientId: "id", clientSecret: "sec", redirectUri: "http://hq/cb", fetch: net, resolveHost: async (h) => (h === "inside.example" ? ["192.168.0.10"] : ["93.184.216.34"]) });
+  await g.exchangeCode("c1");
+  const out = await g.unsubscribe(["in@side.example", "hop@redir.example"]);
+  assert.deepEqual(out[0], { from: "in@side.example", result: "failed", detail: "its one-click link was refused (it points at a private address); nothing was sent" });
+  assert.deepEqual(out[1], { from: "hop@redir.example", result: "link", detail: "https://redir.example/unsub" }, "a redirect is handed to Phil as a link, not followed");
+  assert.deepEqual(asked, ["https://redir.example/unsub manual"]);
 });
 
 test("Oscar's Sunday 4:00 routine carries Phil's unsubscribe sweep", async () => {

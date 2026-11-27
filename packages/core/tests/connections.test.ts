@@ -204,3 +204,30 @@ test("the watch runs every three hours as housekeeping, on the Schedules screen,
   assert.equal(phone.at(-1), "Robinhood is working again | Connected.");
   assert.ok((await jarvis.attentionList()).some((i) => i.title === "Robinhood stopped working" && i.status === "done"));
 });
+
+test("review, Nov 27: a connection that stops being set up closes its alert quietly; only one that works again is \"working again\"", async () => {
+  const { watchConnections, Jarvis, ModelRouter, mockProvider } = await import("../src/index.js");
+  const store = memoryStore(); await store.init();
+  const phone: string[] = [];
+  const jarvis = new Jarvis({ store, router: new ModelRouter({ store, providers: { claude: [mockProvider("mock-claude")], grok: [mockProvider("mock-grok")] } }), notify: async (t) => { phone.push(t); } });
+  let state: "ok" | "fail" | "off" = "ok";
+  jarvis.connectionProbes = () => [{ id: "g", name: "Google", off: () => (state === "off" ? "No account connected." : undefined), run: async () => { if (state === "fail") throw new Error("sign-in expired"); return "fine"; } }];
+  await jarvis.watchConnections();
+  state = "fail"; await jarvis.watchConnections(); await jarvis.watchConnections();
+  assert.deepEqual(phone, ["Needs you: Google stopped working"]);
+  // Phil disconnects the broken account: the item closes, and nobody says it works.
+  state = "off"; await jarvis.watchConnections();
+  assert.deepEqual(phone, ["Needs you: Google stopped working"]);
+  assert.ok((await jarvis.attentionList()).some((i) => i.title === "Google stopped working" && i.status === "done"));
+  void watchConnections;
+});
+
+test("review, Nov 27: results saved side by side from Settings, the watch and an agent all land", async () => {
+  const store = memoryStore(); await store.init();
+  // A store whose reads and writes take a moment, as the database's do.
+  const slow = { settings: { get: async <T,>(k: string, d: T) => { await new Promise((r) => setTimeout(r, 5)); return store.settings.get<T>(k, d); }, set: async (k: string, v: unknown) => { await new Promise((r) => setTimeout(r, 5)); return store.settings.set(k, v); } } } as unknown as Parameters<typeof saveChecks>[0];
+  const ids = ["a", "b", "c", "d"];
+  const one = (id: string) => ({ id, name: id, state: "ok" as const, summary: "fine", ms: 1, at: "2026-11-27T00:00:00Z" });
+  await Promise.all(ids.map((id) => saveChecks(slow, [one(id)], ids)));
+  assert.deepEqual((await lastChecks(store)).map((r) => r.id), ids);
+});

@@ -28,6 +28,8 @@ export interface GoogleOptions {
   redirectUri: string;
   fetch?: typeof fetch;
   now?: () => number;
+  /** The addresses a host name resolves to (tests hand in their own); used to refuse one-click links that point inside. */
+  resolveHost?: (host: string) => Promise<string[]>;
   /** Accounts whose events may be changed directly, without approval. Default PERSONAL_CALENDARS. */
   personalCalendars?: string[];
   /** Business accounts and the venture lead who owns each, named when a direct change is refused. Default BUSINESS_CALENDARS. */
@@ -146,7 +148,7 @@ export class GoogleConnector {
     let bad = 0;
     for (const a of list) {
       try {
-        const token = await this.accessToken(a.email);
+        const token = await this.accessToken(a.email === "(unknown)" ? undefined : a.email);
         const res = await this.f(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`);
         if (!res.ok) throw new Error(`Google no longer accepts the sign-in (${res.status}); disconnect it and connect again`);
         const scope = ((await res.json()) as { scope?: string }).scope ?? "";
@@ -407,7 +409,12 @@ export class GoogleConnector {
         const h = (name: string) => j.payload?.headers?.find((x) => x.name.toLowerCase() === name.toLowerCase())?.value;
         const u = parseListUnsubscribe(h("List-Unsubscribe"), h("List-Unsubscribe-Post"));
         if (u.oneClick) {
-          const res = await this.f(u.oneClick, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "List-Unsubscribe=One-Click", redirect: "follow", signal: AbortSignal.timeout(15_000) });
+          // The link is a stranger's: it must be a public https address (never this server, the local network or a
+          // cloud metadata address), and a redirect is not followed (it could lead inside after the check).
+          const refused = await notPublic(u.oneClick, this.opts.resolveHost ?? resolveHost);
+          if (refused) { out.push({ from, result: "failed", detail: `its one-click link was refused (${refused}); nothing was sent` }); continue; }
+          const res = await this.f(u.oneClick, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "List-Unsubscribe=One-Click", redirect: "manual", signal: AbortSignal.timeout(15_000) });
+          if (res.status >= 300 && res.status < 400) { out.push({ from, result: "link", detail: u.oneClick }); continue; }
           if (!res.ok) { out.push({ from, result: "failed", detail: `the sender's one-click link answered ${res.status}` }); continue; }
           out.push({ from, result: "one-click", detail: u.oneClick });
         } else if (u.mailto) {
@@ -812,16 +819,63 @@ export function parseListUnsubscribe(header?: string, post?: string): ListUnsubs
   if (mail) {
     const m = /^mailto:([^?\s]+)(?:\?(.*))?$/i.exec(mail);
     const to = m?.[1] ? decodeURIComponent(m[1]) : "";
-    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    if (/^[^\s@<>,;:"']+@[^\s@<>,;:"']+\.[^\s@<>,;:"']+$/.test(to)) {
       const subject = m?.[2] ? new URLSearchParams(m[2]).get("subject") ?? undefined : undefined;
-      out.mailto = { to, subject: subject || undefined };
+      out.mailto = { to, subject: unsubscribeSubject(subject) };
     }
   }
   out.way = out.oneClick ? "one-click" : out.mailto ? "mailto" : out.link ? "link" : undefined;
   return out;
 }
 
+/**
+ * The subject a mailto: unsubscribe may carry: one line, a word or a token ("unsubscribe", "unsubscribe me",
+ * "leave-9f3a…"). The header is a stranger's, and this mail goes out from Phil's own account once he approves a card
+ * that only names the sender: anything that reads like a message (more than three words, a line break, over 150
+ * characters) is dropped for the plain word.
+ */
+export function unsubscribeSubject(raw?: string): string | undefined {
+  const s = (raw ?? "").trim();
+  if (!s) return undefined;
+  if (/[\x00-\x1f\x7f]/.test(s) || s.length > 150 || s.split(/\s+/).length > 3) return undefined;
+  return s;
+}
+
+/** A header value on one line: a line break in a subject or an address would start a header of the writer's choosing (Bcc, a body). */
+const oneLine = (s: string) => String(s).replace(/[\r\n\x00]+/g, " ").trim();
+
+async function resolveHost(host: string): Promise<string[]> {
+  const { lookup } = await import("node:dns/promises");
+  return (await lookup(host, { all: true })).map((a) => a.address);
+}
+/** Addresses that are this machine, the local network, link-local (cloud metadata lives there) or otherwise not the public internet. */
+export function isPrivateAddress(ip: string): boolean {
+  const a = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  const v4 = /^(?:::ffff:)?(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(a);
+  if (v4) {
+    const [x, y] = [Number(v4[1]), Number(v4[2])];
+    return x === 0 || x === 10 || x === 127 || (x === 100 && y >= 64 && y <= 127) || (x === 169 && y === 254) || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168) || (x === 192 && y === 0) || (x === 198 && (y === 18 || y === 19)) || x >= 224;
+  }
+  if (!a.includes(":")) return true; // not an address at all
+  return a === "::" || a === "::1" || /^f[cd]/.test(a) || /^fe[89ab]/.test(a) || a.startsWith("ff") || a.startsWith("64:ff9b:");
+}
+/** Why a stranger's link may not be requested from the server, or nothing when it is a public https address. */
+export async function notPublic(url: string, resolve: (host: string) => Promise<string[]> = resolveHost): Promise<string | undefined> {
+  let u: URL;
+  try { u = new URL(url); } catch { return "not a web address"; }
+  if (u.protocol !== "https:") return "not https";
+  if (u.username || u.password) return "it carries a sign-in";
+  if (u.port && u.port !== "443") return "an unusual port";
+  const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || /\.(localhost|local|internal|lan|home|intranet)$/.test(host) || !host.includes(".") && !host.includes(":")) return "an internal name";
+  if (/^[\d.]+$/.test(host) || host.includes(":")) return isPrivateAddress(host) ? "a private address" : undefined;
+  let ips: string[];
+  try { ips = await resolve(host); } catch { return "its host name doesn't resolve"; }
+  if (!ips.length) return "its host name doesn't resolve";
+  return ips.some(isPrivateAddress) ? "it points at a private address" : undefined;
+}
+
 export function rawMail(m: { to: string; subject: string; body: string }): string {
-  const msg = [`To: ${m.to}`, `Subject: ${m.subject}`, "MIME-Version: 1.0", 'Content-Type: text/plain; charset="UTF-8"', "", m.body].join("\r\n");
+  const msg = [`To: ${oneLine(m.to)}`, `Subject: ${oneLine(m.subject)}`, "MIME-Version: 1.0", 'Content-Type: text/plain; charset="UTF-8"', "", m.body].join("\r\n");
   return Buffer.from(msg).toString("base64url");
 }

@@ -40,9 +40,11 @@ const URL_KEY = "hq.url", KEY_KEY = "hq.key", SPEAK_KEY = "speak";
 /** How long silence lasts before what was heard is taken as the question, and before an answer leaves the view. */
 export const SILENCE_MS = 2500, NOTHING_HEARD_MS = 10_000, LINGER_MS = 40_000, NOTE_MS = 6000;
 /** A card stays up longer than an answer: it waits on a decision. */
-export const CARD_MS = 120_000;
+export const CARD_MS = 90_000;
 /** The all-day memory is sent this often; HQ's switches are looked at again every fifth time (ten minutes). */
 export const FLUSH_MS = 120_000;
+/** After a spoken question or Jarvis's own voice, how long the memory ignores what it hears (the tail arrives late). */
+export const QUIET_MS = 4000;
 const RECHECK_EVERY = 5, MAX_UNSENT = 500, SEND_AT = 40;
 
 /** Spoken commands handled on the glasses, never sent to Jarvis as a question. Whole utterances only. */
@@ -96,7 +98,7 @@ export class Controller {
   async init(): Promise<void> {
     const [url, key, speak] = await Promise.all([this.glass.store.get(URL_KEY), this.glass.store.get(KEY_KEY), this.glass.store.get(SPEAK_KEY)]);
     this.speakOn = speak !== "off";
-    if (url && key) { this.cfg = { url, key }; this.status = "Paired with HQ"; await this.refresh(); }
+    if (url && key) { this.cfg = { url, key }; this.status = "Paired with HQ"; await this.refresh(); this.startClock(); }
     this.tell();
   }
 
@@ -111,6 +113,7 @@ export class Controller {
       this.cfg = next;
       this.status = "Paired with HQ";
       this.apply(opts);
+      this.startClock();
     } catch (e) { this.status = `Not saved: ${(e as Error).message}`; }
     this.tell();
   }
@@ -138,33 +141,47 @@ export class Controller {
   }
   private apply(o: HqOptions): void {
     this.opts = o;
-    if (o.listen && this.cfg) this.startAllDay(); else this.stopAllDay(false);
+    if (o.listen && this.cfg) this.startAllDay(); else this.stopAllDay();
     if (!o.approvals && this.cards) { this.cards = undefined; if (this.phase === "reading") this.dismiss(); }
+  }
+  /**
+   * The two-minute clock runs for as long as the glasses are paired, memory on or off: it is also what looks at
+   * HQ's switches again (every fifth turn), which is how a memory turned on in Settings ever starts.
+   */
+  private startClock(): void {
+    if (this.tickTimer === undefined && this.cfg) this.tickTimer = this.timers.set(() => void this.tick(), FLUSH_MS);
   }
   private startAllDay(): void {
     if (!this.stopAll && this.glass.hearAll) this.stopAll = this.glass.hearAll((h) => this.overheard(h));
-    if (this.tickTimer === undefined) this.tickTimer = this.timers.set(() => void this.tick(), FLUSH_MS);
   }
-  private stopAllDay(keepClock: boolean): void {
+  /** Turned off in HQ: the mic is let go, and what was heard and not sent is dropped, not kept on the phone. */
+  private stopAllDay(): void {
     this.stopAll?.(); this.stopAll = undefined;
-    if (!keepClock && this.tickTimer !== undefined) { this.timers.clear(this.tickTimer); this.tickTimer = undefined; }
-    // Turned off in HQ: what was heard and not sent is dropped, not kept on the phone.
-    if (!keepClock) this.unsent = [];
+    this.unsent = [];
   }
+  /** Nothing goes to the memory until this moment: a question's own words and Jarvis's voice arrive a beat late. */
+  private quietUntil = 0;
+  private lastAsked = "";
+  private hushMemory(ms = QUIET_MS) { this.quietUntil = Math.max(this.quietUntil, this.now() + ms); }
+  private static same(a: string, b: string) { const n = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); return !!n(a) && n(a) === n(b); }
   /** A line for the memory: only finished ones, never a question to Jarvis (that's in the chat) or Jarvis's own voice. */
   private overheard(h: { text: string; isFinal: boolean }): void {
     const text = h.text.trim();
     if (!h.isFinal || !text || !this.opts.listen || this.phase === "listening" || this.speaking) return;
+    // The question just asked reaches this listener too, sometimes after the asking has begun; so does the tail of
+    // what Jarvis said aloud.
+    if (this.now() < this.quietUntil || Controller.same(text, this.lastAsked)) return;
     this.unsent.push({ at: new Date(this.now()).toISOString(), text });
     if (this.unsent.length > MAX_UNSENT) this.unsent.splice(0, this.unsent.length - MAX_UNSENT);
     if (this.unsent.length >= SEND_AT) void this.flush();
   }
   private async tick(): Promise<void> {
     this.tickTimer = undefined;
+    // The next turn is booked first: a send or a look that never comes back must not stop the clock.
+    this.startClock();
     await this.flush();
     // Every ten minutes, look again at what HQ has switched on (memory turned on in Settings starts here).
-    if (++this.ticks % RECHECK_EVERY === 0) await this.refresh();
-    if (this.cfg && (this.opts.listen || this.unsent.length)) this.tickTimer = this.timers.set(() => void this.tick(), FLUSH_MS);
+    if (++this.ticks % RECHECK_EVERY === 0) { await this.refresh(); this.tell(); }
   }
   /** Send what was heard. Kept on the phone when HQ can't be reached; dropped when HQ says the memory is off. */
   async flush(): Promise<void> {
@@ -173,9 +190,11 @@ export class Controller {
     const batch = this.unsent.slice(0, MAX_UNSENT);
     try {
       await this.hq().heard(batch);
-      this.unsent.splice(0, batch.length);
+      // Exactly the lines that went, wherever they sit now: more may have come in, and trimmed the list, meanwhile.
+      const sent = new Set(batch);
+      this.unsent = this.unsent.filter((x) => !sent.has(x));
     } catch (e) {
-      if (e instanceof HqError && e.status === 403) { this.opts = { ...this.opts, listen: false }; this.stopAllDay(false); }
+      if (e instanceof HqError && e.status === 403) { this.opts = { ...this.opts, listen: false }; this.stopAllDay(); }
     } finally { this.sending = false; this.tell(); }
   }
 
@@ -184,9 +203,9 @@ export class Controller {
   private async speak(text: string): Promise<void> {
     if (!this.speakOn || !this.glass.say || !text.trim()) return;
     this.speaking = true;
-    try { await this.glass.say(text); } catch { /* a voice that fails leaves the text in view */ } finally { this.speaking = false; }
+    try { await this.glass.say(text); } catch { /* a voice that fails leaves the text in view */ } finally { this.speaking = false; this.hushMemory(); }
   }
-  private hushNow(): void { if (this.speaking) this.glass.hush?.(); this.speaking = false; }
+  private hushNow(): void { if (this.speaking) { this.glass.hush?.(); this.hushMemory(); } this.speaking = false; }
 
   // ---- Asking -----------------------------------------------------------------------------------------------------
 
@@ -220,6 +239,10 @@ export class Controller {
     const q = text.trim();
     if (!q) return;
     this.stopHearing();
+    // The pause timer that would have sent these same words is done with: left running, it fired while a card was
+    // being approved and sent the approval a second time ("Nothing ran" for a card that had run).
+    if (this.timer !== undefined) { this.timers.clear(this.timer); this.timer = undefined; }
+    if (spoken) { this.lastAsked = q; this.hushMemory(); }
     // Spoken commands for the cards are handled here and never reach Jarvis.
     if (this.cards && this.cfg) {
       if (APPROVE.test(q)) return this.decideCard("approved");

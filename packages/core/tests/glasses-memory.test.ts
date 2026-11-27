@@ -44,3 +44,29 @@ test("a card read on the glasses is plain words; what moves money says where to 
   assert.ok(GLASSES_TOOLS.some((t) => t.name === "glasses_heard"));
   assert.ok(CHARTERS.lip!.tools!.includes("glasses_heard"));
 });
+
+test("review, Nov 27: two weeks means two weeks with the memory switched off too, and Erase all isn't undone by a batch in flight", async () => {
+  const { pruneHeard } = await import("../src/index.js");
+  const was = process.env.HQ_PASSWORD; process.env.HQ_PASSWORD = "pw";
+  try {
+    const store = memoryStore(); await store.init();
+    await setGlassesOptions(store, { listen: true });
+    await saveHeard(store, [{ at: iso(30), text: "Mike said Friday" }], NOW);
+    // Switched off: nothing is saved any more, so nothing would ever prune. HQ's timer does.
+    await setGlassesOptions(store, { listen: false });
+    assert.equal(await pruneHeard(store, NOW + 10 * 86_400_000), 0, "ten days on: still inside the two weeks");
+    assert.equal(await pruneHeard(store, NOW + 15 * 86_400_000), 1);
+    assert.deepEqual(await heardDays(store), []);
+    assert.equal(await store.settings.get("glasses.heard.2026-11-25", null), null);
+    // Reading does it too: recall never shows a day past the limit.
+    await setGlassesOptions(store, { listen: true });
+    await saveHeard(store, [{ at: iso(30), text: "old words" }], NOW);
+    assert.match(await heardText(store, { query: "old", now: NOW + 20 * 86_400_000 }), /all-day memory is on, but they haven't sent anything|Nothing heard/);
+    // A batch and an erase at the same moment: the erase wins whichever order they were asked in.
+    await saveHeard(store, [{ at: iso(5), text: "first" }], NOW);
+    const [, erased] = await Promise.all([saveHeard(store, [{ at: iso(1), text: "in flight" }], NOW), forgetHeard(store)]);
+    assert.equal(erased, 1);
+    assert.deepEqual(await heardDays(store), []);
+    assert.equal(await store.settings.get("glasses.heard.2026-11-25", null), null);
+  } finally { if (was === undefined) delete process.env.HQ_PASSWORD; else process.env.HQ_PASSWORD = was; }
+});
