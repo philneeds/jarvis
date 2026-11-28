@@ -46,14 +46,21 @@ export const FILE_MIME = {
   txt: "text/plain; charset=utf-8",
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  mp4: "video/mp4",
+  webm: "video/webm",
 } as const;
 export type FileExt = keyof typeof FILE_MIME;
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
-const FILE_ID = /^[0-9a-f-]{36}\.(pptx|xlsx|csv|txt|pdf|docx)$/;
+/** A clip the studio made (Joi's videos): larger than a document, still small enough to hold in memory and serve. */
+export const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+const FILE_ID = /^[0-9a-f-]{36}\.(pptx|xlsx|csv|txt|pdf|docx|mp4|webm)$/;
+/** A stored file that plays in the page (served with byte ranges, shown as a player in chat). */
+export const isVideoFile = (id: string) => /^[0-9a-f-]{36}\.(mp4|webm)$/.test(id);
 
 export async function saveFile(buf: Buffer, ext: FileExt): Promise<string> {
   if (!buf.length) throw new Error("empty file");
-  if (buf.length > MAX_FILE_BYTES) throw new Error("file is over 20 MB");
+  const video = ext === "mp4" || ext === "webm";
+  if (buf.length > (video ? MAX_VIDEO_BYTES : MAX_FILE_BYTES)) throw new Error(`file is over ${video ? "200" : "20"} MB`);
   const id = `${randomUUID()}.${ext}`;
   await fs.mkdir(dir(), { recursive: true });
   await fs.writeFile(path.join(dir(), id), buf);

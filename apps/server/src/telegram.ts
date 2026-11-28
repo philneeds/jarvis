@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent, saveImage, addDataFile, setTemplate, deckFile, readDocument, saveDoc, docsContext } from "@jarvis/core";
+import { bus, getAgent, type Approval, type Jarvis, type JarvisEvent, saveImage, loadImage, loadFile, isVideoFile, addDataFile, setTemplate, deckFile, readDocument, saveDoc, docsContext } from "@jarvis/core";
 import { transcribe as transcribeDefault, synthesize as synthesizeDefault, transcriptionProvider } from "./speech.js";
 
 /**
@@ -44,15 +44,31 @@ export class TelegramBot {
     } catch { /* the text already went */ }
   }
 
-  /** Send files (decks) as Telegram documents. */
+  /** Send files as Telegram documents (decks), and a clip the studio made as a video that plays in the chat. */
   async sendFiles(files: { id: string; name: string }[] = []) {
     for (const f of files.slice(0, 3)) {
-      const d = await deckFile(this.jarvis.store, f.id);
+      const d = (await deckFile(this.jarvis.store, f.id)) ?? (await loadFile(f.id).then((x) => (x ? { name: f.name, ...x } : undefined)));
       if (!d) continue;
+      // Telegram takes up to 50 MB from a bot; a bigger clip stays in HQ, where the message already links it.
+      if (d.data.length > 50 * 1024 * 1024) continue;
+      const video = isVideoFile(f.id);
       const form = new FormData();
       form.append("chat_id", this.opts.chatId);
-      form.append("document", new Blob([new Uint8Array(d.data)], { type: d.mime }), d.name);
-      await this.f(`https://api.telegram.org/bot${this.opts.token}/sendDocument`, { method: "POST", body: form }).catch(() => undefined);
+      form.append(video ? "video" : "document", new Blob([new Uint8Array(d.data)], { type: d.mime }), d.name);
+      await this.f(`https://api.telegram.org/bot${this.opts.token}/${video ? "sendVideo" : "sendDocument"}`, { method: "POST", body: form }).catch(() => undefined);
+    }
+  }
+
+  /** Send pictures an agent put on its message (Joi's images) as Telegram photos; one too large for a photo goes as a file. */
+  async sendImages(ids: string[] = []) {
+    for (const id of ids.slice(0, 4)) {
+      const img = await loadImage(id);
+      if (!img) continue;
+      const photo = img.data.length <= 10 * 1024 * 1024;
+      const form = new FormData();
+      form.append("chat_id", this.opts.chatId);
+      form.append(photo ? "photo" : "document", new Blob([new Uint8Array(img.data)], { type: img.mime }), id);
+      await this.f(`https://api.telegram.org/bot${this.opts.token}/${photo ? "sendPhoto" : "sendDocument"}`, { method: "POST", body: form }).catch(() => undefined);
     }
   }
 
@@ -62,7 +78,7 @@ export class TelegramBot {
       if (e.type === "chat.message" && e.message.channel === "telegram" && e.message.role !== "phil") {
         const o = e.message;
         const who = o.role === "jarvis" ? "Jarvis" : o.role === "system" ? "HQ" : getAgent(o.agentId ?? "")?.name ?? o.agentId ?? "Agent";
-        void this.send(`${who}: ${o.text}`).then(() => this.sendFiles(o.files)).then(() => { if (o.replyTo && this.voiceAsked.has(o.replyTo) && o.kind !== "ack") return this.sendSpoken(o.text); });
+        void this.send(`${who}: ${o.text}`).then(() => this.sendImages(o.images)).then(() => this.sendFiles(o.files)).then(() => { if (o.replyTo && this.voiceAsked.has(o.replyTo) && o.kind !== "ack") return this.sendSpoken(o.text); });
       }
       if (e.type === "report") void this.send(`${e.title} · ${e.agentId === "jarvis" ? "Jarvis" : getAgent(e.agentId)?.name ?? e.agentId}\n\n${e.text}`).then(() => this.sendFiles(e.files));
       if (e.type === "approval.new") void this.announce(e.approval);

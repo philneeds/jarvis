@@ -6,7 +6,7 @@ import { glassesKeyOk, glassesReplies, glassesStatus, pairGlasses, unpairGlasses
 import { cardPrint } from "./telegram.js";
 import { kalshiLimitsText, limitsText, hlAccounts, isHlAddress, accountText, HL_ACCOUNTS_KEY, polyAccounts, polyPositionsText, POLY_ACCOUNTS_KEY, lighterAccounts, lighterAccountText, LIGHTER_ACCOUNTS_KEY } from "@jarvis/core";
 import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type LeadPerfectionConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type EagleViewConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
-import { lastChecks, runChecks, saveChecks } from "@jarvis/core";
+import { lastChecks, runChecks, saveChecks, isVideoFile } from "@jarvis/core";
 import { connectionProbes } from "./checks.js";
 import { passkeyRoutes } from "./passkeys.js";
 import { ttsRoutes } from "./tts.js";
@@ -872,6 +872,19 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     const f = d ?? (await loadFile(id).then((x) => (x ? { name: named ?? id, ...x } : undefined)));
     if (!f) return c.json({ error: "not found" }, 404);
     const ascii = f.name.replace(/[^\x20-\x7e]+/g, "_").replace(/"/g, "'");
+    // A clip plays in the page: phones ask for it in byte ranges and won't play without them.
+    if (isVideoFile(id)) {
+      const total = f.data.length;
+      const base = { "content-type": f.mime, "accept-ranges": "bytes", "content-disposition": `inline; filename="${ascii}"`, "cache-control": "private, max-age=3600" };
+      const m = /^bytes=(\d*)-(\d*)$/.exec(c.req.header("range") ?? "");
+      if (m && (m[1] || m[2])) {
+        const start = m[1] ? Number(m[1]) : Math.max(0, total - Number(m[2]));
+        const end = m[1] && m[2] ? Math.min(Number(m[2]), total - 1) : total - 1;
+        if (start >= total || start > end) return new Response(null, { status: 416, headers: { "content-range": `bytes */${total}` } });
+        return new Response(new Uint8Array(f.data.subarray(start, end + 1)), { status: 206, headers: { ...base, "content-range": `bytes ${start}-${end}/${total}`, "content-length": String(end - start + 1) } });
+      }
+      return new Response(new Uint8Array(f.data), { headers: { ...base, "content-length": String(total) } });
+    }
     return new Response(new Uint8Array(f.data), { headers: { "content-type": f.mime, "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(f.name)}`, "cache-control": "private, max-age=3600" } });
   });
 

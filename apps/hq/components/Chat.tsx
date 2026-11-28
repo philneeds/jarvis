@@ -10,6 +10,9 @@ import { imageUrl } from "@/lib/images";
 import { ACCEPT, AttachTray, ClipIcon, useAttachments } from "@/lib/attach";
 import { Working } from "@/components/Working";
 
+/** A clip the studio made: stored as a file, played in the message. */
+const IS_VIDEO = /\.(mp4|webm)$/;
+
 const QUICK = ["/brief", "/status", "/approvals", "/usage", "/pause", "/condense", "/update", "/help"];
 
 type Recognition = { start(): void; stop(): void; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null; lang: string; interimResults: boolean; continuous: boolean };
@@ -149,9 +152,12 @@ export function Chat({ compact, initial }: { compact?: boolean; initial?: string
               </span>
             )}
             {m.images?.length ? (
-              <div className="flex flex-wrap gap-2 mb-1">{m.images.map((id) => <a key={id} href={imageUrl(id)} target="_blank" rel="noreferrer"><img src={imageUrl(id)} alt="Attached image" className="h-28 w-auto max-w-full object-cover border" style={{ borderColor: "var(--line)" }} /></a>)}</div>
+              <div className="flex flex-wrap gap-2 mb-1">{m.images.map((id) => <a key={id} href={imageUrl(id)} target="_blank" rel="noreferrer"><img src={imageUrl(id)} alt={m.role === "phil" ? "Attached image" : "Image from the agent"} className={`${m.role === "phil" ? "h-28" : "max-h-80"} w-auto max-w-full object-cover border`} style={{ borderColor: "var(--line)" }} /></a>)}</div>
             ) : null}
             {m.role === "phil" ? m.text : <Md text={m.text} />}
+            {m.files?.some((f) => IS_VIDEO.test(f.id)) ? (
+              <div className="flex flex-wrap gap-2 mt-1.5">{m.files.filter((f) => IS_VIDEO.test(f.id)).map((f) => <video key={f.id} src={`/api/files/${f.id}`} controls playsInline preload="metadata" aria-label={f.name} className="max-h-80 max-w-full border" style={{ borderColor: "var(--line)" }} />)}</div>
+            ) : null}
             {m.files?.length ? <div className="flex flex-wrap gap-2 mt-1.5">{m.files.map((f) => <a key={f.id} href={`/api/files/${f.id}`} className="btn btn-sm" download>⬇ {f.name}</a>)}</div> : null}
             {m.role !== "system" && (
               <div className="msg-actions">
