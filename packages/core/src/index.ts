@@ -30,6 +30,7 @@ export * from "./coinglass.js";
 export * from "./coinalyze.js";
 export * from "./connections.js";
 export * from "./shipreview.js";
+export * from "./holdings.js";
 export * from "./glasses.js";
 export * from "./lookup.js";
 export * from "./xai.js";

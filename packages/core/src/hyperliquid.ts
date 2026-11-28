@@ -147,6 +147,20 @@ export async function accountText(acct: HlAccount, f: typeof fetch = fetch, now 
   return lines.join("\n");
 }
 
+/**
+ * What a Hyperliquid account holds, in dollars: the perps account value plus dollars sitting in Spot (USDC and other
+ * dollar coins). Spot tokens that aren't dollars are left out, so this is a floor, not a full valuation.
+ */
+export async function hlAccountTotal(acct: HlAccount, f: typeof fetch = fetch): Promise<number> {
+  const given = acct.address.trim();
+  const role = await info<{ role?: string; data?: { user?: string } }>({ type: "userRole", user: given }, f).catch(() => ({}) as { role?: string; data?: { user?: string } });
+  const owner = role.role === "agent" ? role.data?.user : undefined;
+  const user = owner && isHlAddress(owner) ? owner : given;
+  const [perp, spot] = await Promise.all([info<Clearing>({ type: "clearinghouseState", user }, f), info<Spot>({ type: "spotClearinghouseState", user }, f).catch(() => ({}) as Spot)]);
+  const dollars = (spot.balances ?? []).filter((b) => /^(USDC|USDT0?|USDH|USDE)$/i.test(String(b.coin))).reduce((t, b) => t + num(b.total), 0);
+  return num(perp.marginSummary?.accountValue) + dollars;
+}
+
 export const HYPERLIQUID_TOOLS: ToolDef[] = [
   defineTool({
     name: "hyperliquid_account",

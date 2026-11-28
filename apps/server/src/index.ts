@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
-import { HyperliquidTrader, KalshiTrader } from "@jarvis/core";
+import { HyperliquidTrader, KalshiTrader, holdingsNote, hlAccounts, accountText, hlAccountTotal } from "@jarvis/core";
 import { getAgentConfig, DiscordConnector, EagleViewConnector, LeadPerfectionConnector, GithubConnector, GoHighLevelConnector, GoogleConnector, RobinhoodConnector, runBackup, Jarvis, KuberaConnector, Scheduler, SpotifyConnector, TradingGuard, Watchers, XConnector, Workshop, SHIP_KEY, defaultRunner, readOnlyQuery, bus, parseTrade, storeFromEnv, usageSummary, type JarvisEvent } from "@jarvis/core";
 import { TelegramBot } from "./telegram.js";
 import { createApp } from "./app.js";
@@ -65,13 +65,20 @@ const kalshi = await KalshiTrader.fromEnv(store).catch((e: Error) => { console.w
 if (kalshi) jarvis.addConnector(kalshi, KalshiTrader.promptHint());
 // The whole money team shares one holdings note, refreshed before any of them runs: Kubera's overall picture, plus
 // each position straight from Robinhood once Phil connects it (Kubera shows the Robinhood account as one total).
-jarvis.holdingsSource = async () => {
-  const parts = await Promise.all([
-    kubera?.holdingsText().catch((e: Error) => `Kubera couldn't be read: ${e.message.slice(0, 160)}`),
-    robinhood.positionsText().catch((e: Error) => `Robinhood couldn't be read: ${e.message.slice(0, 160)}`),
-  ]);
-  return parts.filter(Boolean).join("\n\n");
-};
+// Kalshi and Hyperliquid are read straight from the venue too: Kubera's own link to them lags (Nov 28: it had Kalshi
+// at $611 while the account held about $6,030), and the note says the gap in dollars.
+jarvis.holdingsSource = () => holdingsNote(store, {
+  kubera: kubera ? () => kubera.holdingsText() : undefined,
+  robinhood: () => robinhood.positionsText(),
+  venues: [
+    ...(kalshi ? [{ name: "Kalshi", match: /kalshi/i, text: () => kalshi.accountText(), total: () => kalshi.total() }] : []),
+    {
+      name: "Hyperliquid", match: /hyperliquid/i,
+      text: async () => { const list = await hlAccounts(store); return list.length ? (await Promise.all(list.map((a) => accountText(a)))).join("\n\n") : undefined; },
+      total: async () => { const list = await hlAccounts(store); return list.length ? (await Promise.all(list.map((a) => hlAccountTotal(a)))).reduce((t, n) => t + n, 0) : undefined; },
+    },
+  ],
+});
 // Einstein's workshop: a copy of the code he can change and test; ships through Phil's approval, deploys itself.
 const workshop = Workshop.fromEnv();
 if (workshop) {

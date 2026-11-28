@@ -156,6 +156,7 @@ export class KalshiTrader {
    * balance, positions and orders side by side, and Kalshi answered "too many requests" to one of them, which read
    * as "trading is off". Nothing here is urgent enough to need two requests in the air at once.
    */
+  private balancing?: Promise<{ balance?: number; balance_dollars?: string; portfolio_value?: number }>;
   private gate: Promise<unknown> = Promise.resolve();
   private lastCall = 0;
   private pause(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
@@ -243,7 +244,10 @@ export class KalshiTrader {
     const now = this.now();
     if (!fresh && this.ok && now - this.ok.at < 30_000) return { ...this.ok.v, limits };
     try {
-      const b = await this.call<{ balance?: number; balance_dollars?: string; portfolio_value?: number }>("GET", "/portfolio/balance");
+      // One balance read in the air at a time: an agent's tools ask "is trading on" and "what's in the account" in
+      // the same moment, and both ride on this call.
+      this.balancing ??= this.call<{ balance?: number; balance_dollars?: string; portfolio_value?: number }>("GET", "/portfolio/balance").finally(() => { this.balancing = undefined; });
+      const b = await this.balancing;
       const v = { trading: true, balance: b.balance_dollars !== undefined ? num(b.balance_dollars) : num(b.balance) / 100, portfolio: num(b.portfolio_value) / 100 };
       this.ok = { at: now, v };
       return { ...v, limits };
@@ -448,6 +452,11 @@ export class KalshiTrader {
   }
 
   /** The account in words: cash, what's open, what's resting. */
+  /** Everything the account holds, in dollars (cash plus positions at Kalshi's mark); undefined when it can't be read. */
+  async total(): Promise<number | undefined> {
+    const s = await this.status();
+    return s.trading ? (s.balance ?? 0) + (s.portfolio ?? 0) : undefined;
+  }
   async accountText(): Promise<string> {
     const s = await this.status(true);
     if (!s.trading) return `Kalshi: ${s.problem}`;
