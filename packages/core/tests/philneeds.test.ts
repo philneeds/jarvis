@@ -263,3 +263,44 @@ test("a DM card names the person by @handle: HQ finds their id when it is filed,
   const b = await jarvis.requestApproval({ agentId: "ncrypt", kind: "send", title: "Reply to nobody", body: "hi", payload: { action: "x.dm", account: "philneeds", to: "@nobody_here", text: "hi" } });
   assert.match(b.effect ?? "", /HQ couldn't confirm who that is/);
 });
+
+test("what Jarvis costs to run: fixed lines Phil gave, pay-per-use spend HQ logged, the pace for the month, and what's still unknown", async () => {
+  const { costReport, costReportText, setCostLines, COST_TOOLS } = await import("../src/index.js");
+  const { jarvis, store, x } = await connected();
+  const now = new Date(2026, 10, 15, 12); // Nov 15, local
+  const at = (d: Date) => d.toISOString();
+  await store.usage.add({ id: "a", at: at(new Date(2026, 10, 10)), plan: "xai", provider: "xai:x_search", agentId: "lucas", inputTokens: 0, outputTokens: 0, costUsd: 6 });
+  await store.usage.add({ id: "b", at: at(new Date(2026, 10, 12)), plan: "x", provider: "x:api", agentId: "ncrypt", inputTokens: 0, outputTokens: 0, costUsd: 3 });
+  await store.usage.add({ id: "c", at: at(new Date(2026, 9, 20)), plan: "xai", provider: "xai:x_search", agentId: "lucas", inputTokens: 0, outputTokens: 0, costUsd: 11 });
+  await store.usage.add({ id: "d", at: at(new Date(2026, 10, 11)), plan: "claude", provider: "claude:agent-sdk", agentId: "jarvis", inputTokens: 0, outputTokens: 0, costUsd: 40 });
+  let r = await costReport(store, now);
+  assert.deepEqual(r.unknown, ["Claude plan", "SuperGrok plan", "HQ server"]);
+  assert.equal(r.meteredUsd, 9, "Claude runs on the plan are shown, not added");
+  assert.equal(r.lastMonthMeteredUsd, 11);
+  assert.ok(Math.abs(r.projectedMeteredUsd - (9 / 14.5) * 30) < 1e-9);
+  // Munger files what Phil told him; it changes HQ's record only after Phil approves.
+  const card = await jarvis.requestApproval({ agentId: "munger", kind: "record", title: "Jarvis running costs", body: "Claude Max $200, SuperGrok $30, server $24", payload: { action: "costs.set", lines: [{ name: "Claude plan", monthlyUsd: 200 }, { name: "SuperGrok plan", monthlyUsd: "$30" }, { name: "HQ server", monthlyUsd: 24, note: "DigitalOcean" }] } });
+  assert.match(card.effect ?? "", /No money moves and nothing leaves HQ/);
+  assert.equal((await costReport(store, now)).fixedUsd, 0);
+  await jarvis.decide(card.id, "approved");
+  r = await costReport(store, now);
+  assert.equal(r.fixedUsd, 254); assert.deepEqual(r.unknown, []);
+  assert.ok(Math.abs(r.projectedTotalUsd - (254 + (9 / 14.5) * 30)) < 1e-9);
+  const text = costReportText(r);
+  assert.match(text, /Fixed, per month: \$254\.00\n- Claude plan: \$200\.00/);
+  assert.match(text, /- xAI credits \(X search, images, Grok API\): \$6\.00 this month over 1 call, \$11\.00 last month .*most: lucas \$6\.00/);
+  assert.match(text, /- X API \(Lists, posts, DMs\): \$3\.00 this month.*HQ's estimate/);
+  assert.match(text, /- Claude runs: \$40\.00 this month.*covered by the plan, not added to the total/);
+  await setCostLines(store, [], ["hq server"]);
+  assert.deepEqual((await costReport(store, now)).unknown, ["HQ server"]);
+  await assert.rejects(setCostLines(store, [{ name: "Kubera", monthlyUsd: "lots" }]), /needs monthlyUsd/);
+  assert.equal(COST_TOOLS[0]!.name, "hq_costs");
+  assert.ok(CHARTERS.munger!.tools!.includes("hq_costs"));
+  assert.ok(SCHEDULES.some((s) => s.id === "munger-costs" && s.agentId === "munger" && s.when === "monthly:1@08:10" && s.push));
+
+  // X's API calls are logged at HQ's estimate, against the agent that made them.
+  const before = (await store.usage.since(new Date(0))).filter((u) => u.plan === "x").length;
+  await x.tools().find((t) => t.name === "x_list_posts")!.handler({ hours: 24 }, { store, agentId: "lucas" });
+  const logged = (await store.usage.since(new Date(0))).filter((u) => u.plan === "x").slice(before);
+  assert.deepEqual(logged.map((u) => [u.agentId, u.modelId, u.costUsd]), [["lucas", "List read", 0.015]]);
+});

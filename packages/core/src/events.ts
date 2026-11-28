@@ -186,7 +186,7 @@ export interface ActivityEntry {
 }
 
 export interface PlanUsage {
-  plan: "claude" | "supergrok" | "xai" | "chatgpt" | "cursor" | "higgsfield";
+  plan: "claude" | "supergrok" | "xai" | "x" | "chatgpt" | "cursor" | "higgsfield";
   label: string;
   /** Estimated share of the plan's pool used in the current window, 0..1. */
   used: number;

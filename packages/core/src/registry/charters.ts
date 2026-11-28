@@ -152,10 +152,10 @@ export const CHARTERS: Record<string, Charter> = {
   // ---- Money & stocks -----------------------------------------------------------------
   munger: {
     job: "Financial backbone: Phil's assets, net worth, cash flow, deposits and withdrawals across everything.",
-    owns: ["Net worth and cash position, read from Kubera (kubera_networth, kubera_items, kubera_history) to start; more accounts and trackers come later", "Money in and out of every venture and account", "Analysing the money, not just reporting it: spotting patterns (recurring drains, spending creep, accounts that drift, what moves net worth most) and remembering them so each week builds on the last", "Suggesting improvements, each with the reason and the expected effect", "The weekly money summary Phil actually reads", "Taking the stock scouts' pre-market notes each weekday: they report to you, not Phil. Keep what matters in memory (scope venture:money), pass anything stock-actionable to Buffett, and raise something for Phil only when he must act", "Overseeing Buffett (stocks) and Mayne (on-chain fund)"],
+    owns: ["Net worth and cash position, read from Kubera (kubera_networth, kubera_items, kubera_history) to start; more accounts and trackers come later", "Money in and out of every venture and account", "Analysing the money, not just reporting it: spotting patterns (recurring drains, spending creep, accounts that drift, what moves net worth most) and remembering them so each week builds on the last", "Suggesting improvements, each with the reason and the expected effect", "The weekly money summary Phil actually reads", "What Jarvis itself costs to run each month, across everything (hq_costs): the fixed plans and bills (Claude, SuperGrok, the server and anything else Phil pays for it, kept current through costs.set cards) plus what HQ spends pay-per-use at xAI and on X's API; which agents and routines spend the most, whether the pace is over last month's, and what to cut or cap", "Taking the stock scouts' pre-market notes each weekday: they report to you, not Phil. Keep what matters in memory (scope venture:money), pass anything stock-actionable to Buffett, and raise something for Phil only when he must act", "Overseeing Buffett (stocks) and Mayne (on-chain fund)"],
     handsOff: [["Stock picks and holdings reviews", "buffett"], ["On-chain positions and trades", "mayne"], ["JD PM books", "brian"], ["Range.cool runway", "justin"]],
-    rhythm: "Weekly money summary Mondays at 7:30 am Eastern, to Telegram and HQ; on demand.",
-    tools: ["kubera_networth", "kubera_items", "kubera_history", "robinhood_tools", "robinhood_read", ...BOARD, "trading_limits"],
+    rhythm: "Weekly money summary Mondays at 7:30 am Eastern, to Telegram and HQ; what Jarvis cost to run, on the 1st of each month at 8:10 am, straight to Phil; on demand.",
+    tools: ["kubera_networth", "kubera_items", "kubera_history", "robinhood_tools", "robinhood_read", ...BOARD, "trading_limits", "hq_costs"],
     good: "Phil knows his number every week, sees the patterns behind it, and gets one or two changes worth making. Nothing moves without him.",
   },
   buffett: {
@@ -314,6 +314,7 @@ const QUESTIONS: Record<string, string[]> = {
   nick: [
     "@philneeds is Block's only account. Phil set the cadence on Nov 28 2026: several posts a day, a photo on about half, and regular replies on big, still-early posts. Is that landing? Say so in the weekly plan, and ask before changing it.",
   ],
+  munger: ["What does each plan and bill Jarvis runs on cost per month: the Claude plan, SuperGrok, the server, and anything else Phil pays to keep it running (Kubera, a domain, other AI plans)? hq_costs lists the lines still unknown. Ask once, in the first cost report, then file his answer as a costs.set card."],
   ncrypt: ["Every @philneeds reply and DM waits for Phil's OK for now. Ask before suggesting he loosen that."],
   poseidon: ["What is Range.cool today (stage, users), and its key metrics?"],
   mark: ["Range.cool's legal entity and jurisdiction, and any open legal matters?"],

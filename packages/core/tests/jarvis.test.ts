@@ -755,7 +755,7 @@ test("leads report to Jarvis's inbox, not Phil; the next daily brief folds them 
   assert.equal(to("karol-leads"), "stella"); assert.equal(to("stella-leads"), "jarvis"); assert.equal(to("house-open"), "munger");
   assert.equal(to("stevon-weekly"), undefined); assert.equal(to("daily-brief"), undefined);
   // Deliverables Phil asked to get himself: the Philneeds content routines (Nov 28 2026) and Stevon's deck.
-  assert.deepEqual(SCHEDULES.filter((s) => s.push).map((s) => s.id), ["lucas-signal", "boo-drafts", "boo-quote", "ncrypt-targets-am", "ncrypt-targets-mid", "ncrypt-targets-pm", "ncrypt-dms-am", "ncrypt-dms-pm", "stevon-weekly"]);
+  assert.deepEqual(SCHEDULES.filter((s) => s.push).map((s) => s.id), ["lucas-signal", "boo-drafts", "boo-quote", "ncrypt-targets-am", "ncrypt-targets-mid", "ncrypt-targets-pm", "ncrypt-dms-am", "ncrypt-dms-pm", "stevon-weekly", "munger-costs"]);
 });
 
 test("the brief asks Metro only once Apple Health has data: no model run just to hear \"no health data yet\"", async () => {

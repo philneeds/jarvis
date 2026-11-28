@@ -119,6 +119,8 @@ export async function usageSummary(store: Store, now = new Date()): Promise<Usag
   }
   if (grokPlan() === "supergrok") plans.push(build("supergrok", "SuperGrok (Grok CLI)", "weekly runs, est.", rows.filter((r) => r.plan === "supergrok" && r.at >= week), (m) => m.length / CAPS.grokWeeklyRuns));
   if (grokPlan() === "xai" || process.env.XAI_API_KEY || rows.some((r) => r.plan === "xai")) plans.push(build("xai", "xAI credits (X search, Grok API)", `monthly budget, $${CAPS.xaiMonthlyUsd}`, rows.filter((r) => r.plan === "xai"), (m) => cost(m) / CAPS.xaiMonthlyUsd));
+  // X's API is pay per use with no cap of HQ's own: shown once something has been spent, at HQ's estimate of X's prices.
+  if (rows.some((r) => r.plan === "x")) plans.push(build("x", "X API (Lists, posts, DMs)", "pay per use, estimated", rows.filter((r) => r.plan === "x"), () => 0));
   plans.push(build("chatgpt", "ChatGPT (Health team)", "manual", [], () => 0));
   plans.push(build("cursor", "Cursor (Jason 2.0)", "manual", [], () => 0));
   return { at: now.toISOString(), plans };

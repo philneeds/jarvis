@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
 import type { Store } from "../store/types.js";
 import { readSealedSetting, writeSealedSetting, SIGN_IN_LOCKED } from "../secrets.js";
@@ -54,6 +55,11 @@ const API = "https://api.x.com/2";
 export const DEFAULT_X_LISTS = ["Airdrop Acres Top Farmers", "Airdrop Acres Top LPers"];
 /** A List read is billed per post, so one read serves every routine that asks within this window. */
 const LIST_CACHE_MS = 90 * 60_000;
+/**
+ * X's pay-per-use prices as HQ understands them (Nov 2026, from X's pricing page and its summaries), in dollars per
+ * item. They are an estimate for Munger's cost report: the X developer console's balance is the true figure.
+ */
+export const X_PRICES = { postRead: 0.005, ownedRead: 0.001, userRead: 0.01, postCreate: 0.015, postCreateWithLink: 0.2, dmCreate: 0.015 };
 const PLACEHOLDER = /\[\s*\$?\s*[XYZN#?]+\s*%?\s*\]/;
 const RECONNECT = (h: string, what: string) => `@${h}'s X connection was made before HQ could ${what}. Disconnect and connect it again under Settings (one tap), then retry.`;
 const eastern = (iso?: string) => { const d = new Date(iso ?? ""); return Number.isNaN(d.getTime()) ? (iso ?? "") : d.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " ET"; };
@@ -121,6 +127,14 @@ export class XConnector {
   /** Sealed at rest: the tokens can post as Phil. A row saved before sealing is sealed on first read. */
   async accounts(): Promise<XAccount[]> { const r = await readSealedSetting<XAccount[]>(this.store, ACCOUNTS_KEY); this.locked = r.locked; return r.value ?? []; }
   private locked = false;
+
+  /** Whose work a call is for (the agent using a tool, or whose card was approved), so its cost lands on them. */
+  private who = new AsyncLocalStorage<string>();
+  /** Logs what a billed X API call is estimated to cost. Never fails the call itself. */
+  private async spend(what: string, items: number, each: number) {
+    if (items <= 0 || each <= 0) return;
+    await this.store.usage.add({ id: `x-${this.now().toString(36)}-${randomBytes(3).toString("hex")}`, at: new Date(this.now()).toISOString(), plan: "x", provider: "x:api", agentId: this.who.getStore() ?? "hq", modelId: what, inputTokens: 0, outputTokens: 0, costUsd: items * each }).catch(() => undefined);
+  }
   async disconnect(handle: string) { await writeSealedSetting(this.store, ACCOUNTS_KEY, (await this.accounts()).filter((a) => a.handle !== handle)); }
   async status() { const list = await this.accounts(); return { accounts: list.map((a) => ({ handle: a.handle, name: a.name, connectedAt: a.connectedAt })), ...(this.locked ? { problem: SIGN_IN_LOCKED } : {}) }; }
 
@@ -180,12 +194,14 @@ export class XConnector {
   async mentions(handle?: string, max = 20) {
     const a = await this.account(handle);
     const j = await this.api<{ data?: { id: string; text: string; author_id?: string; created_at?: string }[] }>(a, `/users/${a.userId}/mentions?max_results=${Math.min(100, Math.max(5, max))}&tweet.fields=created_at,author_id`);
+    await this.spend("mentions read", j.data?.length ?? 0, X_PRICES.postRead);
     return j.data ?? [];
   }
   /** `originals`: Phil's own posts only, without replies and reposts. */
   async ownPosts(handle?: string, max = 20, originals = false) {
     const a = await this.account(handle);
     const j = await this.api<{ data?: { id: string; text: string; created_at?: string; public_metrics?: Record<string, number>; referenced_tweets?: { type?: string }[] }[] }>(a, `/users/${a.userId}/tweets?max_results=${Math.min(100, Math.max(5, max))}&tweet.fields=created_at,public_metrics,referenced_tweets${originals ? "&exclude=replies,retweets" : ""}`);
+    await this.spend("own posts read", j.data?.length ?? 0, X_PRICES.ownedRead);
     return (j.data ?? []).map((p) => ({ ...p, kind: kindOf(p.referenced_tweets), url: `https://x.com/${a.handle}/status/${p.id}` }));
   }
 
@@ -245,6 +261,7 @@ export class XConnector {
     const j = (await res.json()) as { data?: { id: string; text: string; author_id?: string; created_at?: string; public_metrics?: Record<string, number>; referenced_tweets?: { type?: string }[] }[]; includes?: { users?: { id: string; username: string; name?: string }[] } };
     const users = new Map((j.includes?.users ?? []).map((u) => [u.id, u]));
     const posts: XListPost[] = (j.data ?? []).map((p) => { const u = users.get(p.author_id ?? ""); const handle = u?.username ?? "i"; return { id: p.id, url: `https://x.com/${handle}/status/${p.id}`, handle, author: u?.name ?? handle, at: p.created_at ?? "", text: p.text, kind: kindOf(p.referenced_tweets), metrics: p.public_metrics ?? {} }; });
+    await this.spend("List read", posts.length, X_PRICES.postRead);
     this.listCache.set(id, { at: this.now(), max: n, name, posts });
     return { name, posts: within(posts) };
   }
@@ -265,6 +282,7 @@ export class XConnector {
   async dmInbox(handle?: string, max = 20) {
     const a = await this.account(handle);
     const j = await this.api<{ data?: { id: string; text?: string; sender_id?: string; created_at?: string; dm_conversation_id?: string }[] }>(a, `/dm_events?max_results=${Math.min(100, Math.max(1, max))}&dm_event.fields=text,sender_id,created_at,dm_conversation_id`);
+    await this.spend("DMs read", j.data?.length ?? 0, X_PRICES.ownedRead);
     return j.data ?? [];
   }
 
@@ -275,6 +293,7 @@ export class XConnector {
   async dmConversations(handle?: string, days = 3, max = 50): Promise<{ account: string; conversations: XDmConversation[] }> {
     const a = await this.account(handle);
     const j = await this.api<{ data?: { id: string; text?: string; sender_id?: string; created_at?: string; dm_conversation_id?: string; event_type?: string }[]; includes?: { users?: { id: string; username: string; name?: string }[] } }>(a, `/dm_events?max_results=${Math.min(100, Math.max(1, max))}&event_types=MessageCreate&dm_event.fields=text,sender_id,created_at,dm_conversation_id,event_type&expansions=sender_id,participant_ids&user.fields=username,name`);
+    await this.spend("DMs read", j.data?.length ?? 0, X_PRICES.ownedRead);
     const users = new Map((j.includes?.users ?? []).map((u) => [u.id, u]));
     const since = this.now() - days * 86_400_000;
     const by = new Map<string, XDmConversation>();
@@ -307,6 +326,7 @@ export class XConnector {
     if (!res.ok) throw new Error(await xProblem(res, `X wouldn't look up @${h}`));
     const u = ((await res.json()) as { data?: { id: string; username: string } }).data;
     if (!u?.id) throw new Error(`X has no account @${h}`);
+    await this.spend("user lookup", 1, X_PRICES.userRead);
     const out = { id: u.id, handle: u.username };
     this.userIds.set(h.toLowerCase(), out);
     return out;
@@ -330,15 +350,20 @@ export class XConnector {
     const media: string[] = [];
     for (const id of images.slice(0, 4)) media.push(await this.uploadMedia(a, id));
     const j = await this.api<{ data: { id: string } }>(a, "/tweets", { method: "POST", body: JSON.stringify({ text, ...(replyTo ? { reply: { in_reply_to_tweet_id: replyTo } } : {}), ...(media.length ? { media: { media_ids: media } } : {}) }) });
+    await this.spend(replyTo ? "reply" : "post", 1, /https?:\/\//.test(text) ? X_PRICES.postCreateWithLink : X_PRICES.postCreate);
     return { id: j.data.id, url: `https://x.com/${a.handle}/status/${j.data.id}`, handle: a.handle, photos: media.length };
   }
   async dm(participantId: string, text: string, handle?: string) {
     const a = await this.account(handle);
     const j = await this.api<{ data: { dm_event_id: string } }>(a, `/dm_conversations/with/${participantId}/messages`, { method: "POST", body: JSON.stringify({ text }) });
+    await this.spend("DM sent", 1, X_PRICES.dmCreate);
     return { id: j.data.dm_event_id, handle: a.handle };
   }
 
-  tools(): ToolDef[] {
+  /** Each tool runs under the name of the agent using it, so what X bills for the read is logged against them. */
+  tools(): ToolDef[] { return this.rawTools().map((t) => ({ ...t, handler: (args, ctx) => this.who.run(ctx?.agentId ?? "hq", () => t.handler(args, ctx)) })); }
+
+  private rawTools(): ToolDef[] {
     const acctArg = { account: z.string().optional().describe("which connected @handle; default the first") };
     return [
       defineTool({
@@ -374,6 +399,11 @@ export class XConnector {
   }
 
   executors(): Record<string, Executor> {
+    const raw = this.rawExecutors();
+    return Object.fromEntries(Object.entries(raw).map(([k, fn]) => [k, ((a, j) => this.who.run(a.agentId, () => fn(a, j))) as Executor]));
+  }
+
+  private rawExecutors(): Record<string, Executor> {
     const text = (p: { text?: unknown }) => { const t = String(p.text ?? "").trim(); if (!t) throw new Error("text is required"); if (t.length > 4000) throw new Error("text is too long"); return t; };
     // A draft with a blank still in it ([$X]) must never go out as written: Phil fills in his number first.
     const final = (t: string) => { const m = t.match(PLACEHOLDER); if (m) throw new Error(`the text still has a blank to fill in (${m[0]}). Press Edit, put your real number in, then approve`); return t; };
@@ -392,7 +422,8 @@ export class XConnector {
    * photo before he approves. With no xAI key, over the day's limit, or when the model fails, the card goes on as text
    * only and says why.
    */
-  async normalize(payload: Record<string, unknown>, agentId: string): Promise<Record<string, unknown> | void> {
+  normalize(payload: Record<string, unknown>, agentId: string): Promise<Record<string, unknown> | void> { return this.who.run(agentId, () => this.normalizeAs(payload, agentId)); }
+  private async normalizeAs(payload: Record<string, unknown>, agentId: string): Promise<Record<string, unknown> | void> {
     // A DM card names the person by @handle; X sends by user id, so HQ looks it up when the card is filed.
     if (payload.action === "x.dm" && typeof payload.to === "string" && payload.to.trim() && !/^\d+$/.test(payload.to.trim())) {
       try { const u = await this.userId(payload.to, typeof payload.account === "string" ? payload.account : undefined); return { ...payload, to: u.id, toHandle: `@${u.handle}` }; }

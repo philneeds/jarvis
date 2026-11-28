@@ -21,6 +21,7 @@ import { imageInputs, imageExists } from "../uploads.js";
 import { HEALTH_TOOLS, healthStatus, healthSummary } from "../health.js";
 import { XREAD_TOOLS, expandXLinks, xPostIds, readXTimeline, type XPost } from "../xread.js";
 import { expandDrafts, XDRAFT_HINT } from "../xdraft.js";
+import { COST_TOOLS, setCostLines } from "../costs.js";
 import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { COINGLASS_TOOLS } from "../coinglass.js";
@@ -341,6 +342,16 @@ export class Jarvis {
       if (checked) void this.syncGoalChecks(g.id).catch(() => undefined);
       return `"${g.name}" has ${g.benchmarks?.length ?? 0} benchmarks${checked ? ` (${checked} checked by HQ against live data)` : ""}; it's ${g.pct}% done.`;
     });
+    // Munger's ledger of what Jarvis costs to run: the fixed plans and bills, as Phil gave them. Only HQ's own record.
+    this.executors.set("costs.set", async (a) => {
+      const p = (a.payload ?? {}) as { lines?: unknown; remove?: unknown };
+      const lines = Array.isArray(p.lines) ? (p.lines as { name?: unknown; monthlyUsd?: unknown; note?: unknown }[]) : [];
+      const remove = Array.isArray(p.remove) ? p.remove : [];
+      if (!lines.length && !remove.length) throw new Error('costs.set needs "lines" (each with name and monthlyUsd) or "remove"');
+      const all = await setCostLines(this.store, lines, remove);
+      return `Running costs updated: ${all.map((l) => `${l.name} $${l.monthlyUsd}`).join(", ") || "no fixed lines"} per month.`;
+    });
+    this.describers.set("costs.set", (p) => `Updates HQ's own record of what Jarvis costs per month (${Array.isArray(p.lines) ? p.lines.length : 0} line${Array.isArray(p.lines) && p.lines.length === 1 ? "" : "s"}${Array.isArray(p.remove) && p.remove.length ? `, ${p.remove.length} removed` : ""}). No money moves and nothing leaves HQ.`);
     // David's three for today, picked from the goals and from what's waiting on Phil. Only a list on Phil's own screen.
     this.executors.set("today.set", async (a) => {
       const raw = (a.payload as { items?: unknown } | undefined)?.items;
@@ -465,7 +476,7 @@ export class Jarvis {
   }
 
   /** Every tool an agent could be given: built-in plus connectors. */
-  allTools() { return [...TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...this.videoToolList, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...COINGLASS_TOOLS, ...this.connectionToolList, ...GLASSES_TOOLS, ...LIGHTER_TOOLS, ...PREDICTION_TOOLS, ...LOOKUP_TOOLS, ...this.workshopToolList, ...this.connectorTools.values()]; }
+  allTools() { return [...TOOLS, ...COST_TOOLS, ...HEALTH_TOOLS, ...XREAD_TOOLS, ...this.videoToolList, ...DATA_TOOLS, ...HYPERLIQUID_TOOLS, ...COINGLASS_TOOLS, ...this.connectionToolList, ...GLASSES_TOOLS, ...LIGHTER_TOOLS, ...PREDICTION_TOOLS, ...LOOKUP_TOOLS, ...this.workshopToolList, ...this.connectorTools.values()]; }
 
   // ---- Video --------------------------------------------------------------
   /** Keys Phil saved in Settings rather than .env (GEMINI_API_KEY). Write-only from the outside. */
