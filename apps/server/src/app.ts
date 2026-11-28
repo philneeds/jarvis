@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { glassesKeyOk, glassesReplies, glassesStatus, pairGlasses, unpairGlasses, glassesOptions, setGlassesOptions, glassesCard, saveHeard, forgetHeard, heardDays, alwaysWaits } from "@jarvis/core";
 import { cardPrint } from "./telegram.js";
 import { kalshiLimitsText, limitsText, hlAccounts, isHlAddress, accountText, HL_ACCOUNTS_KEY, polyAccounts, polyPositionsText, POLY_ACCOUNTS_KEY, lighterAccounts, lighterAccountText, LIGHTER_ACCOUNTS_KEY } from "@jarvis/core";
-import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type LeadPerfectionConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type EagleViewConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext } from "@jarvis/core";
+import { ACTIVITY_KINDS, AGENTS, VENTURES, MODELS, SCHEDULES, VENTURE_DASH, findAgent, getAgentConfig, limitsSchema, setAgentConfig, usageSummary, type ActivityEntry, type GoogleConnector, type LeadPerfectionConnector, type Jarvis, type TradingGuard, type VentureId, type XConnector, type SpotifyConnector, type KuberaConnector, type GoHighLevelConnector, type EagleViewConnector, type DiscordConnector, type GithubConnector, type RobinhoodConnector, type Workshop, SHIP_KEY, AUTO_SHIP_KEY, CHARTERS, healthKey, healthKeyOk, healthStatus, healthSummary, ingestHealth, rotateHealthKey, imageExists, imageMimeOk, loadImage, saveImage, MAX_IMAGE_BYTES, memoryLine, scheduleView, withCustom, runRoutine, recentReports, backupStatus, phaseReadiness, type Connection, addDataFile, listDataFiles, removeDataFile, listDecks, deckFile, loadFile, getTemplate, setTemplate, clearTemplate, MAX_FILE_BYTES, VENTURE_IDS, removeFile, readDocument, saveDoc, getDocs, docsContext, costReport, setCostLines } from "@jarvis/core";
 import { lastChecks, runChecks, saveChecks } from "@jarvis/core";
 import { connectionProbes } from "./checks.js";
 import { passkeyRoutes } from "./passkeys.js";
@@ -274,6 +274,18 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   api.get("/runs/:id", async (c) => { const r = await jarvis.store.runs.get(c.req.param("id")); return r ? c.json({ run: r }) : c.json({ error: "not found" }, 404); });
 
   api.get("/usage", async (c) => c.json(await usageSummary(jarvis.store)));
+  // What Jarvis costs to run: the fixed lines Phil gave plus what HQ logged pay-per-use (the Spend screen, and Munger).
+  api.get("/costs", async (c) => c.json(await costReport(jarvis.store)));
+  // Phil sets a fixed line himself (what a plan costs per month), or removes one. HQ's own record; no money moves.
+  api.put("/costs", async (c) => {
+    const b = z.object({ lines: z.array(z.object({ name: z.string().min(1).max(80), monthlyUsd: z.number().min(0).max(100000), note: z.string().max(200).optional() })).max(30).optional(), remove: z.array(z.string().max(80)).max(30).optional() }).safeParse(await c.req.json().catch(() => ({})));
+    if (!b.success) return c.json({ error: "lines: each with a name and monthlyUsd (dollars per month); remove: names" }, 400);
+    try {
+      await setCostLines(jarvis.store, b.data.lines ?? [], b.data.remove ?? []);
+      await jarvis.router.log("munger", "system", `Phil updated Jarvis's running costs: ${[...(b.data.lines ?? []).map((l) => `${l.name} $${l.monthlyUsd}/mo`), ...(b.data.remove ?? []).map((n) => `${n} removed`)].join(", ")}`);
+      return c.json(await costReport(jarvis.store));
+    } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
 
   api.get("/memory", async (c) => c.json({ items: await jarvis.store.memory.list(c.req.query("scope") || undefined) }));
   api.put("/memory", async (c) => {

@@ -23,6 +23,7 @@ const MORE = [
   { href: "/reports", label: "Reports" },
   { href: "/activity", label: "Activity" },
   { href: "/usage", label: "Usage" },
+  { href: "/spend", label: "Spend" },
   { href: "/memory", label: "Memory" },
   { href: "/ambient", label: "Always on" },
   { href: "/settings", label: "Settings" },
