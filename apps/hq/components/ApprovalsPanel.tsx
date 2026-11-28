@@ -9,7 +9,10 @@ import { imageUrl, uploadImage } from "@/lib/images";
 
 /** The link that opens X with this card's post or reply already written, for sending it by hand (free, no API). */
 function xOpenLink(p: Record<string, unknown> | undefined): string | undefined {
-  if (!p || (p.action !== "x.post" && p.action !== "x.reply") || typeof p.text !== "string" || !p.text.trim()) return undefined;
+  if (!p || typeof p.text !== "string" || !p.text.trim()) return undefined;
+  // A DM opens X's message composer with the person and the text filled in.
+  if (p.action === "x.dm") return /^\d+$/.test(String(p.to ?? "")) ? `https://x.com/messages/compose?recipient_id=${String(p.to)}&text=${encodeURIComponent(p.text.trim())}` : undefined;
+  if (p.action !== "x.post" && p.action !== "x.reply") return undefined;
   const video = typeof p.video === "string" && typeof p.videoFrom === "string" ? p.video : "";
   const u = new URL("https://x.com/intent/post");
   u.searchParams.set("text", video && !p.text.includes(video) ? `${p.text.trim()}\n\n${video}` : p.text.trim());
@@ -31,10 +34,10 @@ const ACTION_LABEL: Record<string, string> = {
 const HEADLINE: Record<string, string[]> = {
   "gmail.send": ["to", "account", "subject"], "gmail.archive": ["account", "query", "max"], "gmail.label": ["account", "label", "query"], "gmail.trash": ["account", "query", "max"], "gmail.unsubscribe": ["account"],
   "calendar.create": ["start", "end", "account"], "calendar.update": ["start", "end", "account"], "calendar.delete": ["title", "account"],
-  "x.post": ["account", "videoFrom"], "x.reply": ["account", "replyTo", "videoFrom"], "x.dm": ["account", "to"], "ghl.message": ["to", "type", "subject"], "ghl.contact.create": ["name", "phone", "email", "source"], "ghl.note": ["to"], "ghl.deal.create": ["name", "stage", "value"], "ghl.deal.move": ["name", "stage", "status"], "robinhood.call": ["tool"], "eagleview.order": ["address", "product", "delivery", "estimate"],
+  "x.post": ["account", "videoFrom"], "x.reply": ["account", "replyTo", "videoFrom"], "x.dm": ["account", "toHandle", "to"], "ghl.message": ["to", "type", "subject"], "ghl.contact.create": ["name", "phone", "email", "source"], "ghl.note": ["to"], "ghl.deal.create": ["name", "stage", "value"], "ghl.deal.move": ["name", "stage", "status"], "robinhood.call": ["tool"], "eagleview.order": ["address", "product", "delivery", "estimate"],
   "trade.execute": ["symbol", "side", "sizeUsd", "strategy"], "trade.close": ["positionId", "pnlUsd"], "strategy.enable": ["name", "backtestReturn", "winRate", "maxDrawdown", "paperDays"],
 };
-const LABEL: Record<string, string> = { to: "To", account: "From", subject: "Subject", query: "Matching", max: "Up to", label: "Label", start: "Start", end: "End", title: "Event", replyTo: "Reply to", videoFrom: "Video from", sizeUsd: "Size $", pnlUsd: "P&L $", positionId: "Position", backtestReturn: "Backtest", winRate: "Win rate", maxDrawdown: "Max drawdown", paperDays: "Paper days", symbol: "Symbol", side: "Side", strategy: "Strategy", name: "Name", type: "Channel", tool: "Tool", phone: "Phone", email: "Email", source: "Source", stage: "Stage", value: "Value $", status: "Status", address: "Address", product: "Report", delivery: "Delivery", estimate: "Cost" };
+const LABEL: Record<string, string> = { to: "To", account: "From", subject: "Subject", query: "Matching", max: "Up to", label: "Label", start: "Start", end: "End", title: "Event", replyTo: "Reply to", videoFrom: "Video from", toHandle: "To", sizeUsd: "Size $", pnlUsd: "P&L $", positionId: "Position", backtestReturn: "Backtest", winRate: "Win rate", maxDrawdown: "Max drawdown", paperDays: "Paper days", symbol: "Symbol", side: "Side", strategy: "Strategy", name: "Name", type: "Channel", tool: "Tool", phone: "Phone", email: "Email", source: "Source", stage: "Stage", value: "Value $", status: "Status", address: "Address", product: "Report", delivery: "Delivery", estimate: "Cost" };
 
 /** What the approve button says for a card. When nothing can act on it, the button must not promise a send. */
 export function approveLabel(a: Approval): string {
@@ -166,7 +169,7 @@ export function ApprovalsPanel({ tab, id = "approve" }: { tab: ApprovalsTab; id?
         const head = (act && HEADLINE[act] ? HEADLINE[act] : Object.keys(a.payload ?? {}).filter((k) => k !== "action" && k !== "body" && k !== "text")).map((k) => [k, a.payload?.[k]] as const).filter(([, val]) => ["string", "number", "boolean"].includes(typeof val)).slice(0, 5);
         const isX = act === "x.post" || act === "x.reply";
         const photos = isX ? photosOf(a) : [];
-        const openInX = isX ? xOpenLink(a.payload) : undefined;
+        const openInX = isX || act === "x.dm" ? xOpenLink(a.payload) : undefined;
         const thread = a.thread ?? [];
         const group = tab === "pending" && a.runId ? runGroups.get(a.runId) ?? [] : [];
         const groupHead = group.length > 1 && group[0]?.id === a.id;
@@ -226,6 +229,9 @@ export function ApprovalsPanel({ tab, id = "approve" }: { tab: ApprovalsTab; id?
                   </span>
                 ))}
               </div>
+            )}
+            {act === "x.dm" && openInX && a.status === "pending" && !isEditing && (
+              <div className="flex flex-wrap items-center gap-2 text-[12px]"><a className="btn btn-sm" href={openInX} target="_blank" rel="noreferrer">Open in X ›</a><span style={{ color: "var(--muted)" }}>Opens the DM in X with this text, to send by hand.</span></div>
             )}
             {isX && a.status === "pending" && !isEditing && (
               <div className="flex flex-wrap items-center gap-2 text-[12px]">
