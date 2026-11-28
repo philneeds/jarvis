@@ -17,9 +17,10 @@ import { getAgentConfig } from "../config.js";
 import { VENTURES, type VentureId } from "../registry/ventures.js";
 import { VENTURE_DASH, recordKind } from "../ventures/dashboards.js";
 import { TOOLS } from "../tools/index.js";
-import { imageInputs } from "../uploads.js";
+import { imageInputs, imageExists } from "../uploads.js";
 import { HEALTH_TOOLS, healthStatus, healthSummary } from "../health.js";
 import { XREAD_TOOLS, expandXLinks, xPostIds, readXTimeline, type XPost } from "../xread.js";
+import { expandDrafts, XDRAFT_HINT } from "../xdraft.js";
 import { DATA_TOOLS, recentDataImages } from "../salesdata.js";
 import { HYPERLIQUID_TOOLS } from "../hyperliquid.js";
 import { COINGLASS_TOOLS } from "../coinglass.js";
@@ -883,7 +884,7 @@ export class Jarvis {
         workshopHint = `\n\nYour workshop couldn't be opened (${(e as Error).message.slice(0, 200)}), so you can't change code this run; say so and diagnose with the tools you have.`;
       }
     }
-    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "") + workshopHint + await this.connectionsText() + await this.pendingText(agent.id);
+    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (tools.some((t) => /^x_(search|list_posts|own_posts|mentions|recent_posts)$/.test(t.name)) && (agent.venture === "philneeds" || agent.serves?.includes("philneeds") || tools.some((t) => t.name === "x_own_posts")) ? `\n\n${XDRAFT_HINT}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "") + workshopHint + await this.connectionsText() + await this.pendingText(agent.id);
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
     // Images Phil attached to this conversation go with every run in it, including hand-offs; agents that read uploaded
     // data also see this week's screenshots.
@@ -901,7 +902,8 @@ export class Jarvis {
     for (const m of memory) if (m.scope === `agent:${agent.id}` && /^(watch|handoff):/.test(m.key)) await this.store.memory.remove(m.scope, m.key).catch(() => undefined);
     if (opts.noBlocks) return r; // the caller reads the reply itself (approval Q&A)
     const { text: said, approvals, remember, metrics, records, handoffs, attention, slides, fills } = extractBlocks(r.text);
-    let text = said;
+    // Draft links (```xdraft): HQ builds the link that opens X with the text filled in.
+    let text = expandDrafts(said).text;
     await this.absorb(agent, approvals, remember, r.runId, metrics, records);
     // Decks: build the .pptx and hand it over in chat (and on Telegram when that's where the conversation is).
     const decks: Deck[] = [];
@@ -2498,6 +2500,22 @@ export class Jarvis {
     // Placing on its own that the last check stopped isn't news: the card goes back to Phil (requestApproval).
     if (!(/^auto:/.test(note ?? "") && outcome.includes(NOT_PLACED))) await this.say({ role: "system", text: `${decision === "approved" ? "Approved" : decision === "rejected" ? "Rejected" : "Edited and approved"}: ${a.title} (${getAgent(a.agentId)?.name ?? a.agentId})${outcome ? ` — ${outcome}` : ""}` });
     return { ...a, note: finalNote };
+  }
+
+  /** Phil's own photos on a waiting X post (his results screenshot), or none: replaces whatever the card carried. */
+  async setApprovalImages(id: string, images: string[]): Promise<Approval | undefined> {
+    const a = await this.store.approvals.get(id);
+    if (!a || a.status !== "pending") return a;
+    const action = (a.payload as { action?: unknown } | undefined)?.action;
+    if (action !== "x.post" && action !== "x.reply") throw new Error("only a post or reply to X carries photos");
+    const ids = [...new Set(images)].slice(0, 4);
+    for (const img of ids) if (!(await imageExists(img))) throw new Error("image not found; upload it first");
+    const { imageNote: _n, video: _v, videoFrom: _f, videoNote: _vn, ...rest } = a.payload as Record<string, unknown>;
+    // A post carries photos or a video, not both: attaching a photo takes the video link off.
+    const payload = ids.length ? { ...rest, images: ids } : { ...a.payload, images: [] };
+    const next = await this.store.approvals.update(id, { payload, effect: this.effectOf({ ...a, payload }) });
+    if (next) bus.emitEvent({ type: "approval.updated", approval: next });
+    return next;
   }
 
   /** Save Phil's change to the text while the item keeps waiting; the agent's original is kept. */

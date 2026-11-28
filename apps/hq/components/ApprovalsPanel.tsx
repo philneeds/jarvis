@@ -5,6 +5,18 @@ import { useLive } from "@/lib/live";
 import { api, post, put, fmtTime } from "@/lib/api";
 import type { Approval } from "@/lib/types";
 import { MayneLimits } from "@/components/MayneLimits";
+import { imageUrl, uploadImage } from "@/lib/images";
+
+/** The link that opens X with this card's post or reply already written, for sending it by hand (free, no API). */
+function xOpenLink(p: Record<string, unknown> | undefined): string | undefined {
+  if (!p || (p.action !== "x.post" && p.action !== "x.reply") || typeof p.text !== "string" || !p.text.trim()) return undefined;
+  const video = typeof p.video === "string" && typeof p.videoFrom === "string" ? p.video : "";
+  const u = new URL("https://x.com/intent/post");
+  u.searchParams.set("text", video && !p.text.includes(video) ? `${p.text.trim()}\n\n${video}` : p.text.trim());
+  const reply = typeof p.replyTo === "string" ? p.replyTo.match(/(\d{5,25})\s*$/)?.[1] : undefined;
+  if (reply) u.searchParams.set("in_reply_to", reply);
+  return u.toString().replace(/\+/g, "%20");
+}
 
 const KIND: Record<string, string> = { send: "var(--red)", post: "var(--sky, #5CC8F5)", money: "var(--gold)", strategy: "#FF6EC7", config: "var(--accent)", record: "var(--green)", other: "var(--muted)" };
 
@@ -19,10 +31,10 @@ const ACTION_LABEL: Record<string, string> = {
 const HEADLINE: Record<string, string[]> = {
   "gmail.send": ["to", "account", "subject"], "gmail.archive": ["account", "query", "max"], "gmail.label": ["account", "label", "query"], "gmail.trash": ["account", "query", "max"], "gmail.unsubscribe": ["account"],
   "calendar.create": ["start", "end", "account"], "calendar.update": ["start", "end", "account"], "calendar.delete": ["title", "account"],
-  "x.post": ["account"], "x.reply": ["account", "replyTo"], "x.dm": ["account", "to"], "ghl.message": ["to", "type", "subject"], "ghl.contact.create": ["name", "phone", "email", "source"], "ghl.note": ["to"], "ghl.deal.create": ["name", "stage", "value"], "ghl.deal.move": ["name", "stage", "status"], "robinhood.call": ["tool"], "eagleview.order": ["address", "product", "delivery", "estimate"],
+  "x.post": ["account", "videoFrom"], "x.reply": ["account", "replyTo", "videoFrom"], "x.dm": ["account", "to"], "ghl.message": ["to", "type", "subject"], "ghl.contact.create": ["name", "phone", "email", "source"], "ghl.note": ["to"], "ghl.deal.create": ["name", "stage", "value"], "ghl.deal.move": ["name", "stage", "status"], "robinhood.call": ["tool"], "eagleview.order": ["address", "product", "delivery", "estimate"],
   "trade.execute": ["symbol", "side", "sizeUsd", "strategy"], "trade.close": ["positionId", "pnlUsd"], "strategy.enable": ["name", "backtestReturn", "winRate", "maxDrawdown", "paperDays"],
 };
-const LABEL: Record<string, string> = { to: "To", account: "From", subject: "Subject", query: "Matching", max: "Up to", label: "Label", start: "Start", end: "End", title: "Event", replyTo: "Reply to", sizeUsd: "Size $", pnlUsd: "P&L $", positionId: "Position", backtestReturn: "Backtest", winRate: "Win rate", maxDrawdown: "Max drawdown", paperDays: "Paper days", symbol: "Symbol", side: "Side", strategy: "Strategy", name: "Name", type: "Channel", tool: "Tool", phone: "Phone", email: "Email", source: "Source", stage: "Stage", value: "Value $", status: "Status", address: "Address", product: "Report", delivery: "Delivery", estimate: "Cost" };
+const LABEL: Record<string, string> = { to: "To", account: "From", subject: "Subject", query: "Matching", max: "Up to", label: "Label", start: "Start", end: "End", title: "Event", replyTo: "Reply to", videoFrom: "Video from", sizeUsd: "Size $", pnlUsd: "P&L $", positionId: "Position", backtestReturn: "Backtest", winRate: "Win rate", maxDrawdown: "Max drawdown", paperDays: "Paper days", symbol: "Symbol", side: "Side", strategy: "Strategy", name: "Name", type: "Channel", tool: "Tool", phone: "Phone", email: "Email", source: "Source", stage: "Stage", value: "Value $", status: "Status", address: "Address", product: "Report", delivery: "Delivery", estimate: "Cost" };
 
 /** What the approve button says for a card. When nothing can act on it, the button must not promise a send. */
 export function approveLabel(a: Approval): string {
@@ -30,6 +42,8 @@ export function approveLabel(a: Approval): string {
   const inert = !act || /^(No connector handles|Nothing happens)/.test(a.effect ?? "");
   return inert ? "Approve (records only)" : (ACTION_LABEL[act] ?? "Approve");
 }
+
+const photosOf = (a: Approval): string[] => (Array.isArray(a.payload?.images) ? (a.payload.images as unknown[]).map(String) : []);
 
 export type ApprovalsTab = "pending" | "decided";
 
@@ -69,6 +83,18 @@ export function ApprovalsPanel({ tab, id = "approve" }: { tab: ApprovalsTab; id?
       const r = await put<{ approval: Approval }>(`/api/approvals/${a.id}`, { body: draft });
       replace(r.approval); setEditing(null);
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  };
+  /** Phil's own photos on a waiting X post: add one from his device, or take one off. */
+  const setImages = async (a: Approval, images: string[]) => {
+    setBusy(a.id); setError(null);
+    try { replace((await put<{ approval: Approval }>(`/api/approvals/${a.id}/images`, { images })).approval); }
+    catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  };
+  const attach = async (a: Approval, file: File | undefined) => {
+    if (!file) return;
+    setBusy(a.id); setError(null);
+    try { const id = await uploadImage(file); await setImages(a, [...photosOf(a), id].slice(0, 4)); }
+    catch (e) { setError((e as Error).message); setBusy(null); }
   };
   const ask = async (a: Approval) => {
     const q = (question[a.id] ?? "").trim();
@@ -138,6 +164,9 @@ export function ApprovalsPanel({ tab, id = "approve" }: { tab: ApprovalsTab; id?
         const inert = !act || /^(No connector handles|Nothing happens)/.test(a.effect ?? "");
         const label = inert ? "Approve (records only)" : (ACTION_LABEL[act] ?? "Approve");
         const head = (act && HEADLINE[act] ? HEADLINE[act] : Object.keys(a.payload ?? {}).filter((k) => k !== "action" && k !== "body" && k !== "text")).map((k) => [k, a.payload?.[k]] as const).filter(([, val]) => ["string", "number", "boolean"].includes(typeof val)).slice(0, 5);
+        const isX = act === "x.post" || act === "x.reply";
+        const photos = isX ? photosOf(a) : [];
+        const openInX = isX ? xOpenLink(a.payload) : undefined;
         const thread = a.thread ?? [];
         const group = tab === "pending" && a.runId ? runGroups.get(a.runId) ?? [] : [];
         const groupHead = group.length > 1 && group[0]?.id === a.id;
@@ -186,6 +215,24 @@ export function ApprovalsPanel({ tab, id = "approve" }: { tab: ApprovalsTab; id?
               </>
             ) : (
               <p className="m-0 text-[13px] whitespace-pre-wrap leading-relaxed">{a.body}</p>
+            )}
+            {/* An X post's photos: the exact pictures that go out with it. Phil can take one off or add his own. */}
+            {isX && photos.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {photos.map((id) => (
+                  <span key={id} className="relative inline-block">
+                    <a href={imageUrl(id)} target="_blank" rel="noreferrer"><img src={imageUrl(id)} alt={typeof a.payload?.imagePrompt === "string" ? `Photo for this post: ${a.payload.imagePrompt}` : "Photo for this post"} className="h-40 w-auto max-w-full object-cover border" style={{ borderColor: "var(--line)" }} /></a>
+                    {a.status === "pending" && <button className="btn btn-sm absolute top-1 right-1" disabled={busy === a.id} aria-label="Remove this photo" onClick={() => setImages(a, photos.filter((x) => x !== id))}>×</button>}
+                  </span>
+                ))}
+              </div>
+            )}
+            {isX && a.status === "pending" && !isEditing && (
+              <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                {photos.length < 4 && <label className="btn btn-sm cursor-pointer">{photos.length ? "Add another photo" : "Attach your photo"}<input type="file" accept="image/*" className="sr-only" disabled={busy === a.id} onChange={(e) => { void attach(a, e.target.files?.[0]); e.target.value = ""; }} /></label>}
+                {openInX && <a className="btn btn-sm" href={openInX} target="_blank" rel="noreferrer">Open in X ›</a>}
+                {openInX && <span style={{ color: "var(--muted)" }}>Open in X posts it by hand, free{photos.length ? "; add the photo there yourself" : ""}.</span>}
+              </div>
             )}
             {(a.kind === "strategy" || a.kind === "money") && a.status === "pending" && (a.agentId === "mayne" || /^(trade|strategy|order|hyperliquid)\./.test(typeof a.payload?.action === "string" ? a.payload.action : "")) && <MayneLimits compact />}
 

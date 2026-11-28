@@ -15,6 +15,7 @@ export * from "./uploads.js";
 export { readDocument, saveDoc, getDocs, docsContext, docSummary, pdfToText, docxToText, pptxToText, type AttachedDoc } from "./doctext.js";
 export * from "./health.js";
 export * from "./xread.js";
+export * from "./xdraft.js";
 export * from "./video.js";
 export * from "./secrets.js";
 export * from "./progress.js";

@@ -8,7 +8,7 @@ import { CHARTERS } from "./registry/charters.js";
 export type Connection = "Google" | "X" | "X search" | "Spotify" | "Kubera" | "Robinhood" | "GoHighLevel" | "EagleView" | "LeadPerfection" | "Discord" | "GitHub" | "Apple Health";
 export const ALL_CONNECTIONS: Connection[] = ["Google", "GoHighLevel", "Kubera", "Robinhood", "Spotify", "Discord", "GitHub", "Apple Health", "EagleView", "LeadPerfection", "X", "X search"];
 const NEEDS: [RegExp, Connection][] = [
-  [/^(gmail_|calendar_|google_)/, "Google"], [/^(x_own_|x_mentions|x_dm_)/, "X"], [/^x_search$/, "X search"], [/^spotify_/, "Spotify"], [/^kubera_/, "Kubera"],
+  [/^(gmail_|calendar_|google_)/, "Google"], [/^(x_own_|x_mentions|x_dm_|x_list_)/, "X"], [/^x_search$/, "X search"], [/^spotify_/, "Spotify"], [/^kubera_/, "Kubera"],
   [/^robinhood_/, "Robinhood"], [/^ghl_/, "GoHighLevel"], [/^eagleview_/, "EagleView"], [/^lp_/, "LeadPerfection"], [/^discord_/, "Discord"], [/^github_/, "GitHub"], [/^health_/, "Apple Health"],
 ];
 /**

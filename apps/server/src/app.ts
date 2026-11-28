@@ -201,6 +201,16 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     if (!a) return c.json({ error: "not found" }, 404);
     return c.json({ approval: a });
   });
+  // Phil's own photos on a waiting X post (up to four, already uploaded); an empty list takes them off.
+  api.put("/approvals/:id/images", async (c) => {
+    const body = z.object({ images: z.array(z.string().max(80)).max(4) }).safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "images: up to four uploaded image ids" }, 400);
+    try {
+      const a = await jarvis.setApprovalImages(c.req.param("id"), body.data.images);
+      if (!a) return c.json({ error: "not found" }, 404);
+      return c.json({ approval: a });
+    } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
   // Ask the agent about its proposal; the answer lands on the card and may revise it.
   api.post("/approvals/:id/ask", async (c) => {
     const body = z.object({ question: z.string().min(1).max(4000) }).safeParse(await c.req.json().catch(() => ({})));
