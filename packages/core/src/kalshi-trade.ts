@@ -40,6 +40,8 @@ const TIMEOUT_MS = 20_000;
 
 /** The request's outcome isn't known: no answer in time, or Kalshi's own error. An order sent this way may have gone out. */
 class Unsure extends Error {}
+/** How old a balance reading may be and still count as "now": Kalshi allows one balance read a second. */
+const BALANCE_FRESH_MS = 2000;
 /** Kalshi said "too many requests"; `waitMs` is how long it asked HQ to wait, when it said. */
 class RateLimited extends Error { constructor(readonly waitMs?: number) { super("Kalshi's rate limit is hit; try again in a moment"); } }
 
@@ -180,7 +182,8 @@ export class KalshiTrader {
       try { return await this.paced(() => this.once<T>(method, path, body)); }
       catch (e) {
         if (!(e instanceof RateLimited) || method !== "GET" || i >= 2) throw e;
-        await this.pause(Math.min(e.waitMs ?? (this.opts.retryMs ?? 1000) * (i + 1), 5000));
+        // A little over a second by default: the balance bucket refills once a second, and exactly a second can be a hair early.
+        await this.pause(Math.min(e.waitMs ?? (this.opts.retryMs ?? 1200) * (i + 1), 5000));
       }
     }
   }
@@ -198,7 +201,8 @@ export class KalshiTrader {
     const scope = /insufficient_scope:_?([a-z_:]+?)_required/.exec(String(e.code ?? ""));
     if (res.status === 403 && scope) throw new Error(`Kalshi's key lacks the "${scope[1]}" permission; make a key with read and trade access`);
     if (res.status === 401) throw new Error(`Kalshi refused the key (${said || "401"}); check KALSHI_API_KEY_ID and the .pem, and the server's clock`);
-    if (res.status === 429) { const s = Number(res.headers.get("retry-after")); throw new RateLimited(Number.isFinite(s) && s > 0 ? s * 1000 : undefined); }
+    // Kalshi sends no Retry-After; when it says how long until the bucket refills (X-RateLimit-Reset, seconds), that is the wait.
+    if (res.status === 429) { const s = Number(res.headers.get("x-ratelimit-reset") ?? res.headers.get("retry-after")); throw new RateLimited(Number.isFinite(s) && s > 0 ? Math.ceil(s * 1000) + 100 : undefined); }
     if (res.status === 408 || res.status >= 500) throw new Unsure(`Kalshi answered ${res.status}${said ? `: ${said}` : ""}`);
     throw new Error(`Kalshi answered ${res.status}${said ? `: ${said}` : ""}`);
   }
@@ -242,7 +246,10 @@ export class KalshiTrader {
   async status(fresh = false): Promise<{ trading: boolean; problem?: string; balance?: number; portfolio?: number; transient?: boolean; limits: KalshiLimits }> {
     const limits = await this.limits();
     const now = this.now();
-    if (!fresh && this.ok && now - this.ok.at < 30_000) return { ...this.ok.v, limits };
+    // Kalshi lets a standard account read its balance once a second, with no burst (docs, rate limits: "Basic and
+    // Advanced tiers can call it once per second"). So even a caller that wants it fresh gets the reading from the
+    // last two seconds: asking again inside that second is the one thing sure to be refused.
+    if (this.ok && now - this.ok.at < (fresh ? BALANCE_FRESH_MS : 30_000)) return { ...this.ok.v, limits };
     try {
       // One balance read in the air at a time: an agent's tools ask "is trading on" and "what's in the account" in
       // the same moment, and both ride on this call.
