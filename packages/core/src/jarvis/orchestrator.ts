@@ -31,6 +31,7 @@ import { GLASSES_HINT, GLASSES_TOOLS } from "../glasses.js";
 import { LOOKUP_TOOLS } from "../lookup.js";
 import { INSTAGRAM_LINE, VideoAnalyzer, videoCaps, videoLogLine, videoRefs, videoText, videoTools, withoutInstagramLinks, type VideoDeps, type VideoRef } from "../video.js";
 import { Secrets } from "../secrets.js";
+import { Studio, type StudioDeps } from "../studio.js";
 import { DECK_HINT, makeDeck, fillTemplate, fillProblems, deckListing, normalizeFill, normalizeDeck, deckFolderName, type Deck } from "../decks.js";
 import { GUARDRAIL_FILES, HELD_FOR_UPDATE, WORKSHOP_HINT, workshopGuard, workshopTools, type Workshop, type WorkshopToolDeps } from "../workshop.js";
 import { HeldJobs, deployPending, heldLine, type HeldJob } from "../deployhold.js";
@@ -132,7 +133,7 @@ function sameItem(items: RecordItem[], r: { title: string; fields?: Record<strin
 const goalVenture = (v: string) => v !== "root" && Object.prototype.hasOwnProperty.call(VENTURES, v);
 
 /** Which payload field holds the text Phil edits on the card, per action. */
-const TEXT_FIELD: Record<string, string> = { "gmail.send": "body", "x.post": "text", "x.reply": "text", "x.dm": "text", "ghl.message": "message" };
+const TEXT_FIELD: Record<string, string> = { "gmail.send": "body", "x.post": "text", "x.reply": "text", "x.dm": "text", "ghl.message": "message", "media.generate": "prompt" };
 
 /**
  * The list a memory.replace keeps, checked whole: every entry needs a scope, a key and a value. One entry per key (the
@@ -245,6 +246,7 @@ export class Jarvis {
     this.secrets = new Secrets(this.store);
     this.heldJobs = new HeldJobs(this.store);
     this.useVideo();
+    this.useStudio();
     this.pulses.set("health", async () => healthSummary(this.store, 3));
     this.pulses.set("memory", async () => (await this.store.memory.list()).filter((m) => !/^(watch|handoff):/.test(m.key)).map((m) => `${m.scope}|${m.key}|${m.value}`).sort().join("\n"));
     this.executors.set("memory.replace", async (a) => {
@@ -478,6 +480,28 @@ export class Jarvis {
   useVideo(deps: VideoDeps = {}) {
     this.video = new VideoAnalyzer({ secrets: this.secrets, ...deps });
     this.videoToolList = videoTools(this.video);
+  }
+  /** Joi's studio: image and video generation, each one a card first (media.generate). */
+  studio!: Studio;
+  /** Build the studio (tests hand it fake providers). It is a connector like the others: tools, a card action, a hint. */
+  useStudio(deps: Partial<StudioDeps> = {}) {
+    const first = !this.studio;
+    this.studio = new Studio({
+      store: this.store, secrets: this.secrets,
+      conversation: () => this.convo.getStore(),
+      deliver: (m) => this.say(m),
+      log: (agentId, kind, summary) => this.router.log(agentId, kind, summary),
+      ...deps,
+    });
+    // The connector registered once hands every call on to whichever studio is current.
+    if (first) this.addConnector({
+      tools: () => this.studio.tools().map((t) => ({ ...t, handler: (args, ctx) => this.studio.tools().find((x) => x.name === t.name)!.handler(args, ctx) })),
+      executors: () => Object.fromEntries(Object.keys(this.studio.executors()).map((k) => [k, (a: Approval, j: Jarvis) => this.studio.executors()[k]!(a, j)])),
+      describe: () => Object.fromEntries(Object.keys(this.studio.describe()).map((k) => [k, (p: Record<string, unknown>, a: Pick<Approval, "agentId" | "payload" | "kind">) => this.studio.describe()[k]!(p, a)])),
+      normalize: (p) => this.studio.normalize(p),
+      preflight: (a) => this.studio.preflight(a),
+      toolsFor: (id) => this.studio.toolsFor(id),
+    });
   }
   /** For Settings: reader, model, where the key is from, and the line for Phil when it's off (the key itself is never returned). */
   videoStatus() { return this.video.status(); }
@@ -883,7 +907,7 @@ export class Jarvis {
         workshopHint = `\n\nYour workshop couldn't be opened (${(e as Error).message.slice(0, 200)}), so you can't change code this run; say so and diagnose with the tools you have.`;
       }
     }
-    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "") + workshopHint + await this.connectionsText() + await this.pendingText(agent.id);
+    const system = agentSystemPrompt(agent, memory, cfg.persona, tools) + (tools.some((t) => this.connectorTools.has(t.name)) && this.promptHints.length ? `\n\n${this.promptHints.join("\n")}` : "") + (cfg.tools.includes("deck_template") ? `\n\n${DECK_HINT}` : "") + (tools.some((t) => t.name === "studio_models") ? `\n\n${Studio.promptHint()}` : "") + workshopHint + await this.connectionsText() + await this.pendingText(agent.id);
     const prompt = `${opts.from ?? "Phil"} asks: ${task}`;
     // Images Phil attached to this conversation go with every run in it, including hand-offs; agents that read uploaded
     // data also see this week's screenshots.

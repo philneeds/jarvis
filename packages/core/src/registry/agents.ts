@@ -76,7 +76,7 @@ export const AGENTS: AgentDef[] = [
   },
   {
     id: "joi", name: "Joi", short: "Everything visual", layer: 1, parent: "jarvis", venture: "command", serves: ["personal"], model: "claude-opus", phase: 2, priority: "room",
-    desc: "In charge of everything visual, with taste and a point of view: gives Phil her honest opinion on designs, branding, logos, colours, layouts, thumbnails, photos, the HQ screens and any visual question, and says what she'd change and why. Writes the brief for images and video (Higgsfield generates them once it's connected), plans visual explanations, web visuals, and the charts and graphs shown to Phil. Asks for a link or a description when she can't see the thing itself.",
+    desc: "In charge of everything visual, with taste and a point of view: gives Phil her honest opinion on designs, branding, logos, colours, layouts, thumbnails, photos, the HQ screens and any visual question, and says what she'd change and why. Makes images on the major image models (GPT Image, Nano Banana, Grok Imagine) and video on Higgsfield, picking the model that suits the job; each generation is a card with its price that Phil approves first. Plans visual explanations, web visuals, and the charts and graphs shown to Phil. Asks for a link or a description when she can't see the thing itself.",
   },
 
   // ---- Personal & health -------------------------------------------------

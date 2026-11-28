@@ -15,7 +15,8 @@ import { useLive } from "@/lib/live";
 import { api, post, fmtTime } from "@/lib/api";
 
 interface Passkey { id: string; label: string; createdAt: string }
-interface Connectors { workshop?: { configured: boolean; dir?: string; canShip: boolean; autoShip?: boolean; last?: { at: string; sha: string; title: string; status: string; note?: string } | null }; xsearch?: { configured: boolean; model: string; grokMode: string }; video?: { configured: boolean; backend: string; model: string; missing?: string; key: { set: boolean; source: "env" | "settings" | "none"; savedAt?: string; problem?: string; canSave: boolean } }; google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; eagleview?: { configured: boolean; sandbox?: boolean; orders?: number; lastFetch?: { ok: boolean; at: string; error?: string } | null }; leadperfection?: { configured: boolean; url?: string; user?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; robinhood?: { configured: boolean; connected: boolean; connectedAt?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
+interface StudioProviderStatus { id: string; label: string; configured: boolean; keyHelp: string; keys: { name: string; label: string; set: boolean; source: "env" | "settings" | "none"; savedAt?: string; problem?: string; canSave: boolean }[]; models: { id: string; label: string; kind: "image" | "video"; from?: number }[] }
+interface Connectors { studio?: { providers: StudioProviderStatus[]; spend: { day: string; usd: number; items: number }; caps: { perItemUsd: number; perDayUsd: number } }; workshop?: { configured: boolean; dir?: string; canShip: boolean; autoShip?: boolean; last?: { at: string; sha: string; title: string; status: string; note?: string } | null }; xsearch?: { configured: boolean; model: string; grokMode: string }; video?: { configured: boolean; backend: string; model: string; missing?: string; key: { set: boolean; source: "env" | "settings" | "none"; savedAt?: string; problem?: string; canSave: boolean } }; google: { configured: boolean; connected: boolean; email?: string; accounts: { email: string; connectedAt?: string }[] }; x: { configured: boolean; accounts: { handle: string; name?: string; connectedAt: string }[] }; spotify?: { configured: boolean; connected: boolean; name?: string; connectedAt?: string }; kubera?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null; days?: number; netWorth?: number }; ghl?: { configured: boolean; lastFetch?: { ok: boolean; at: string; error?: string } | null }; eagleview?: { configured: boolean; sandbox?: boolean; orders?: number; lastFetch?: { ok: boolean; at: string; error?: string } | null }; leadperfection?: { configured: boolean; url?: string; user?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; discord?: { configured: boolean; channels?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; github?: { configured: boolean; repos?: string[]; lastFetch?: { ok: boolean; at: string; error?: string } | null }; robinhood?: { configured: boolean; connected: boolean; connectedAt?: string; lastFetch?: { ok: boolean; at: string; error?: string } | null }; telegram: { configured: boolean }; ntfy: { configured: boolean } }
 
 export default function SettingsPage() {
   const { state, refresh } = useLive();
@@ -85,6 +86,18 @@ export default function SettingsPage() {
     catch (e) { setVidMsg((e as Error).message); } finally { setVidBusy(false); }
   };
   const removeGeminiKey = async () => { if (!confirm("Remove the Gemini key? Nobody can watch videos until a new one is saved.")) return; await api("/api/video/key", { method: "DELETE" }); setVidMsg(undefined); await load(); };
+  // The studio's keys (Joi's image and video providers): one field per provider, same rules as the video key.
+  const [studioKey, setStudioKey] = useState<Record<string, string>>({});
+  const [studioMsg, setStudioMsg] = useState<Record<string, string | undefined>>({});
+  const [studioBusy, setStudioBusy] = useState<string>();
+  const saveStudioKey = async (id: string, label: string) => {
+    const key = (studioKey[id] ?? "").trim();
+    if (!key) return;
+    setStudioBusy(id); setStudioMsg((m) => ({ ...m, [id]: `Saving and checking with ${label}…` }));
+    try { const r = await post<{ ok: boolean; summary: string }>(`/api/studio/${id}/key`, { key }); setStudioMsg((m) => ({ ...m, [id]: r.summary })); setStudioKey((k) => ({ ...k, [id]: "" })); await load(); }
+    catch (e) { setStudioMsg((m) => ({ ...m, [id]: (e as Error).message })); } finally { setStudioBusy(undefined); }
+  };
+  const forgetStudioKey = async (id: string, label: string) => { if (!confirm(`Take the ${label} key out of HQ? Joi can't generate with ${label} until a new one is saved.`)) return; await api(`/api/studio/${id}/key`, { method: "DELETE" }); setStudioMsg((m) => ({ ...m, [id]: undefined })); await load(); };
   const [health, setHealth] = useState<{ keySet: boolean; lastIngest: { at: string; samples: number; workouts: number } | null; days: number; summary: string } | null>(null);
   const [healthKey, setHealthKey] = useState<string>();
   const [copied, setCopied] = useState<string>();
@@ -370,6 +383,44 @@ export default function SettingsPage() {
                 {vidMsg && <p className="m-0" style={{ color: "var(--ink)" }}>{vidMsg}</p>}
               </div>
             )}
+          </div>
+          <div className="flex flex-col gap-3 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Studio">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className={`dot ${conn?.studio?.providers.some((p) => p.configured) ? "dot-working" : "dot-idle"}`} />
+              <BrandLogo name="Studio" /><span className="flex-1 basis-64 min-w-0"><b>Studio</b> · how Joi makes images and video. Each provider turns on with its own key; every generation is a card with its price that you approve first, and the result arrives in chat.</span>
+              {conn?.studio && <span className="ml-auto" style={{ color: "var(--dim)" }}>today ${conn.studio.spend.usd.toFixed(2)} over {conn.studio.spend.items} · caps ${conn.studio.caps.perItemUsd} each, ${conn.studio.caps.perDayUsd} a day</span>}
+            </div>
+            {conn?.studio?.providers.map((p) => {
+              const k = p.keys[0];
+              if (!k) return null;
+              return (
+                <div key={p.id} className="pl-6 flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`dot ${p.configured ? "dot-working" : "dot-idle"}`} />
+                    <b>{p.label}</b>
+                    <span className="flex-1 basis-48 min-w-0" style={{ color: "var(--muted)" }}>{p.models.map((m) => `${m.label} (${m.kind}${m.from !== undefined ? `, from $${m.from < 0.1 ? m.from.toFixed(3) : m.from.toFixed(2)}` : ", priced per card"})`).join(" · ")}</span>
+                    {p.configured
+                      ? <span className="ml-auto" style={{ color: "var(--dim)" }}>on · key {k.source === "env" ? "from the server's .env" : `saved here${k.savedAt ? ` ${fmtTime(k.savedAt)}` : ""}`}</span>
+                      : <span className="ml-auto" style={{ color: "var(--amber)" }}>off</span>}
+                  </div>
+                  {k.source !== "env" && (
+                    <>
+                      {k.problem && <p className="m-0" style={{ color: "var(--red)" }}>{k.problem}</p>}
+                      {!k.set && !k.problem && <span style={{ color: "var(--muted)" }}>{p.keyHelp} It is sealed on HQ&apos;s server, never shown again, and works at once.</span>}
+                      {k.canSave ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input className="input flex-1 min-w-[12rem]" type="password" autoComplete="off" aria-label={k.label} placeholder={k.set ? "Paste a new key to replace the saved one" : `Paste the ${k.label}`} value={studioKey[p.id] ?? ""} onChange={(e) => setStudioKey((x) => ({ ...x, [p.id]: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter") void saveStudioKey(p.id, p.label); }} />
+                          <button className="btn btn-sm btn-primary" disabled={studioBusy === p.id || !(studioKey[p.id] ?? "").trim()} onClick={() => void saveStudioKey(p.id, p.label)}>{studioBusy === p.id ? "Checking…" : "Save"}</button>
+                          {k.set && <><button className="btn btn-sm" onClick={() => void testSimple(`/api/studio/${p.id}/test`, (t) => setStudioMsg((m) => ({ ...m, [p.id]: t })))}>Check now</button><button className="btn btn-sm btn-danger" onClick={() => void forgetStudioKey(p.id, p.label)}>Remove</button></>}
+                        </div>
+                      ) : <span style={{ color: "var(--amber)" }}>Keys can&apos;t be kept here until HQ_PASSWORD (or HQ_SECRETS_KEY) is set in /opt/jarvis/.env on the server; until then add {k.name} to that file and restart.</span>}
+                    </>
+                  )}
+                  {k.source === "env" && <div><button className="btn btn-sm" onClick={() => void testSimple(`/api/studio/${p.id}/test`, (t) => setStudioMsg((m) => ({ ...m, [p.id]: t })))}>Check now</button></div>}
+                  {studioMsg[p.id] && <p className="m-0" style={{ color: "var(--ink)" }}>{studioMsg[p.id]}</p>}
+                </div>
+              );
+            })}
           </div>
           <div className="flex flex-col gap-2 text-[12px] border-t pt-3" style={{ borderColor: "var(--line)" }} aria-label="Apple Health">
             <div className="flex flex-wrap items-center gap-3">

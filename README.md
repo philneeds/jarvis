@@ -43,6 +43,10 @@ Every agent names its model in `packages/core/src/registry/agents.ts`; swapping 
 | X, for every model | xAI X search (`x_search`); the Grok CLI has no X search and X blocks servers' page reads | `XAI_API_KEY` |
 | `cursor`, `higgsfield`, `chatgpt-health` | not callable from HQ yet | Jarvis reports it and asks Phil to relay |
 
+### The studio (Joi makes images and video)
+
+Joi generates images on OpenAI (GPT Image), Google (Nano Banana) and xAI (Grok Imagine), and video on Higgsfield (Kling, Seedance, Wan), plus Higgsfield's Soul images. A provider turns on when its key is set: in `.env` (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `HIGGSFIELD_API_KEY` as `KEY_ID:KEY_SECRET`) or pasted under Settings → Studio, where it is sealed and works without a restart. Every generation is an approval card (`media.generate`) carrying the prompt, the model and the price (Higgsfield's own quote, or HQ's price table for the others); nothing is sent or charged until Phil approves, and editing the card's text edits the prompt. The result arrives in chat (and on Telegram when asked from there) with what it cost. A video can start from a picture Phil attached or one Joi made. `STUDIO_CAP_PER_ITEM_USD` (5) and `STUDIO_CAP_PER_DAY_USD` (25) are a backstop behind the approval. A Higgsfield job in progress survives a restart. The code is `packages/core/src/studio.ts`.
+
 The router tries the configured mode first and falls back to the other if it is available. Model ids: `CLAUDE_OPUS_MODEL`, `CLAUDE_SONNET_MODEL`, `GROK_MODEL`.
 
 ### Einstein's workshop (HQ changes its own code)

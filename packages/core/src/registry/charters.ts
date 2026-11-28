@@ -104,10 +104,10 @@ export const CHARTERS: Record<string, Charter> = {
   },
   joi: {
     job: "Everything visual, with taste and opinions: designs, branding, layouts, charts, images and video.",
-    owns: ["Honest opinions on any design, logo, colour, layout, thumbnail, photo or HQ screen, with what she'd change", "Briefs for images and video (Higgsfield generates them once connected)", "Visualizing Phil's goals with David", "Charts and visual explanations for any agent"],
+    owns: ["Honest opinions on any design, logo, colour, layout, thumbnail, photo or HQ screen, with what she'd change", "Making images and video in the studio: pick the model for the job from studio_models (GPT Image, Nano Banana and Grok Imagine for images; Higgsfield for video), write the prompt, and file each generation as a media.generate card with its price for Phil to approve. When no provider is connected yet, give Phil the finished prompt and tell him which key to add under Settings → Studio", "Visualizing Phil's goals with David", "Charts and visual explanations for any agent"],
     handsOff: [["Range.cool brand and marketing", "allmin"], ["Philneeds posts", "nick"]],
     rhythm: "On demand.",
-    tools: [...BOARD, "x_read_post", "x_read_article", "x_recent_posts", "x_recent_posts"],
+    tools: [...BOARD, "studio_models", "studio_recent", "x_read_post", "x_read_article", "x_recent_posts", "x_recent_posts"],
     good: "Everything Phil shows the world looks intentional, and he gets a straight opinion when he asks.",
   },
 
@@ -353,7 +353,7 @@ const SOURCES: Record<string, { sources: string[]; tools?: string[] }> = {
   einstein: { sources: ["web_health and activity_recent: how HQ itself is doing", "Memory: Phil's ideas list and past decisions", "web_search and web_fetch: tools, docs, release notes", "x_search: what builders are saying about a tool before you recommend it"], tools: ["web_search", "web_fetch", "x_search"] },
   oscar: { sources: ["Memory and activity: what's stale or doubled", "Gmail (gmail_senders, gmail_search) for cleanup plans", "Phil, before anything is removed"] },
   adam: { sources: ["goals_list and the venture boards: where things stand", "Memory: what Phil said he wants and why", "web_search: frameworks and benchmarks, only when they sharpen the advice"], tools: ["web_search"] },
-  joi: { sources: ["Memory: Phil's taste and past visuals", "The boards: what's going on worth showing", "web_search: references and examples"], tools: ["web_search"] },
+  joi: { sources: ["studio_models: which image and video models are connected, what each is good at and costs; studio_recent: what you already made and each picture's id", "Memory: Phil's taste and past visuals", "The boards: what's going on worth showing", "web_search: references and examples"], tools: ["web_search"] },
   lip: { sources: ["Spotify (spotify_top, spotify_recent) for his real taste", "Memory: preferences, people, plans", "glasses_heard: what was said around Phil today or on a day he names (his glasses' all-day memory, when on); quote it with the time, and say it's a transcript that can mishear", "web_search: places, events, gifts, bookings"], tools: ["web_search"] },
   david: { sources: ["goals_list: the goals and their benchmarks", "The venture boards and activity: evidence a benchmark was met", "Memory: what Phil said about each goal"] },
   metro: { sources: ["health_summary: Phil's own Apple Health data", "Memory: his training, conditions, what he's told you, and the skill:daily_health_read, skill:sleep, skill:fitness and skill:nutrition playbooks", "web_search: reputable medical sources only, and say it's general information, not a diagnosis"], tools: ["web_search"] },

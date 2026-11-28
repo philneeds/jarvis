@@ -504,6 +504,7 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
     robinhood: connectors.robinhood ? await connectors.robinhood.status() : { configured: false, connected: false },
     xsearch: { configured: !!process.env.XAI_API_KEY, model: process.env.XAI_SEARCH_MODEL || "grok-4.7", grokMode: process.env.GROK_MODE || "cli" },
     video: jarvis.videoStatus(),
+    studio: await jarvis.studio.status(),
     workshop: { configured: !!connectors.workshop, dir: connectors.workshop?.dir, canShip: !!process.env.GITHUB_PUSH_TOKEN, last: await jarvis.store.settings.get("workshop.ship", null), autoShip: await jarvis.store.settings.get(AUTO_SHIP_KEY, false) },
     telegram: { configured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) },
     ntfy: { configured: !!process.env.NOTIFY_WEBHOOK_URL },
@@ -770,6 +771,35 @@ export function createApp(jarvis: Jarvis, connectors: { google?: GoogleConnector
   });
   api.post("/video/test", async (c) => {
     try { return c.json({ ok: true, summary: await jarvis.videoCheck() }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
+  });
+  // The studio's keys (Joi's image and video providers), from Settings. Write-only, like the video reader's: a key
+  // the provider refuses outright isn't kept; one that can't be checked just now is, with a warning.
+  api.post("/studio/:provider/key", async (c) => {
+    const provider = jarvis.studio.provider(c.req.param("provider"));
+    const p = z.object({ key: z.string().min(1).max(400) }).safeParse(await c.req.json().catch(() => ({})));
+    if (!provider) return c.json({ error: "HQ has no studio provider by that name" }, 404);
+    if (!p.success) return c.json({ error: "paste the key" }, 400);
+    const name = provider.keys[0]!.name;
+    try { await jarvis.secrets.set(name, p.data.key); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+    try {
+      const summary = await jarvis.studio.check(provider.id);
+      await jarvis.router.log("joi", "system", `Phil saved a ${provider.label} key in Settings; ${provider.label} accepted it and Joi can generate with it now`);
+      return c.json({ ok: true, summary });
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (/refused the key|must be the key id/.test(msg)) { await jarvis.secrets.clear(name); return c.json({ error: `${msg}. Nothing was saved; check the key and paste it again.` }, 400); }
+      return c.json({ ok: false, summary: `Saved, but HQ couldn't confirm it with ${provider.label} just now (${msg}). Use Check now in a minute.` });
+    }
+  });
+  api.delete("/studio/:provider/key", async (c) => {
+    const provider = jarvis.studio.provider(c.req.param("provider"));
+    if (!provider) return c.json({ error: "HQ has no studio provider by that name" }, 404);
+    await jarvis.secrets.clear(provider.keys[0]!.name);
+    await jarvis.router.log("joi", "system", `Phil removed the ${provider.label} key from Settings; Joi can't generate with ${provider.label} until a new one is saved`);
+    return c.json({ ok: true });
+  });
+  api.post("/studio/:provider/test", async (c) => {
+    try { return c.json({ ok: true, summary: await jarvis.studio.check(c.req.param("provider")) }); } catch (e) { return c.json({ error: (e as Error).message }, 502); }
   });
   // Check the Kubera key works (one call, cached for 20 minutes) and show the net worth line.
   api.post("/connectors/kubera/test", async (c) => {

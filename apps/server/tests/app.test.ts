@@ -105,6 +105,49 @@ test("Settings takes the Gemini key: saved sealed, checked with Google, shown as
   } finally { jarvisInst.useVideo({ env: {} }); }
 });
 
+test("Settings takes a studio key: checked with the provider, sealed, shown as on without the key; a refused one isn't kept", async () => {
+  const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
+  const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;
+  type Studio = { providers: { id: string; configured: boolean; keys: { set: boolean; source: string }[]; models: { id: string }[] }[] };
+  const read = async () => ((await (await call("/api/connectors", { cookie })).json()) as { studio: Studio }).studio;
+  const KEY = "kid_0123456789:secret_abcdefghijklmnop";
+  let refuse = false;
+  const seen: { url: string; auth?: string }[] = [];
+  const higgsfield = (async (input: string | URL | Request, init?: RequestInit) => {
+    seen.push({ url: String(input), auth: ((init?.headers ?? {}) as Record<string, string>).authorization });
+    if (refuse) return new Response(JSON.stringify({ detail: "Invalid credentials" }), { status: 401, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ usd: "0.005" }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  jarvisInst.useStudio({ fetch: higgsfield, env: {} });
+  try {
+    const off = (await read()).providers;
+    assert.deepEqual(off.map((p) => [p.id, p.configured]), [["openai", false], ["google", false], ["xai", false], ["higgsfield", false]]);
+    assert.equal((await call("/api/studio/midjourney/key", { method: "POST", cookie, body: JSON.stringify({ key: KEY }) })).status, 404);
+
+    const saved = await call("/api/studio/higgsfield/key", { method: "POST", cookie, body: JSON.stringify({ key: KEY }) });
+    assert.deepEqual(await saved.json(), { ok: true, summary: "Higgsfield accepted the key (it quotes $0.005 for a Soul image). Video is on." });
+    assert.deepEqual(seen.map((s) => [s.url, s.auth]), [["https://api.higgsfield.ai/estimate/higgsfield-ai/soul/v2/standard", `Key ${KEY}`]], "one free price check to prove it");
+    const on = await read();
+    assert.deepEqual(on.providers.find((p) => p.id === "higgsfield")!.keys.map((k) => [k.set, k.source]), [[true, "settings"]]);
+    assert.ok(on.providers.find((p) => p.id === "higgsfield")!.models.some((m) => m.id === "higgsfield/kling-3.0"));
+    assert.ok(!JSON.stringify(on).includes(KEY), "the key never comes back out");
+    const stored = JSON.stringify(await store.settings.get("secrets.HIGGSFIELD_API_KEY", null));
+    assert.ok(stored.includes("aes-256-gcm") && !stored.includes("secret_abcdefghijklmnop"), "sealed in the store");
+
+    assert.equal((await call("/api/studio/higgsfield/key", { method: "DELETE", cookie })).status, 200);
+    assert.equal((await read()).providers.find((p) => p.id === "higgsfield")!.configured, false);
+
+    // The id and the secret must both be there, and a key Higgsfield refuses isn't kept.
+    const half = await call("/api/studio/higgsfield/key", { method: "POST", cookie, body: JSON.stringify({ key: "justonehalf" }) });
+    assert.match(((await half.json()) as { error: string }).error, /KEY_ID:KEY_SECRET.*Nothing was saved/);
+    refuse = true;
+    const bad = await call("/api/studio/higgsfield/key", { method: "POST", cookie, body: JSON.stringify({ key: KEY }) });
+    assert.equal(bad.status, 400);
+    assert.match(((await bad.json()) as { error: string }).error, /^Higgsfield refused the key \(Invalid credentials\)\. Nothing was saved/);
+    assert.equal(await store.settings.get("secrets.HIGGSFIELD_API_KEY", "gone"), "gone");
+  } finally { jarvisInst.useStudio({ env: {} }); }
+});
+
 test("the last-deploy line answers even without a workshop: no record, no live commit, but when HQ came up", async () => {
   const ok = await call("/api/login", { method: "POST", body: JSON.stringify({ password: "open-sesame" }) });
   const cookie = ok.headers.get("set-cookie")!.split(";")[0]!;

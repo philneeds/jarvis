@@ -2,7 +2,9 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:
 import type { Store } from "./store/types.js";
 
 /**
- * Keys Phil pastes into Settings instead of /opt/jarvis/.env (today: GEMINI_API_KEY for the video reader).
+ * Keys Phil pastes into Settings instead of /opt/jarvis/.env: GEMINI_API_KEY for the video reader, and the studio's
+ * (Joi's image and video providers: OpenAI, Google, xAI, Higgsfield). A studio key saved here serves the studio only;
+ * the other things that use OPENAI_API_KEY or XAI_API_KEY (voice notes, X search) still read them from .env.
  *
  * Each one sits in the settings table sealed with AES-256-GCM under a key derived from HQ_SECRETS_KEY, else
  * HQ_SESSION_SECRET, else HQ_PASSWORD, so a database dump, the nightly backup, the JSON store on disk and db_query all
@@ -12,7 +14,7 @@ import type { Store } from "./store/types.js";
  *
  * An entry in .env still wins over a saved one: the server's own secret is the truth when both exist.
  */
-export const SECRET_NAMES = ["GEMINI_API_KEY"] as const;
+export const SECRET_NAMES = ["GEMINI_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "HIGGSFIELD_API_KEY"] as const;
 export type SecretName = (typeof SECRET_NAMES)[number];
 export const SECRETS_KEY_PREFIX = "secrets.";
 export const settingKeyFor = (name: SecretName) => `${SECRETS_KEY_PREFIX}${name}`;
